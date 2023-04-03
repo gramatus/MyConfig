@@ -5,6 +5,8 @@ curl -LO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_
 sudo dpkg -i ripgrep_13.0.0_amd64.deb
 cp -a .config/. ~/.config
 nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
-# cp .config/.zshrc ~/.config/.zshrc
+cp .zshrc ~/.zshrc
+cp .tmux.conf ~/.tmux.conf
 sudo apt-get update
-sudo apt-get install xclip
+# sudo apt-get install -y tmux
+sudo apt-get install -y xclip
