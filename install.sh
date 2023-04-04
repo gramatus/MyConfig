@@ -10,3 +10,9 @@ cp .tmux.conf ~/.tmux.conf
 sudo apt-get update
 sudo apt-get install -y xclip
 sudo apt-get install -y tmux
+
+# Concatenate something to the variable and see if the result is only that something
+if [ "x$DISPLAY" = "x" ] && [ "x$CODESPACES" != "xtrue" ]
+then
+   export DISPLAY=:0
+fi

@@ -3,6 +3,8 @@
 -- Only required if you have packer configured as `opt`
 vim.cmd.packadd('packer.nvim')
 
+local vscode = vim.g.vscode == 1
+
 return require('packer').startup(function(use)
   -- Packer can manage itself
   use 'wbthomason/packer.nvim'
@@ -22,53 +24,67 @@ return require('packer').startup(function(use)
 -- 	  end
 --   })
 
---   use({
---       "folke/trouble.nvim",
---       config = function()
---           require("trouble").setup {
---               icons = false,
---               -- your configuration comes here
---               -- or leave it empty to use the default settings
---               -- refer to the configuration section below
---           }
---       end
---   })
+  use({
+      "folke/trouble.nvim",
+      config = function()
+          require("trouble").setup {
+              icons = false,
+              -- your configuration comes here
+              -- or leave it empty to use the default settings
+              -- refer to the configuration section below
+          }
+      end,
+      disable = vscode
+  })
 
 
---   use({"nvim-treesitter/nvim-treesitter", run = ":TSUpdate"})
---   use("nvim-treesitter/playground")
---   use("theprimeagen/harpoon")
---   use("theprimeagen/refactoring.nvim")
+  use({
+      "nvim-treesitter/nvim-treesitter",
+      run = ":TSUpdate",
+      disable = vscode
+  })
+  use({"nvim-treesitter/playground", disable = vscode })
+  --   use("theprimeagen/harpoon")
+  --   use("theprimeagen/refactoring.nvim")
   use("mbbill/undotree")
---   use("tpope/vim-fugitive")
---   use("nvim-treesitter/nvim-treesitter-context");
+  --   use("tpope/vim-fugitive")
+  use({"nvim-treesitter/nvim-treesitter-context", disable = vscode});
 
---   use {
--- 	  'VonHeikemen/lsp-zero.nvim',
--- 	  branch = 'v1.x',
--- 	  requires = {
--- 		  -- LSP Support
--- 		  {'neovim/nvim-lspconfig'},
--- 		  {'williamboman/mason.nvim'},
--- 		  {'williamboman/mason-lspconfig.nvim'},
+   use {
+ 	  'VonHeikemen/lsp-zero.nvim',
+ 	  branch = 'v1.x',
+ 	  requires = {
+ 		  -- LSP Support
+ 		  {'neovim/nvim-lspconfig'},
+ 		  {'williamboman/mason.nvim'},
+ 		  {'williamboman/mason-lspconfig.nvim'},
 
--- 		  -- Autocompletion
--- 		  {'hrsh7th/nvim-cmp'},
--- 		  {'hrsh7th/cmp-buffer'},
--- 		  {'hrsh7th/cmp-path'},
--- 		  {'saadparwaiz1/cmp_luasnip'},
--- 		  {'hrsh7th/cmp-nvim-lsp'},
--- 		  {'hrsh7th/cmp-nvim-lua'},
+ 		  -- Autocompletion
+ 		  {'hrsh7th/nvim-cmp'},
+ 		  {'hrsh7th/cmp-buffer'},
+ 		  {'hrsh7th/cmp-path'},
+ 		  {'saadparwaiz1/cmp_luasnip'},
+ 		  {'hrsh7th/cmp-nvim-lsp'},
+ 		  {'hrsh7th/cmp-nvim-lua'},
 
--- 		  -- Snippets
--- 		  {'L3MON4D3/LuaSnip'},
--- 		  {'rafamadriz/friendly-snippets'},
--- 	  }
---   }
+          -- Snippets
+          {'L3MON4D3/LuaSnip'},
+          {'rafamadriz/friendly-snippets'},
+      },
+      disable = vscode
+  }
 
 --   use("folke/zen-mode.nvim")
 --   use("github/copilot.vim")
 --   use("eandrju/cellular-automaton.nvim")
 --   use("laytan/cloak.nvim")
+
+
+    use {
+        'prettier/vim-prettier',
+        run = 'yarn install',
+        ft = {'javascript', 'typescript', 'css', 'less', 'scss', 'graphql', 'markdown', 'vue', 'html'},
+        disable = vscode
+    }
 
 end)
