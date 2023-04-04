@@ -25,13 +25,3 @@ nmap gc  <Plug>VSCodeCommentary
 omap gc  <Plug>VSCodeCommentary
 nmap gcc <Plug>VSCodeCommentaryLine
 ]]
-vim.cmd[[
-        " Important!!
-        if has('termguicolors')
-          set termguicolors
-        endif
-        " The configuration options should be placed before `colorscheme edge`.
-        let g:edge_style = 'aura'
-        let g:edge_better_performance = 1
-        colorscheme one-nvim
-]]

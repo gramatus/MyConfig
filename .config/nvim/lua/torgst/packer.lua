@@ -21,6 +21,10 @@ return require('packer').startup(function(use)
   use 'Th3Whit3Wolf/onebuddy'
   use 'Th3Whit3Wolf/one-nvim'
   use 'folke/tokyonight.nvim'
+  use 'vigoux/oak'
+  use 'mhartington/oceanic-next'
+  use 'glepnir/zephyr-nvim'
+  use 'ishan9299/modus-theme-vim'
 
 --   use({
 -- 	  'rose-pine/neovim',
