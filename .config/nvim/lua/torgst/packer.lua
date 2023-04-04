@@ -16,6 +16,12 @@ return require('packer').startup(function(use)
 	  requires = { {'nvim-lua/plenary.nvim'} }
   }
 
+  use 'sainnhe/edge'
+  use 'tjdevries/colorbuddy.vim'
+  use 'Th3Whit3Wolf/onebuddy'
+  use 'Th3Whit3Wolf/one-nvim'
+  use 'folke/tokyonight.nvim'
+
 --   use({
 -- 	  'rose-pine/neovim',
 -- 	  as = 'rose-pine',
