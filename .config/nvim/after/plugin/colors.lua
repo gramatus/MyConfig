@@ -26,6 +26,7 @@ vim.api.nvim_create_user_command(
         vim.api.nvim_set_hl(0, "@initializer.property", { fg = "#471AC4", italic=false  })
         vim.api.nvim_set_hl(0, "@method", { fg = "#99740f", italic=false  })
         vim.api.nvim_set_hl(0, "@function.typescript", { fg = "#99740f", italic=false  })
+        vim.api.nvim_set_hl(0, "@function.call.typescript", { fg = "#99740f", italic=false  })
         vim.api.nvim_set_hl(0, "@property.method.call.c_sharp", { fg = "#99740f", italic=false  })
         -- vim.api.nvim_set_hl(0, "@method.call.c_sharp", { fg = "#FF0000", italic=false  })
         vim.api.nvim_set_hl(0, "@type.builtin", { fg = "#0000ff", italic=false  })
