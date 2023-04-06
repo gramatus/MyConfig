@@ -70,7 +70,10 @@ ZSH_THEME="devcontainers"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git)
+plugins=(
+    git
+    zsh-autosuggestions
+)
 
 source $ZSH/oh-my-zsh.sh
 
@@ -104,3 +107,9 @@ DISABLE_UPDATE_PROMPT=true
 
 # Enable vi mode
 bindkey -v
+
+# Save initial folder as WORKSPACE_FOLDER (useful in Codespaces/VSCode/DevContainers)
+export WORKSPACE_FOLDER=$PWD
+# Setup aliases
+alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
+alias cdnc="cd ~/.config/nvim" # Go to nvim config folder
