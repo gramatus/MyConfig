@@ -2,7 +2,8 @@ vim.g.mapleader = " "
 vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
 
 vim.keymap.set("n", "<leader>p", "<nop>")
-vim.keymap.set("n", "<leader>py", vim.cmd.PrettierAsync)
+vim.keymap.set("n", "<C-k><C-d>", vim.cmd.Format)
+-- TODO: Look at these suggestions: https://alpha2phi.medium.com/neovim-for-beginners-key-mappings-and-whichkey-31dbf58f9f87
 
 vim.keymap.set("n", "<leader>bg", ':exec &bg=="light"? "set bg=dark" : "set bg=light"<CR>', {noremap = true, silent = true})
 

@@ -16,3 +16,5 @@ if [ "x$DISPLAY" = "x" ] && [ "x$CODESPACES" != "xtrue" ]
 then
    export DISPLAY=:0
 fi
+
+npm install -g @fsouza/prettierd

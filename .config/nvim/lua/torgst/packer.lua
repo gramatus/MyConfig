@@ -89,12 +89,12 @@ return require('packer').startup(function(use)
 --   use("eandrju/cellular-automaton.nvim")
 --   use("laytan/cloak.nvim")
 
-
-    use {
-        'prettier/vim-prettier',
-        run = 'yarn install',
-        ft = {'javascript', 'typescript', 'css', 'less', 'scss', 'graphql', 'markdown', 'vue', 'html'},
-        disable = vscode
-    }
+    use 'mhartington/formatter.nvim'
+    -- use {
+    --     'prettier/vim-prettier',
+    --     run = 'yarn install',
+    --     ft = {'javascript', 'typescript', 'css', 'less', 'scss', 'graphql', 'markdown', 'vue', 'html'},
+    --     disable = vscode
+    -- }
 
 end)
