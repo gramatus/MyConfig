@@ -18,3 +18,6 @@ then
 fi
 
 npm install -g @fsouza/prettierd
+export PATH=$PATH:~/scripts
+
+# See also: https://github.com/tmux/tmux/wiki/Getting-Started
