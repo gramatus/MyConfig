@@ -12,9 +12,6 @@ sudo apt-get update
 sudo apt-get install -y xclip
 sudo apt-get install -y tmux
 
-# Setup paths
-export PATH=$PATH:~/scripts
-
 # Copy files and folders to HOME
 cp -a scripts/. ~/scripts
 cp -a .config/. ~/.config
