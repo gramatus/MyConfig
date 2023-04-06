@@ -14,7 +14,6 @@ vim.cmd[[
         " The configuration options should be placed before `colorscheme edge`.
         let g:edge_style = 'aura'
         let g:edge_better_performance = 1
-        colorscheme one-nvim
 ]]
 
 vim.api.nvim_create_user_command(
@@ -53,6 +52,7 @@ vim.api.nvim_create_user_command(
         vim.api.nvim_set_hl(0, "@conditional", { fg = "#0000FF", italic=false  })
         vim.api.nvim_set_hl(0, "@comment", { fg = "#008000", italic=false  })
         vim.api.nvim_set_hl(0, "@constant.builtin", { fg = "#0000FF", italic=false  })
+        vim.api.nvim_set_hl(0, "@punctuation.special", { fg = "#0000FF", italic=false  })
         vim.api.nvim_set_hl(0, "@undefined.typescript", { fg = "#0000FF", italic=false  })
         -- vim.api.nvim_set_hl(0, "@constant.builtin.typescript", { fg = "#5590B7", italic=false  })
         vim.api.nvim_set_hl(0, "@union_type.typescript", { fg = "#5590B7", italic=false  })
@@ -73,3 +73,5 @@ autocmd({"ColorScheme"}, {
     group = colorGroup,
     command = "LoadColors",
 })
+
+vim.cmd('colorscheme one-nvim')
