@@ -63,6 +63,7 @@ vim.api.nvim_create_user_command(
 
         vim.api.nvim_set_hl(0, "@lsp.type.class_name.cs", { fg = "#5590B7" })
         vim.api.nvim_set_hl(0, "@lsp.type.string", { bg = "#000000" }) -- This is just for testing, to see when LSP has loaded
+        vim.api.nvim_set_hl(0, "@lsp.type.function.typescript", { bg = "#000000" }) -- This is just for testing, to see when LSP has loaded
 
         -- Set colorscheme after options
         --require("vim.treesitter.query").set_query("test", "test", "(member_access_expression expression: (identifier) @initialIdentifier)")

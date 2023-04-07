@@ -9,8 +9,10 @@ lsp.preset("recommended")
 lsp.ensure_installed({
   'tsserver',
   'omnisharp',
-  'volar',
+  'volar', -- Currently does not add semantic tokens (as far as I can tell, but lets keep it as it might come soon)
+  'vuels', --https://github.com/vuejs/vetur/tree/master/server
   'eslint',
+  'tailwindcss',
 })
 
 -- Fix Undefined global 'vim'
@@ -23,7 +25,7 @@ lsp.ensure_installed({
 --       }
 --   }
 -- })
-lsp.nvim_lua_ls();
+require('lspconfig').lua_ls.setup(lsp.nvim_lua_ls());
 
 local cmp = require('cmp')
 local cmp_select = {behavior = cmp.SelectBehavior.Select}
@@ -81,25 +83,180 @@ lsp.on_attach(function(client, bufnr)
     end
   end
 
-  if client.server_capabilities.documentHighlightProvider then
-    vim.cmd [[
-      hi! LspReferenceRead cterm=bold ctermbg=235 guibg=LightYellow
-      hi! LspReferenceText cterm=bold ctermbg=235 guibg=LightYellow
-      hi! LspReferenceWrite cterm=bold ctermbg=235 guibg=LightYellow
-    ]]
-    vim.api.nvim_create_augroup('lsp_document_highlight', {})
-    vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
-      group = 'lsp_document_highlight',
-      buffer = 0,
-      callback = vim.lsp.buf.document_highlight,
-    })
-    vim.api.nvim_create_autocmd('CursorMoved', {
-      group = 'lsp_document_highlight',
-      buffer = 0,
-      callback = vim.lsp.buf.clear_references,
-    })
-  end
+  -- if client.server_capabilities.documentHighlightProvider then
+  --   vim.cmd [[
+  --     hi! LspReferenceRead cterm=bold ctermbg=235 guibg=LightYellow
+  --     hi! LspReferenceText cterm=bold ctermbg=235 guibg=LightYellow
+  --     hi! LspReferenceWrite cterm=bold ctermbg=235 guibg=LightYellow
+  --   ]]
+  --   vim.api.nvim_create_augroup('lsp_document_highlight', {})
+  --   vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
+  --     group = 'lsp_document_highlight',
+  --     buffer = 0,
+  --     callback = vim.lsp.buf.document_highlight,
+  --   })
+  --   vim.api.nvim_create_autocmd('CursorMoved', {
+  --     group = 'lsp_document_highlight',
+  --     buffer = 0,
+  --     callback = vim.lsp.buf.clear_references,
+  --   })
+  -- end
 end)
+
+local lspconfig = require'lspconfig'
+local lspconfig_configs = require'lspconfig.configs'
+local lspconfig_util = require 'lspconfig.util'
+
+local function on_new_config(new_config, new_root_dir)
+  local function get_typescript_server_path(root_dir)
+    local project_root = lspconfig_util.find_node_modules_ancestor(root_dir)
+    return project_root and (lspconfig_util.path.join(project_root, 'node_modules', 'typescript', 'lib', 'tsserverlibrary.js'))
+      or ''
+  end
+
+  if
+    new_config.init_options
+    and new_config.init_options.typescript
+    and new_config.init_options.typescript.tsdk == ''
+  then
+    new_config.init_options.typescript.tsdk = get_typescript_server_path(new_root_dir)
+  end
+end
+
+local volar_cmd = {'vue-language-server', '--stdio'}
+local volar_root_dir = lspconfig_util.root_pattern 'package.json'
+
+lspconfig_configs.volar_api = {
+ default_config = {
+   cmd = volar_cmd,
+   root_dir = volar_root_dir,
+   on_new_config = on_new_config,
+   filetypes = { 'vue'},
+   -- If you want to use Volar's Take Over Mode (if you know, you know)
+   --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
+   init_options = {
+     typescript = {
+       tsdk = ''
+     },
+     languageFeatures = {
+       implementation = true, -- new in @volar/vue-language-server v0.33
+       references = true,
+       definition = true,
+       typeDefinition = true,
+       callHierarchy = true,
+       hover = true,
+       rename = true,
+       renameFileRefactoring = true,
+       signatureHelp = true,
+       codeAction = true,
+       workspaceSymbol = true,
+       completion = {
+         defaultTagNameCase = 'both',
+         defaultAttrNameCase = 'kebabCase',
+         getDocumentNameCasesRequest = false,
+         getDocumentSelectionRequest = false,
+       },
+     }
+   },
+ }
+}
+lspconfig.volar_api.setup{}
+
+lspconfig_configs.volar_doc = {
+  default_config = {
+    cmd = volar_cmd,
+    root_dir = volar_root_dir,
+    on_new_config = on_new_config,
+
+    filetypes = { 'vue'},
+    -- If you want to use Volar's Take Over Mode (if you know, you know):
+    --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
+    init_options = {
+      typescript = {
+        tsdk = ''
+      },
+      languageFeatures = {
+        implementation = true, -- new in @volar/vue-language-server v0.33
+        documentHighlight = true,
+        documentLink = true,
+        codeLens = { showReferencesNotification = true},
+        -- not supported - https://github.com/neovim/neovim/pull/15723
+        semanticTokens = true,
+        diagnostics = true,
+        schemaRequestService = true,
+      }
+    },
+  }
+}
+lspconfig.volar_doc.setup{}
+
+lspconfig_configs.volar_html = {
+  default_config = {
+    cmd = volar_cmd,
+    root_dir = volar_root_dir,
+    on_new_config = on_new_config,
+
+    filetypes = { 'vue'},
+    -- If you want to use Volar's Take Over Mode (if you know, you know), intentionally no 'json':
+    --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
+    init_options = {
+      typescript = {
+        tsdk = ''
+      },
+      documentFeatures = {
+        selectionRange = true,
+        foldingRange = true,
+        linkedEditingRange = true,
+        documentSymbol = true,
+        -- not supported - https://github.com/neovim/neovim/pull/13654
+        documentColor = true,
+        documentFormatting = {
+          defaultPrintWidth = 100,
+        },
+      }
+    },
+  }
+}
+lspconfig.volar_html.setup{}
+
+-- require('lspconfig').omnisharp.setup {
+--   cmd = { "dotnet", "/usr/bin/omnisharp/OmniSharp.dll" },
+
+--   -- Enables support for reading code style, naming convention and analyzer
+--   -- settings from .editorconfig.
+--   enable_editorconfig_support = true,
+
+--   -- If true, MSBuild project system will only load projects for files that
+--   -- were opened in the editor. This setting is useful for big C# codebases
+--   -- and allows for faster initialization of code navigation features only
+--   -- for projects that are relevant to code that is being edited. With this
+--   -- setting enabled OmniSharp may load fewer projects and may thus display
+--   -- incomplete reference lists for symbols.
+--   enable_ms_build_load_projects_on_demand = false,
+
+--   -- Enables support for roslyn analyzers, code fixes and rulesets.
+--   enable_roslyn_analyzers = false,
+
+--   -- Specifies whether 'using' directives should be grouped and sorted during
+--   -- document formatting.
+--   organize_imports_on_format = false,
+
+--   -- Enables support for showing unimported types and unimported extension
+--   -- methods in completion lists. When committed, the appropriate using
+--   -- directive will be added at the top of the current file. This option can
+--   -- have a negative impact on initial completion responsiveness,
+--   -- particularly for the first few completion sessions after opening a
+--   -- solution.
+--   enable_import_completion = false,
+
+--   -- Specifies whether to include preview versions of the .NET SDK when
+--   -- determining which version to use for project loading.
+--   sdk_include_prereleases = true,
+
+--   -- Only run analyzers against open files when 'enableRoslynAnalyzers' is
+--   -- true
+--   analyze_open_documents_only = false,
+-- }
 
 lsp.setup()
 
