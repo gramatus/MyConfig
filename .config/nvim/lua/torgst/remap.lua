@@ -1,6 +1,7 @@
 vim.g.mapleader = " "
 vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
 
+vim.keymap.set("n", "<leader>cl", "<cmd>so ~/.config/nvim/after/plugin/colors.lua<CR>") -- For use while setting up my own colors
 vim.keymap.set("n", "<leader>ph", "<cmd>Telescope find_files hidden=true<cr>")
 
 vim.keymap.set("n", "<leader>p", "<nop>")
@@ -8,6 +9,12 @@ vim.keymap.set("n", "<C-k><C-d>", vim.cmd.Format)
 -- TODO: Look at these suggestions: https://alpha2phi.medium.com/neovim-for-beginners-key-mappings-and-whichkey-31dbf58f9f87
 
 vim.keymap.set("n", "<leader>bg", ':exec &bg=="light"? "set bg=dark" : "set bg=light"<CR>', {noremap = true, silent = true})
+
+-- -- TESTING: Move "arrows" one key to the right
+-- vim.keymap.set("", "ø", "l")
+-- vim.keymap.set("", "l", "k")
+-- vim.keymap.set("", "k", "j")
+-- vim.keymap.set("", "j", "h")
 
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv")
 vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv")

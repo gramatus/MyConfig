@@ -86,6 +86,8 @@ return require('packer').startup(function(use)
       disable = vscode
   }
 
+  -- use {'neoclide/coc.nvim', branch = 'release'}
+
 --   use("folke/zen-mode.nvim")
 --   use("github/copilot.vim")
 --   use("eandrju/cellular-automaton.nvim")
