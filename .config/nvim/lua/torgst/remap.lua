@@ -52,6 +52,10 @@ vim.keymap.set("n", "<leader>x", "<cmd>!chmod +x %<CR>", { silent = true })
 vim.keymap.set("n", "<leader>vpp", "<cmd>e ~/.dotfiles/nvim/.config/nvim/lua/torgst/packer.lua<CR>");
 vim.keymap.set("n", "<leader>mr", "<cmd>CellularAutomaton make_it_rain<CR>");
 
+-- vim-commaentary doesn't seem to add keymaps by itself (or perhaps it will later), anyway I try adding my own
+vim.keymap.set("x", "C-'", "<cmd>Commentary<CR>")
+vim.keymap.set("x", "gc", "<cmd>Commentary<CR>")
+
 -- Switch buffer
 vim.keymap.set("n", "<S-h>", ":bprevious<CR>", default_opts)
 vim.keymap.set("n", "<S-l>", ":bnext<CR>", default_opts)
