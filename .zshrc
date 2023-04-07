@@ -115,4 +115,3 @@ export PATH=$PATH:~/scripts
 # Setup aliases
 alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
 alias cdnc="cd ~/.config/nvim" # Go to nvim config folder
-alias dvim=/usr/bin/nvim-linux64/bin/nvim # This should be installed during install.sh
