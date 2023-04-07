@@ -10,6 +10,7 @@ lsp.ensure_installed({
   'tsserver',
   'omnisharp',
   'volar',
+  'eslint',
 })
 
 -- Fix Undefined global 'vim'
