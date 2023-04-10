@@ -93,7 +93,7 @@ return require('packer').startup(function(use)
 --   use("eandrju/cellular-automaton.nvim")
 --   use("laytan/cloak.nvim")
 
-    use 'mhartington/formatter.nvim'
+    -- use 'mhartington/formatter.nvim'
     use 'jose-elias-alvarez/null-ls.nvim'
     -- use {
     --     'prettier/vim-prettier',
