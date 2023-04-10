@@ -5,7 +5,18 @@ vim.keymap.set("n", "<leader>cl", "<cmd>so ~/.config/nvim/after/plugin/colors.lu
 vim.keymap.set("n", "<leader>ph", "<cmd>Telescope find_files hidden=true<cr>")
 
 vim.keymap.set("n", "<leader>p", "<nop>")
-vim.keymap.set("n", "<C-k><C-d>", vim.lsp.buf.format)
+-- https://github.com/jose-elias-alvarez/null-ls.nvim/wiki/Avoiding-LSP-formatting-conflicts
+local lsp_formatting = function(bufnr)
+    vim.lsp.buf.format({
+        filter = function(client)
+            if client.name == "tsserver" then do return false end end
+            if client.name == "eslint" then do return false end end
+            return true
+        end,
+        bufnr = bufnr,
+    })
+end
+vim.keymap.set("n", "<C-k><C-d>", lsp_formatting)
 -- TODO: Look at these suggestions: https://alpha2phi.medium.com/neovim-for-beginners-key-mappings-and-whichkey-31dbf58f9f87
 
 vim.keymap.set("n", "<leader>bg", ':exec &bg=="light"? "set bg=dark" : "set bg=light"<CR>', {noremap = true, silent = true})

@@ -94,6 +94,7 @@ return require('packer').startup(function(use)
 --   use("laytan/cloak.nvim")
 
     use 'mhartington/formatter.nvim'
+    use 'jose-elias-alvarez/null-ls.nvim'
     -- use {
     --     'prettier/vim-prettier',
     --     run = 'yarn install',
