@@ -32,3 +32,5 @@ vim.opt.colorcolumn = "80"
 
 vim.opt.clipboard = "unnamedplus"
 vim.opt.bg = "light"
+
+vim.opt.autoread = true
