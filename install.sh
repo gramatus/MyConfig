@@ -14,14 +14,6 @@ sudo dpkg -i ripgrep_13.0.0_amd64.deb
 sudo apt-get update
 sudo apt-get install -y xclip
 
-# Install TMUX (and dependencies)
-sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
-curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
-tar -zxf tmux-*.tar.gz # Extracts into subfolder with same name as archive
-cd tmux-*/
-./configure --prefix=/usr
-make && sudo make install
-
 # Copy files and folders to HOME
 cp -a scripts/. ~/scripts
 cp -a .config/. ~/.config
@@ -35,6 +27,15 @@ git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-m
 nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
 # Install PrettierDaemon
 npm install -g @fsouza/prettierd
+
+# Install TMUX (and dependencies)
+sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
+curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
+tar -zxf tmux-*.tar.gz # Extracts into subfolder with same name as archive
+cd tmux-*/
+./configure --prefix=/usr
+make && sudo make install
+cd ..
 
 # Install Neovim nightly build as DVIM
 . ~/scripts/install-dvim.sh
