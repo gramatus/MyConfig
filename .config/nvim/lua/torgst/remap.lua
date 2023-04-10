@@ -5,7 +5,7 @@ vim.keymap.set("n", "<leader>cl", "<cmd>so ~/.config/nvim/after/plugin/colors.lu
 vim.keymap.set("n", "<leader>ph", "<cmd>Telescope find_files hidden=true<cr>")
 
 vim.keymap.set("n", "<leader>p", "<nop>")
-vim.keymap.set("n", "<C-k><C-d>", vim.cmd.Format)
+vim.keymap.set("n", "<C-k><C-d>", vim.lsp.buf.format)
 -- TODO: Look at these suggestions: https://alpha2phi.medium.com/neovim-for-beginners-key-mappings-and-whichkey-31dbf58f9f87
 
 vim.keymap.set("n", "<leader>bg", ':exec &bg=="light"? "set bg=dark" : "set bg=light"<CR>', {noremap = true, silent = true})
