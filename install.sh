@@ -13,7 +13,14 @@ sudo dpkg -i ripgrep_13.0.0_amd64.deb
 # Install xclip and tmux
 sudo apt-get update
 sudo apt-get install -y xclip
-sudo apt-get install -y tmux
+
+# Install TMUX (and dependencies)
+sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
+curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
+tar -zxf tmux-*.tar.gz # Extracts into subfolder with same name as archive
+cd tmux-*/
+./configure --prefix=/usr
+make && sudo make install
 
 # Copy files and folders to HOME
 cp -a scripts/. ~/scripts
