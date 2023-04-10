@@ -13,6 +13,7 @@ lsp.ensure_installed({
   'vuels', --https://github.com/vuejs/vetur/tree/master/server
   'eslint',
   'tailwindcss',
+  'lua_ls'
 })
 
 -- Fix Undefined global 'vim'
