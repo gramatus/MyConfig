@@ -11,6 +11,9 @@ local lsp_formatting = function(bufnr)
         filter = function(client)
             if client.name == "tsserver" then do return false end end
             if client.name == "eslint" then do return false end end
+            if string.find(client.name, "volar") then do return false end end
+            if client.name == "vuels" then do return false end end
+            -- if client.name == "tailwindcss" then do return false end end
             return true
         end,
         bufnr = bufnr,

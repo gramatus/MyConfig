@@ -84,6 +84,13 @@ else
           end
       end
 
+      if client.name == 'vuels' then
+          client.handlers["textDocument/publishDiagnostics"] = function(...)
+              local result = select(2, ...)
+              result.diagnostics = {}
+          end
+      end
+
       -- if client.server_capabilities.documentHighlightProvider then
       --   vim.cmd [[
       --     hi! LspReferenceRead cterm=bold ctermbg=235 guibg=LightYellow
