@@ -28,6 +28,12 @@ else
     -- })
     require('lspconfig').lua_ls.setup(lsp.nvim_lua_ls());
 
+    lsp.configure('omnisharp', {
+        handlers = {
+            ["textDocument/definition"] = require('omnisharp_extended').handler,
+        }
+    })
+
     local cmp = require('cmp')
     local cmp_select = { behavior = cmp.SelectBehavior.Select }
     local cmp_mappings = lsp.defaults.cmp_mappings({
