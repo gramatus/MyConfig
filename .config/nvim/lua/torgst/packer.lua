@@ -85,6 +85,7 @@ return require('packer').startup(function(use)
         },
         disable = vscode
     }
+    use { 'torgst/omnisharp-extended-lsp.nvim', branch = 'nodef' }
 
     -- use {'neoclide/coc.nvim', branch = 'release'}
 
