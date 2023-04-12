@@ -122,4 +122,4 @@ alias cdnc="cd ~/.config/nvim" # Go to nvim config folder
 #    export DISPLAY=:0
 # fi
 # Check if XCLIP is working
-echo "test"|xclip && export xclip_working=true || export xclip_working=false
+echo "test"|xclip 2> /dev/null && export xclip_working=true || export xclip_working=false
