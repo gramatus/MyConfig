@@ -19,6 +19,7 @@ cp -a scripts/. ~/scripts
 cp -a .config/. ~/.config
 cp .zshrc ~/.zshrc
 cp .tmux.conf ~/.tmux.conf
+cp .bash_profile ~/.bash_profile
 
 # Install zsh autosuggestions
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
