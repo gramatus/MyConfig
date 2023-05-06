@@ -1,3 +1,10 @@
+# Symlink files and folders to HOME
+ln -sr scripts ~/scripts
+ln -sr .config ~/.config
+ln -sr .zshrc ~/.zshrc
+ln -sr .tmux.conf ~/.tmux.conf
+ln -sr .bash_profile ~/.bash_profile
+
 # Install Neovim
 curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
 chmod u+x nvim.appimage
@@ -13,13 +20,6 @@ sudo dpkg -i ripgrep_13.0.0_amd64.deb
 # Install xclip and tmux
 sudo apt-get update
 sudo apt-get install -y xclip
-
-# Copy files and folders to HOME
-ln -sr scripts ~/scripts
-ln -sr .config ~/.config
-ln -sr .zshrc ~/.zshrc
-ln -sr .tmux.conf ~/.tmux.conf
-ln -sr .bash_profile ~/.bash_profile
 
 # Install zsh autosuggestions
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
