@@ -1,6 +1,7 @@
 # Symlink files and folders to HOME
 ln -sr scripts ~/scripts
 ln -sr .config ~/.config
+rm ~/.zshrc
 ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
