@@ -45,3 +45,7 @@ chmod u+x dvim.appimage
 ./dvim.appimage --appimage-extract
 sudo mv squashfs-root /dvim/
 sudo ln -s /dvim/AppRun /usr/bin/dvim
+
+# Fix copilot login in codespaces (see https://github.com/orgs/community/discussions/48027)
+sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js
+sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pack/packer/start/copilot.vim/dist/agent.js
