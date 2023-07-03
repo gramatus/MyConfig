@@ -1,6 +1,6 @@
 # Symlink files and folders to HOME
 ln -sr scripts ~/scripts
-ln -sr .config ~/.config
+ln -sr .config/nvim ~/.config/nvim # Need to symlink every folder in .config
 rm ~/.zshrc
 ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
