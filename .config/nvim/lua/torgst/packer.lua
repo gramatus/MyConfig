@@ -102,4 +102,5 @@ return require('packer').startup(function(use)
     --     ft = {'javascript', 'typescript', 'css', 'less', 'scss', 'graphql', 'markdown', 'vue', 'html'},
     --     disable = vscode
     -- }
+    use 'github/copilot.vim'
 end)
