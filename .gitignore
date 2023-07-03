@@ -1,2 +1,5 @@
 *.appimage
 *.deb
+tmux-*/
+*.gz
+packer_compiled.lua
