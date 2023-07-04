@@ -87,7 +87,7 @@ return require('packer').startup(function(use)
     }
     use { 'torgst/omnisharp-extended-lsp.nvim', branch = 'nodef' }
 
-    -- use {'neoclide/coc.nvim', branch = 'release'}
+    use {'neoclide/coc.nvim', branch = 'release'}
 
     --   use("folke/zen-mode.nvim")
     --   use("github/copilot.vim")
