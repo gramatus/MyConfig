@@ -40,11 +40,11 @@ make && sudo make install
 cd ..
 
 # Install Neovim nightly build as DVIM
-curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
-chmod u+x dvim.appimage
-./dvim.appimage --appimage-extract
-sudo mv squashfs-root /dvim/
-sudo ln -s /dvim/AppRun /usr/bin/dvim
+# curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
+# chmod u+x dvim.appimage
+# ./dvim.appimage --appimage-extract
+# sudo mv squashfs-root /dvim/
+# sudo ln -s /dvim/AppRun /usr/bin/dvim
 
 # Fix copilot login in codespaces (see https://github.com/orgs/community/discussions/48027)
 sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js
