@@ -271,6 +271,11 @@ else
     --   analyze_open_documents_only = false,
     -- }
 
+    lspconfig.terraformls.setup {
+        cmd = { 'terraform-ls', 'serve' },
+        filetypes = { 'terraform', 'tf' }
+    }
+
     lsp.setup()
 
     vim.diagnostic.config({
