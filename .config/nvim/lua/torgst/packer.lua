@@ -103,4 +103,5 @@ return require('packer').startup(function(use)
     --     disable = vscode
     -- }
     use 'github/copilot.vim'
+    use 'nvim-tree/nvim-tree.lua'
 end)

@@ -1,6 +1,10 @@
+-- disable netrw at the very start of your init.lua
+vim.g.loaded_netrw = 1
+vim.g.loaded_netrwPlugin = 1
+
 require("torgst")
 -- Create a "fake clipboard", this will allow copying internally in codespaces running in the web using VIM copy mode
-vim.cmd[[
+vim.cmd [[
   if getenv("CODESPACES")==?"true"
       echo "Setting fake clipboard for Codespaces"
       let g:clipboard = {

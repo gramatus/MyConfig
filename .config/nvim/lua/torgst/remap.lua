@@ -2,7 +2,8 @@ vim.g.mapleader = " "
 if vim.g.vscode then
     vim.keymap.set('n', '<leader>pv', "<Cmd>call VSCodeNotify('workbench.action.files.openFile')<CR>")
 else
-    vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
+    -- vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
+    vim.keymap.set("n", "<leader>pv", "<cmd>NvimTreeFocus<CR>")
 end
 
 
