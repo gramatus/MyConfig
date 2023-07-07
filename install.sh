@@ -56,3 +56,17 @@ wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/sha
 gpg --no-default-keyring --keyring /usr/share/keyrings/hashicorp-archive-keyring.gpg --fingerprint
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 sudo apt update && sudo apt install terraform-ls
+
+# Ensure vs code extensions are installed
+code --install-extension "donjayamanne.githistory"
+code --install-extension "rangav.vscode-thunder-client"
+code --install-extension "github.copilot"
+code --install-extension "dotjoshjohnson.xml"
+code --install-extension "ckolkman.vscode-postgres"
+code --install-extension "usernamehw.errorlens"
+code --install-extension "esbenp.prettier-vscode"
+code --install-extension "asvetliakov.vscode-neovim"
+code --install-extension "heaths.vscode-guid"
+code --install-extension "dbaeumer.vscode-eslint"
+code --install-extension "ms-vsliveshare.vsliveshare"
+code --install-extension "eamodio.gitlens"
