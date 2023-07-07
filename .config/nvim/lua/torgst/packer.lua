@@ -87,7 +87,7 @@ return require('packer').startup(function(use)
     }
     use { 'torgst/omnisharp-extended-lsp.nvim', branch = 'nodef' }
 
-    use {'neoclide/coc.nvim', branch = 'release'}
+    use {'neoclide/coc.nvim', branch = 'release', disable = vscode }
 
     --   use("folke/zen-mode.nvim")
     --   use("github/copilot.vim")
@@ -102,6 +102,6 @@ return require('packer').startup(function(use)
     --     ft = {'javascript', 'typescript', 'css', 'less', 'scss', 'graphql', 'markdown', 'vue', 'html'},
     --     disable = vscode
     -- }
-    use 'github/copilot.vim'
-    use 'nvim-tree/nvim-tree.lua'
+    use { 'github/copilot.vim', disable = vscode }
+    use { 'nvim-tree/nvim-tree.lua', disable = vscode }
 end)
