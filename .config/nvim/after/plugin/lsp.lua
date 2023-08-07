@@ -10,7 +10,7 @@ else
         'tsserver',
         'omnisharp',
         'volar', -- Currently does not add semantic tokens (as far as I can tell, but lets keep it as it might come soon)
-        'vuels', --https://github.com/vuejs/vetur/tree/master/server
+        -- 'vuels', --https://github.com/vuejs/vetur/tree/master/server
         'eslint',
         'tailwindcss',
         'lua_ls',
@@ -40,11 +40,12 @@ else
         ['<C-p>'] = cmp.mapping.select_prev_item(cmp_select),
         ['<C-n>'] = cmp.mapping.select_next_item(cmp_select),
         ['<C-y>'] = cmp.mapping.confirm({ select = true }),
+        ['<enter>'] = cmp.mapping.confirm({ select = true }),
         ["<C-Space>"] = cmp.mapping.complete(),
     })
 
-    cmp_mappings['<Tab>'] = nil
-    cmp_mappings['<S-Tab>'] = nil
+    -- cmp_mappings['<Tab>'] = nil
+    -- cmp_mappings['<S-Tab>'] = nil
 
     lsp.setup_nvim_cmp({
         mapping = cmp_mappings
@@ -141,96 +142,90 @@ else
     local volar_cmd = { 'vue-language-server', '--stdio' }
     local volar_root_dir = lspconfig_util.root_pattern 'package.json'
 
-    lspconfig_configs.volar_api = {
-        default_config = {
-            cmd = volar_cmd,
-            root_dir = volar_root_dir,
-            on_new_config = on_new_config,
-            filetypes = { 'vue' },
-            -- If you want to use Volar's Take Over Mode (if you know, you know)
-            --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
-            init_options = {
-                typescript = {
-                    tsdk = ''
-                },
-                languageFeatures = {
-                    implementation = true, -- new in @volar/vue-language-server v0.33
-                    references = true,
-                    definition = true,
-                    typeDefinition = true,
-                    callHierarchy = true,
-                    hover = true,
-                    rename = true,
-                    renameFileRefactoring = true,
-                    signatureHelp = true,
-                    codeAction = true,
-                    workspaceSymbol = true,
-                    completion = {
-                        defaultTagNameCase = 'both',
-                        defaultAttrNameCase = 'kebabCase',
-                        getDocumentNameCasesRequest = false,
-                        getDocumentSelectionRequest = false,
-                    },
-                }
-            },
-        }
-    }
-    lspconfig.volar_api.setup {}
+    -- lspconfig_configs.volar_api = {
+    --     default_config = {
+    --         cmd = volar_cmd,
+    --         root_dir = volar_root_dir,
+    --         on_new_config = on_new_config,
+    --         filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
+    --         init_options = {
+    --             typescript = {
+    --                 tsdk = ''
+    --             },
+    --             languageFeatures = {
+    --                 implementation = true,
+    --                 references = true,
+    --                 definition = true,
+    --                 typeDefinition = true,
+    --                 callHierarchy = true,
+    --                 hover = true,
+    --                 rename = true,
+    --                 renameFileRefactoring = true,
+    --                 signatureHelp = true,
+    --                 codeAction = true,
+    --                 workspaceSymbol = true,
+    --                 completion = {
+    --                     defaultTagNameCase = 'both',
+    --                     defaultAttrNameCase = 'kebabCase',
+    --                     getDocumentNameCasesRequest = false,
+    --                     getDocumentSelectionRequest = false,
+    --                 },
+    --             }
+    --         },
+    --     }
+    -- }
+    -- lspconfig.volar_api.setup {}
 
-    lspconfig_configs.volar_doc = {
-        default_config = {
-            cmd = volar_cmd,
-            root_dir = volar_root_dir,
-            on_new_config = on_new_config,
-            filetypes = { 'vue' },
-            -- If you want to use Volar's Take Over Mode (if you know, you know):
-            --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
-            init_options = {
-                typescript = {
-                    tsdk = ''
-                },
-                languageFeatures = {
-                    implementation = true, -- new in @volar/vue-language-server v0.33
-                    documentHighlight = true,
-                    documentLink = true,
-                    codeLens = { showReferencesNotification = true },
-                    -- not supported - https://github.com/neovim/neovim/pull/15723
-                    semanticTokens = true,
-                    diagnostics = true,
-                    schemaRequestService = true,
-                }
-            },
-        }
-    }
-    lspconfig.volar_doc.setup {}
+    -- lspconfig_configs.volar_doc = {
+    --     default_config = {
+    --         cmd = volar_cmd,
+    --         root_dir = volar_root_dir,
+    --         on_new_config = on_new_config,
+    --         filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
+    --         init_options = {
+    --             typescript = {
+    --                 tsdk = ''
+    --             },
+    --             languageFeatures = {
+    --                 implementation = true,
+    --                 documentHighlight = true,
+    --                 documentLink = true,
+    --                 codeLens = { showReferencesNotification = true },
+    --                 semanticTokens = true,
+    --                 diagnostics = true,
+    --                 schemaRequestService = true,
+    --             }
+    --         },
+    --     }
+    -- }
+    -- lspconfig.volar_doc.setup {}
 
-    lspconfig_configs.volar_html = {
-        default_config = {
-            cmd = volar_cmd,
-            root_dir = volar_root_dir,
-            on_new_config = on_new_config,
-            filetypes = { 'vue' },
-            -- If you want to use Volar's Take Over Mode (if you know, you know), intentionally no 'json':
-            --filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
-            init_options = {
-                typescript = {
-                    tsdk = ''
-                },
-                documentFeatures = {
-                    selectionRange = true,
-                    foldingRange = true,
-                    linkedEditingRange = true,
-                    documentSymbol = true,
-                    -- not supported - https://github.com/neovim/neovim/pull/13654
-                    documentColor = true,
-                    documentFormatting = {
-                        defaultPrintWidth = 100,
-                    },
-                }
-            },
-        }
-    }
-    lspconfig.volar_html.setup {}
+    -- lspconfig_configs.volar_html = {
+    --     default_config = {
+    --         cmd = volar_cmd,
+    --         root_dir = volar_root_dir,
+    --         on_new_config = on_new_config,
+    --         filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue', 'json' },
+    --         init_options = {
+    --             typescript = {
+    --                 tsdk = ''
+    --             },
+    --             documentFeatures = {
+    --                 selectionRange = true,
+    --                 foldingRange = true,
+    --                 linkedEditingRange = true,
+    --                 documentSymbol = true,
+    --                 documentColor = true, -- not supported - https://github.com/neovim/neovim/pull/13654
+    --                 documentFormatting = {
+    --                     defaultPrintWidth = 100,
+    --                 },
+    --             }
+    --         },
+    --     }
+    -- }
+    -- lspconfig.volar_html.setup {}
+
+    require 'lspconfig'.volar.setup {}
 
     -- require('lspconfig').omnisharp.setup {
     --   cmd = { "dotnet", "/usr/bin/omnisharp/OmniSharp.dll" },
@@ -271,6 +266,29 @@ else
     --   analyze_open_documents_only = false,
     -- }
 
+    lspconfig.terraformls.setup {
+        cmd = { 'terraform-ls', 'serve' },
+        filetypes = { 'terraform', 'tf' }
+    }
+
+    lspconfig.tailwindcss.setup {
+
+        settings = {
+            tailwindCSS = {
+                classAttributes = { "class", "className", "class:list", "classList", "ngClass" },
+                lint = {
+                    cssConflict = "warning",
+                    invalidApply = "error",
+                    invalidConfigPath = "error",
+                    invalidScreen = "error",
+                    invalidTailwindDirective = "error",
+                    invalidVariant = "error",
+                    recommendedVariantOrder = "warning"
+                },
+                validate = true
+            }
+        }
+    }
     lsp.setup()
 
     vim.diagnostic.config({

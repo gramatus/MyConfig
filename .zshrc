@@ -114,7 +114,8 @@ export WORKSPACE_FOLDER=$PWD
 export PATH=$PATH:~/scripts
 # Setup aliases
 alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
-alias cdnc="cd ~/.config/nvim" # Go to nvim config folder
+alias cdnc="cd /workspaces/.codespaces/.persistedshare/dotfiles/.config/nvim" # Go to nvim config folder
+alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to nvim config folder
 
 # Check that display variable is set (not sure if this is smart and/or right)
 # if [ "x$DISPLAY" = "x" ] && [ "x$CODESPACES" != "xtrue" ] # Concatenate something to the variable and see if the result is only that something

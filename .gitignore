@@ -1,0 +1,7 @@
+*.appimage
+*.deb
+tmux-*/
+*.gz
+packer_compiled.lua
+scripts/scripts
+.config/nvim/nvim

@@ -1,6 +1,6 @@
 # Symlink files and folders to HOME
 ln -sr scripts ~/scripts
-ln -sr .config ~/.config
+ln -sr .config/nvim ~/.config/nvim # Need to symlink every folder in .config
 rm ~/.zshrc
 ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
@@ -40,8 +40,33 @@ make && sudo make install
 cd ..
 
 # Install Neovim nightly build as DVIM
-curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
-chmod u+x dvim.appimage
-./dvim.appimage --appimage-extract
-sudo mv squashfs-root /dvim/
-sudo ln -s /dvim/AppRun /usr/bin/dvim
+# curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
+# chmod u+x dvim.appimage
+# ./dvim.appimage --appimage-extract
+# sudo mv squashfs-root /dvim/
+# sudo ln -s /dvim/AppRun /usr/bin/dvim
+
+# Fix copilot login in codespaces (see https://github.com/orgs/community/discussions/48027)
+sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js
+sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pack/packer/start/copilot.vim/dist/agent.js
+
+# Install terraform-ls
+sudo apt update && sudo apt install gpg
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+gpg --no-default-keyring --keyring /usr/share/keyrings/hashicorp-archive-keyring.gpg --fingerprint
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform-ls
+
+# Ensure vs code extensions are installed
+code --install-extension "donjayamanne.githistory"
+code --install-extension "rangav.vscode-thunder-client"
+code --install-extension "github.copilot"
+code --install-extension "dotjoshjohnson.xml"
+code --install-extension "ckolkman.vscode-postgres"
+code --install-extension "usernamehw.errorlens"
+code --install-extension "esbenp.prettier-vscode"
+code --install-extension "asvetliakov.vscode-neovim"
+code --install-extension "heaths.vscode-guid"
+code --install-extension "dbaeumer.vscode-eslint"
+code --install-extension "ms-vsliveshare.vsliveshare"
+code --install-extension "eamodio.gitlens"

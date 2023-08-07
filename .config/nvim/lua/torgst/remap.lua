@@ -2,7 +2,8 @@ vim.g.mapleader = " "
 if vim.g.vscode then
     vim.keymap.set('n', '<leader>pv', "<Cmd>call VSCodeNotify('workbench.action.files.openFile')<CR>")
 else
-    vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
+    -- vim.keymap.set("n", "<leader>pv", vim.cmd.Ex)
+    vim.keymap.set("n", "<leader>pv", "<cmd>NvimTreeFocus<CR>")
 end
 
 
@@ -86,8 +87,8 @@ vim.keymap.set("n", "<leader>vpp", "<cmd>e ~/.dotfiles/nvim/.config/nvim/lua/tor
 vim.keymap.set("n", "<leader>mr", "<cmd>CellularAutomaton make_it_rain<CR>");
 
 -- vim-commaentary doesn't seem to add keymaps by itself (or perhaps it will later), anyway I try adding my own
-vim.keymap.set("x", "C-'", "<cmd>Commentary<CR>")
-vim.keymap.set("x", "gc", "<cmd>Commentary<CR>")
+-- vim.keymap.set("x", "C-'", "<cmd>Commentary<CR>")
+-- vim.keymap.set("x", "gc", "<cmd>Commentary<CR>")
 
 -- Switch buffer
 vim.keymap.set("n", "<S-h>", ":bprevious<CR>", default_opts)
