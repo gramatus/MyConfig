@@ -1,3 +1,7 @@
+# Install zsh and oh-my-zsh if not present
+sudo apt install zsh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+
 # Symlink files and folders to HOME
 ln -sr scripts ~/scripts
 ln -sr .config/nvim ~/.config/nvim # Need to symlink every folder in .config
@@ -24,6 +28,8 @@ sudo apt-get install -y xclip
 
 # Install zsh autosuggestions
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+# Install theme (in case of running outside devcontainers)
+wget https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
 # Install TMUX (and dependencies)
 sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
