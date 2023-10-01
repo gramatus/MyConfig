@@ -25,11 +25,6 @@ sudo apt-get install -y xclip
 # Install zsh autosuggestions
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 
-# Prerun packer
-nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
-# Install PrettierDaemon
-npm install -g @fsouza/prettierd
-
 # Install TMUX (and dependencies)
 sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
 curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
@@ -70,3 +65,8 @@ code --install-extension "heaths.vscode-guid"
 code --install-extension "dbaeumer.vscode-eslint"
 code --install-extension "ms-vsliveshare.vsliveshare"
 code --install-extension "eamodio.gitlens"
+
+# Install PrettierDaemon
+npm install -g @fsouza/prettierd
+# Prerun packer, but do it last, as it sometimes (always?) crashes
+nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
