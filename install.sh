@@ -58,6 +58,16 @@ gpg --no-default-keyring --keyring /usr/share/keyrings/hashicorp-archive-keyring
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 sudo apt update && sudo apt install terraform-ls
 
+if ! which node; then
+    sudo apt-get install -y ca-certificates curl gnupg
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    NODE_MAJOR=20
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+    sudo apt-get update
+    sudo apt-get install nodejs
+fi
+
 # Ensure vs code extensions are installed
 code --install-extension "donjayamanne.githistory"
 code --install-extension "rangav.vscode-thunder-client"
