@@ -85,4 +85,5 @@ code --install-extension "eamodio.gitlens"
 # Install PrettierDaemon
 npm install -g @fsouza/prettierd
 # Prerun packer, but do it last, as it sometimes (always?) crashes
-nvim --headless -c 'autocmd User PackerComplete quitall' -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
+nvim --headless -c 'autocmd User PackerComplete quitall'
+# nvim --headless -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
