@@ -127,3 +127,7 @@ echo "test"|xclip 2> /dev/null && export xclip_working=true || export xclip_work
 
 # Used by "GnistPortal", disables error handler middleware
 export DisableErrorHandlerMiddleware=true
+
+# Set nvim as default editor
+export EDITOR=nvim
+export VISUAL=nvim
