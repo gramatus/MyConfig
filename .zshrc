@@ -124,3 +124,6 @@ alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to nvim c
 # fi
 # Check if XCLIP is working
 echo "test"|xclip 2> /dev/null && export xclip_working=true || export xclip_working=false
+
+# Used by "GnistPortal", disables error handler middleware
+export DisableErrorHandlerMiddleware=true
