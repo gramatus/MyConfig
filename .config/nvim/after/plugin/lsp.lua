@@ -1,4 +1,5 @@
-if vim.g.vscode then
+-- Disable LSP as I am currently using NVIM only for VSCode (+ git rebase), and this config is outdated
+if true then
     -- VSCode extension
 else
     -- ordinary Neovim
