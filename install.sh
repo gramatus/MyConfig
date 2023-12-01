@@ -1,6 +1,7 @@
 # Install zsh and oh-my-zsh if not present
 sudo apt install zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+chsh -s /bin/zsh
 
 # Symlink files and folders to HOME
 ln -sr scripts ~/scripts
@@ -69,19 +70,26 @@ if ! which node; then
 fi
 
 # Ensure vs code extensions are installed (or at least try to ensure it)
-code --install-extension "donjayamanne.githistory"
-code --install-extension "rangav.vscode-thunder-client"
-code --install-extension "github.copilot"
-code --install-extension "dotjoshjohnson.xml"
-code --install-extension "ckolkman.vscode-postgres"
-code --install-extension "usernamehw.errorlens"
-code --install-extension "esbenp.prettier-vscode"
-code --install-extension "asvetliakov.vscode-neovim"
-code --install-extension "heaths.vscode-guid"
-code --install-extension "dbaeumer.vscode-eslint"
-code --install-extension "ms-vsliveshare.vsliveshare"
-code --install-extension "eamodio.gitlens"
+if which code; then
+  code --install-extension "donjayamanne.githistory"
+  code --install-extension "rangav.vscode-thunder-client"
+  code --install-extension "github.copilot"
+  code --install-extension "dotjoshjohnson.xml"
+  code --install-extension "ckolkman.vscode-postgres"
+  code --install-extension "usernamehw.errorlens"
+  code --install-extension "esbenp.prettier-vscode"
+  code --install-extension "asvetliakov.vscode-neovim"
+  code --install-extension "heaths.vscode-guid"
+  code --install-extension "dbaeumer.vscode-eslint"
+  code --install-extension "ms-vsliveshare.vsliveshare"
+  code --install-extension "eamodio.gitlens"
+fi
 
+if ! npm config get prefix | grep .npm-global > /dev/null;then
+    echo "Setting npm global install location to be under ~/"
+    mkdir ~/.npm-global
+    npm config set prefix '~/.npm-global'
+fi
 # Install PrettierDaemon
 npm install -g @fsouza/prettierd
 # Prerun packer, but do it last, as it sometimes (always?) crashes
