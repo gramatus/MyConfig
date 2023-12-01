@@ -1,3 +1,8 @@
+-- To enable from MyConfig:
+-- cd ~/.dotfiles/MyConfig
+-- rm ~/.config/nvim
+-- ln -sr .config/nvim.kickstart ~/.config/nvim
+
 --[[
 
 =====================================================================
