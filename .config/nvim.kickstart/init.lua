@@ -305,7 +305,10 @@ vim.keymap.set('n', '<leader>e', vim.diagnostic.open_float, { desc = 'Open float
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostics list' })
 
 -- TMUX keymaps
-vim.keymap.set('n', '<leader>tr', '<Cmd>call jobstart("tmux send-keys -t bottom-left node Space ' .. string.gsub(string.gsub(vim.api.nvim_buf_get_name(0), ".ts", ".js"), "/src/", "/dist/") .. ' Enter")<CR>', { desc = '[T]rigger code [R]un' })
+vim.keymap.set('n', '<leader>tr',
+  '<Cmd>call jobstart("tmux send-keys -t bottom-left node Space ' ..
+  string.gsub(string.gsub(vim.api.nvim_buf_get_name(0), ".ts", ".js"), "/src/", "/dist/") .. ' Enter")<CR>',
+  { desc = '[T]rigger code [R]un' })
 
 -- Other keymaps
 vim.keymap.set("n", "<C-k><C-d>", '<Cmd>Prettier<CR>')
@@ -366,7 +369,7 @@ local function live_grep_git_root()
   local git_root = find_git_root()
   if git_root then
     require('telescope.builtin').live_grep({
-      search_dirs = {git_root},
+      search_dirs = { git_root },
     })
   end
 end
