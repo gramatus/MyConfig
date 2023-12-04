@@ -248,7 +248,8 @@ require('lazy').setup({
       "jose-elias-alvarez/null-ls.nvim",
     },
   },
-  'MunifTanjim/prettier.nvim'
+  'MunifTanjim/prettier.nvim',
+  'tpope/vim-commentary'
 }, {})
 
 -- [[ Setting options ]]
