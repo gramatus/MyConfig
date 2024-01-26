@@ -1,9 +1,9 @@
-# Install zsh and oh-my-zsh if not present
+echo "############### Installing zsh and oh-my-zsh if not present ###############"
 sudo apt install zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-chsh -s /bin/zsh
+sudo chsh -s /bin/zsh
 
-# Symlink files and folders to HOME
+echo "############### Symlinking files and folders to HOME ###############"
 ln -sr scripts ~/scripts
 if [ ! -d "~/.config" ]; then
     mkdir ~/.config;
@@ -14,28 +14,28 @@ ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
-# Install Neovim
+echo "############### Installing Neovim ###############"
 curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
 chmod u+x nvim.appimage
 ./nvim.appimage --appimage-extract
 sudo mv squashfs-root /
 sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
-# Install packer
+echo "############### Installing packer ###############"
 git clone --depth 1 https://github.com/wbthomason/packer.nvim ~/.local/share/nvim/site/pack/packer/start/packer.nvim
-# Install Ripgrep
+echo "############### Installing Ripgrep ###############"
 curl -LO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
 sudo dpkg -i ripgrep_13.0.0_amd64.deb
 
-# Install xclip and tmux
+echo "############### Installing xclip ###############"
 sudo apt-get update
 sudo apt-get install -y xclip
 
-# Install zsh autosuggestions
+echo "############### Installing zsh autosuggestions  ###############"
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-# Install theme (in case of running outside devcontainers)
+echo "############### Installing theme (in case of running outside devcontainers) ###############"
 wget https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
-# Install TMUX (and dependencies)
+echo "############### Installing TMUX (and dependencies) ###############"
 sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
 curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
 tar -zxf tmux-*.tar.gz # Extracts into subfolder with same name as archive
@@ -44,18 +44,19 @@ cd tmux-*/
 make && sudo make install
 cd ..
 
-# Install Neovim nightly build as DVIM
+# echo "############### Installing Neovim nightly build as DVIM ###############"
 # curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
 # chmod u+x dvim.appimage
 # ./dvim.appimage --appimage-extract
 # sudo mv squashfs-root /dvim/
 # sudo ln -s /dvim/AppRun /usr/bin/dvim
 
-# Fix copilot login in codespaces (see https://github.com/orgs/community/discussions/48027)
+echo "############### Fixing copilot login in codespaces ###############" # (see https://github.com/orgs/community/discussions/48027)
 sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js
 sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pack/packer/start/copilot.vim/dist/agent.js
 
-# Install terraform-ls (NO - it creates all sorts of issues!)
+#  (DISABLED - it creates all sorts of issues!)
+# echo "############### Installing terraform-ls ###############"
 # sudo apt update && sudo apt install gpg
 # wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 # gpg --no-default-keyring --keyring /usr/share/keyrings/hashicorp-archive-keyring.gpg --fingerprint
@@ -63,6 +64,7 @@ sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pac
 # sudo apt update && sudo apt install terraform-ls
 
 if ! which node; then
+    echo "############### Installing node ###############"
     sudo apt-get install -y ca-certificates curl gnupg
     sudo mkdir -p /etc/apt/keyrings
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
@@ -72,8 +74,8 @@ if ! which node; then
     sudo apt-get install nodejs
 fi
 
-# Ensure vs code extensions are installed (or at least try to ensure it)
 if which code; then
+  echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
   code --install-extension "donjayamanne.githistory"
   code --install-extension "rangav.vscode-thunder-client"
   code --install-extension "github.copilot"
@@ -89,12 +91,12 @@ if which code; then
 fi
 
 if ! npm config get prefix | grep .npm-global > /dev/null;then
-    echo "Setting npm global install location to be under ~/"
+    echo "############### Setting npm global install location to be under ~/ ###############"
     mkdir ~/.npm-global
     npm config set prefix '~/.npm-global'
 fi
-# Install PrettierDaemon
+echo "############### Installing PrettierDaemon ###############"
 npm install -g @fsouza/prettierd
-# Prerun packer, but do it last, as it sometimes (always?) crashes
+echo "############### Prerunning packer ###############" # doing this last, as it sometimes (always?) crashes
 nvim --headless -c 'autocmd User PackerComplete quitall'
 # nvim --headless -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
