@@ -8,7 +8,7 @@ ln -sr scripts ~/scripts
 if [ ! -d "~/.config" ]; then
     mkdir ~/.config;
 fi
-ln -sr .config/nvim ~/.config/nvim # Need to symlink every folder in .config
+ln -sr .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in .config
 rm ~/.zshrc
 ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
