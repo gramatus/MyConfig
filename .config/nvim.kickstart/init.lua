@@ -1,8 +1,3 @@
--- To enable from MyConfig:
--- cd ~/.dotfiles/MyConfig
--- rm ~/.config/nvim
--- ln -sr .config/nvim.kickstart ~/.config/nvim
-
 --[[
 
 =====================================================================
@@ -115,14 +110,9 @@ require('lazy').setup({
       'rafamadriz/friendly-snippets',
     },
   },
-  {
-    'windwp/nvim-autopairs',
-    event = "InsertEnter",
-    opts = {} -- this is equalent to setup({}) function
-  },
 
   -- Useful plugin to show you pending keybinds.
-  { 'folke/which-key.nvim',  opts = {} },
+  { 'folke/which-key.nvim', opts = {} },
   {
     -- Adds git related signs to the gutter, as well as utilities for managing changes
     'lewis6991/gitsigns.nvim',
@@ -240,16 +230,6 @@ require('lazy').setup({
   --
   --    For additional information see: https://github.com/folke/lazy.nvim#-structuring-your-plugins
   -- { import = 'custom.plugins' },
-  {
-    "jay-babu/mason-null-ls.nvim",
-    event = { "BufReadPre", "BufNewFile" },
-    dependencies = {
-      "williamboman/mason.nvim",
-      "jose-elias-alvarez/null-ls.nvim",
-    },
-  },
-  'MunifTanjim/prettier.nvim',
-  'tpope/vim-commentary'
 }, {})
 
 -- [[ Setting options ]]
@@ -257,11 +237,10 @@ require('lazy').setup({
 -- NOTE: You can change these options as you wish!
 
 -- Set highlight on search
-vim.o.hlsearch = true
+vim.o.hlsearch = false
 
 -- Make line numbers default
 vim.wo.number = true
-vim.wo.relativenumber = true
 
 -- Enable mouse mode
 vim.o.mouse = 'a'
@@ -309,15 +288,6 @@ vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, { desc = 'Go to previous dia
 vim.keymap.set('n', ']d', vim.diagnostic.goto_next, { desc = 'Go to next diagnostic message' })
 vim.keymap.set('n', '<leader>e', vim.diagnostic.open_float, { desc = 'Open floating diagnostic message' })
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostics list' })
-
--- TMUX keymaps
-vim.keymap.set('n', '<leader>tr',
-  '<Cmd>call jobstart("tmux send-keys -t bottom-left node Space ' ..
-  string.gsub(string.gsub(vim.api.nvim_buf_get_name(0), ".ts", ".js"), "/src/", "/dist/") .. ' Enter")<CR>',
-  { desc = '[T]rigger code [R]un' })
-
--- Other keymaps
-vim.keymap.set("n", "<C-k><C-d>", '<Cmd>Prettier<CR>')
 
 -- [[ Highlight on yank ]]
 -- See `:help vim.highlight.on_yank()`
@@ -375,7 +345,7 @@ local function live_grep_git_root()
   local git_root = find_git_root()
   if git_root then
     require('telescope.builtin').live_grep({
-      search_dirs = { git_root },
+      search_dirs = {git_root},
     })
   end
 end
@@ -531,10 +501,6 @@ require('which-key').register {
 -- before setting up the servers.
 require('mason').setup()
 require('mason-lspconfig').setup()
-require("mason-null-ls").setup({
-  handlers = {},
-})
-require("prettier").setup()
 
 -- Enable the following language servers
 --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
@@ -593,7 +559,6 @@ local cmp = require 'cmp'
 local luasnip = require 'luasnip'
 require('luasnip.loaders.from_vscode').lazy_load()
 luasnip.config.setup {}
-local cmp_autopairs = require('nvim-autopairs.completion.cmp')
 
 cmp.setup {
   snippet = {
@@ -616,7 +581,7 @@ cmp.setup {
     },
     ['<Tab>'] = cmp.mapping(function(fallback)
       if cmp.visible() then
-        cmp.confirm()
+        cmp.select_next_item()
       elseif luasnip.expand_or_locally_jumpable() then
         luasnip.expand_or_jump()
       else
@@ -638,10 +603,6 @@ cmp.setup {
     { name = 'luasnip' },
   },
 }
-cmp.event:on(
-  'confirm_done',
-  cmp_autopairs.on_confirm_done()
-)
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
