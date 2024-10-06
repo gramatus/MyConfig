@@ -131,3 +131,4 @@ export DisableErrorHandlerMiddleware=true
 # Set nvim as default editor
 export EDITOR=nvim
 export VISUAL=nvim
+export GIT_EDITOR=nvim
