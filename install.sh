@@ -97,6 +97,7 @@ if ! npm config get prefix | grep .npm-global > /dev/null;then
 fi
 echo "############### Installing PrettierDaemon ###############"
 npm install -g @fsouza/prettierd
-echo "############### Prerunning packer ###############" # doing this last, as it sometimes (always?) crashes
-nvim --headless -c 'autocmd User PackerComplete quitall'
+echo "############### finished install.sh ###############"
+# echo "############### Prerunning packer ###############" # doing this last, as it sometimes (always?) crashes
+# nvim --headless -c 'autocmd User PackerComplete quitall'
 # nvim --headless -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
