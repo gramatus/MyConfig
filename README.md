@@ -29,6 +29,7 @@ gcm_filename=$(curl https://api.github.com/repos/git-ecosystem/git-credential-ma
 wget $gcm_download_url
 sudo dpkg -i $gcm_filename
 sudo apt-get install -y pass
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 git-credential-manager configure
 userid=$(whoami)
 # We don't want a passphrase because we want to use the key in automated scripts, including when starting our shell.
