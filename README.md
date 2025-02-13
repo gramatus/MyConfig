@@ -19,6 +19,8 @@ exit
 wsl -d Debian_gramatus
 ```
 
+For å klargjøre for kjøring av dotfiles:
+
 ```shell
 github_user=gramatus
 
@@ -44,3 +46,12 @@ cd /repos
 sudo chown $userid:$userid .
 ```
 
+For å kjøre dotfiles:
+
+```shell
+cd /repos
+git config --global credential.guiPrompt false
+git clone https://github.com/torgst/MyConfig.git
+cd MyConfig/
+./install.sh
+```
