@@ -19,6 +19,8 @@ exit
 wsl -d Debian_gramatus
 ```
 
+For å klargjøre for kjøring av dotfiles:
+
 ```shell
 github_user=gramatus
 
@@ -29,6 +31,7 @@ gcm_filename=$(curl https://api.github.com/repos/git-ecosystem/git-credential-ma
 wget $gcm_download_url
 sudo dpkg -i $gcm_filename
 sudo apt-get install -y pass
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 git-credential-manager configure
 userid=$(whoami)
 # We don't want a passphrase because we want to use the key in automated scripts, including when starting our shell.
@@ -43,3 +46,12 @@ cd /repos
 sudo chown $userid:$userid .
 ```
 
+For å kjøre dotfiles:
+
+```shell
+cd /repos
+git config --global credential.guiPrompt false
+git clone https://github.com/torgst/MyConfig.git
+cd MyConfig/
+./install.sh
+```

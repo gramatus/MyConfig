@@ -1,5 +1,5 @@
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
-sudo apt install zsh
+sudo apt install -y zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
 sudo chsh -s /bin/zsh
 
@@ -15,9 +15,9 @@ ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
 echo "############### Installing Neovim ###############"
-curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
-chmod u+x nvim.appimage
-./nvim.appimage --appimage-extract
+curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage
+chmod u+x nvim-linux-x86_64.appimage
+./nvim-linux-x86_64.appimage --appimage-extract
 sudo mv squashfs-root /
 sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
 echo "############### Installing packer ###############"
