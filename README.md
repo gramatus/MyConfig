@@ -19,7 +19,7 @@ exit
 wsl -d Debian_gramatus
 ```
 
-For å klargjøre for kjøring av dotfiles:
+For å kunne koble til GitHub og klone repo:
 
 ```shell
 github_user=gramatus
@@ -31,7 +31,7 @@ gcm_filename=$(curl https://api.github.com/repos/git-ecosystem/git-credential-ma
 wget $gcm_download_url
 sudo dpkg -i $gcm_filename
 sudo apt-get install -y pass
-export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+# export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 # Might be needed, might not be needed
 git-credential-manager configure
 userid=$(whoami)
 # We don't want a passphrase because we want to use the key in automated scripts, including when starting our shell.
