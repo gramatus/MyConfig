@@ -20,6 +20,7 @@ chmod u+x nvim-linux-x86_64.appimage
 ./nvim-linux-x86_64.appimage --appimage-extract
 sudo mv squashfs-root /
 sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
+sudo apt install -y unzip # stylua needs unzip to install
 echo "############### Installing packer ###############"
 git clone --depth 1 https://github.com/wbthomason/packer.nvim ~/.local/share/nvim/site/pack/packer/start/packer.nvim
 echo "############### Installing Ripgrep ###############"
