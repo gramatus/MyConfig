@@ -19,7 +19,7 @@ exit
 wsl -d Debian_gramatus
 ```
 
-For å kunne koble til GitHub og klone repo:
+For å kunne koble til GitHub og klone repo (dette baserer seg på å ha Git credentials lokalt i WSL, men se neste seksjon for et bedre alternativ):
 
 ```shell
 github_user=gramatus
@@ -46,11 +46,22 @@ cd /repos
 sudo chown $userid:$userid .
 ```
 
+For å kunne koble til GitHub og klone repo (dette baserer seg på å dele Git credentials med Windows, pass på å legge inn riktig brukernavn):
+
+```shell
+sudo apt-get install -y git curl wget jq
+git config --global credential.helper "/mnt/c/Users/TORGST/AppData/Local/Programs/Git/mingw64/bin/git-credential-manager.exe"
+sudo mkdir /repos
+cd /repos
+userid=$(whoami)
+sudo chown $userid:$userid .
+```
+
 For å kjøre dotfiles:
 
 ```shell
 cd /repos
-git config --global credential.guiPrompt false
+# git config --global credential.guiPrompt false
 git clone https://github.com/torgst/MyConfig.git
 cd MyConfig/
 ./install.sh
