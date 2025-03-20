@@ -78,7 +78,6 @@ fi
 if which code; then
   echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
   code --install-extension "donjayamanne.githistory"
-  code --install-extension "rangav.vscode-thunder-client"
   code --install-extension "github.copilot"
   code --install-extension "dotjoshjohnson.xml"
   code --install-extension "ckolkman.vscode-postgres"
