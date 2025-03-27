@@ -81,6 +81,10 @@ echo "############### Installing GitHub CLI ###############"
   && sudo apt update \
   && sudo apt install gh -y
 
+echo "############### TODO: Download public signing key ###############"
+# TODO: figure out auth in this scenario
+# mkdir -p ~/.ssh
+# gh api /users/torgst/ssh_signing_keys | jq '.[] | select(.title=="Commit signing") | .key' -r > ~/.ssh/id_ed25519.pub
 
 if which code; then
   echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
