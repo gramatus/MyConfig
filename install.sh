@@ -101,10 +101,14 @@ if which code; then
   code --install-extension "eamodio.gitlens"
 fi
 
-if ! npm config get prefix | grep .npm-global > /dev/null;then
-    echo "############### Setting npm global install location to be under ~/ ###############"
-    mkdir ~/.npm-global
-    npm config set prefix '~/.npm-global'
+# NVM handles global packages automatically. For non-NVM environments, set a user-local prefix to avoid needing sudo.
+if ! command -v nvm &> /dev/null; then
+    if ! npm config get prefix | grep -q "${HOME}"; then
+        echo "############### Setting npm global install location to be under ~/ ###############"
+        mkdir -p ~/.npm-global
+        npm config set prefix '~/.npm-global'
+        # Make sure ~/.npm-global/bin is in PATH (add to .bashrc/.zshrc if needed)
+    fi
 fi
 echo "############### Installing PrettierDaemon ###############"
 npm install -g @fsouza/prettierd
