@@ -17,29 +17,18 @@ fi
 # ============================================================================
 # Interactive Shell Setup
 # ============================================================================
-# Only configure these for interactive sessions (terminals you type in).
-# Non-interactive shells (spawned by tools like Claude Code, scripts, etc.)
-# skip this block to avoid breaking automated command execution.
-#
-# Reference for Codespaces environment variables:
-# https://docs.github.com/en/codespaces/developing-in-codespaces/persisting-environment-variables-and-temporary-files#for-all-codespaces-that-you-create
+# Only run for interactive sessions (terminals you type in).
+# WARNING: Without this guard, non-interactive shells spawned by tools like
+# Claude Code, VS Code tasks, or scripts will break.
 if [[ $- == *i* ]]; then
     # GnistPortal: Disable .NET error handler middleware for cleaner dev output
+    # Reference: https://docs.github.com/en/codespaces/developing-in-codespaces/persisting-environment-variables-and-temporary-files#for-all-codespaces-that-you-create
     export DisableErrorHandlerMiddleware=true
 
-fi
-
-# ============================================================================
-# Switch to Zsh
-# ============================================================================
-# Replace bash with zsh for interactive sessions.
-# This is what makes Codespaces (which default to bash) run zsh instead.
-#
-# WARNING: Without the interactive guard, this breaks tools that spawn
-# non-interactive bash shells (e.g., Claude Code, VS Code tasks, scripts).
-if [[ $- == *i* ]]; then
-    # Tell programs that zsh is our preferred shell
+    # Declare zsh as preferred shell. Programs that spawn subshells or
+    # open new terminals may check $SHELL to decide which shell to use.
     export SHELL=/bin/zsh
-    # 'exec' replaces bash with zsh - must be last since nothing after runs
+    # Replace bash with zsh. This is what makes Codespaces run zsh instead.
+    # Must be last - 'exec' replaces the shell process, so nothing after runs.
     exec /bin/zsh -l
 fi
