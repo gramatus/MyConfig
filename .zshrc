@@ -4,6 +4,30 @@
 # Skip ALL shell config for non-interactive shells
 [[ ! -o interactive ]] && return
 
+# ============================================================================
+# Daily Logging Helper
+# ============================================================================
+# Logs to console only on first trigger each day (per message ID).
+_zshrc_log_once() {
+    local id="$1"
+    local msg="$2"
+    local marker_dir="${HOME}/.cache/zshrc_logs"
+    local today=$(date +%Y-%m-%d)
+    local marker_file="${marker_dir}/${id}-${today}"
+
+    mkdir -p "$marker_dir"
+    if [[ ! -f "$marker_file" ]]; then
+        echo "[.zshrc] $msg"
+        touch "$marker_file"
+        find "$marker_dir" -name "${id}-*" ! -name "${id}-${today}" -delete 2>/dev/null
+    fi
+}
+
+_zshrc_log_once "startup" "Loading zsh config (interactive=$([[ -o interactive ]] && echo yes || echo no), login=$([[ -o login ]] && echo yes || echo no))"
+
+# ============================================================================
+# Oh-My-Zsh Configuration
+# ============================================================================
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
@@ -78,10 +102,12 @@ plugins=(
     zsh-autosuggestions
 )
 
+_zshrc_log_once "omz" "Loading Oh-My-Zsh (theme=$ZSH_THEME, plugins: ${plugins[*]})"
 source $ZSH/oh-my-zsh.sh
 
-# User configuration
-
+# ============================================================================
+# User Configuration
+# ============================================================================
 # export MANPATH="/usr/local/man:$MANPATH"
 
 # You may need to manually set your language environment
@@ -110,28 +136,41 @@ DISABLE_UPDATE_PROMPT=true
 
 # Enable vi mode
 bindkey -v
+_zshrc_log_once "vi_mode" "Enabled vi mode"
 
 # Save initial folder as WORKSPACE_FOLDER (useful in Codespaces/VSCode/DevContainers)
 export WORKSPACE_FOLDER=$PWD
 # Setup paths
 export PATH=$PATH:~/scripts
+_zshrc_log_once "env" "Set WORKSPACE_FOLDER=$WORKSPACE_FOLDER, added ~/scripts to PATH"
+
 # Setup aliases
 alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
 alias cdnc="cd /workspaces/.codespaces/.persistedshare/dotfiles/.config/nvim" # Go to nvim config folder
-alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to nvim config folder
+alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to dotfiles config folder
+_zshrc_log_once "my_alias" "My custom aliases: cdw, cdnc, cddot"
+_zshrc_log_once "omz_alias" "OMZ git aliases: see ~/.oh-my-zsh/plugins/git/README.md or run 'omz plugin info git'"
 
 # Check that display variable is set (not sure if this is smart and/or right)
 # if [ "x$DISPLAY" = "x" ] && [ "x$CODESPACES" != "xtrue" ] # Concatenate something to the variable and see if the result is only that something
 # then
 #    export DISPLAY=:0
 # fi
-# Check if XCLIP is working
+# ============================================================================
+# Clipboard Support (is XCLIP working?)
+# ============================================================================
 echo "test"|xclip 2> /dev/null && export xclip_working=true || export xclip_working=false
+_zshrc_log_once "xclip" "Clipboard support: xclip_working=$xclip_working"
 
-# Used by "GnistPortal", disables error handler middleware
+# ============================================================================
+# Application-Specific Settings
+# ============================================================================
+# GnistPortal: Disable .NET error handler middleware for cleaner dev output
 export DisableErrorHandlerMiddleware=true
+_zshrc_log_once "gnist" "Set DisableErrorHandlerMiddleware=true"
 
 # Set nvim as default editor
 export EDITOR=nvim
 export VISUAL=nvim
 export GIT_EDITOR=nvim
+_zshrc_log_once "editor" "Set EDITOR=nvim"
