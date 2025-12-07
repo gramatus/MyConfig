@@ -1,3 +1,9 @@
+# Skip dotfiles for specific repos
+if [ "$GITHUB_REPOSITORY" = "gramatus/claude-reproductions" ]; then
+    echo "Skipping dotfiles installation for this repository"
+    exit 0
+fi
+
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
 sudo apt install -y zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
