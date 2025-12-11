@@ -70,8 +70,9 @@ fi
 # sudo ln -s /dvim/AppRun /usr/bin/dvim
 
 echo "############### Fixing copilot login in codespaces ###############" # (see https://github.com/orgs/community/discussions/48027)
-sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js
-sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pack/packer/start/copilot.vim/dist/agent.js
+# These files may not exist yet during initial setup - ignore errors
+# sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.vscode-remote/extensions/github.copilot-*/dist/extension.js 2>/dev/null || true
+# sed -i 's/"true"===process\.env\.CODESPACES/false/' ~/.local/share/nvim/site/pack/packer/start/copilot.vim/dist/agent.js 2>/dev/null || true
 
 #  (DISABLED - it creates all sorts of issues!)
 # echo "############### Installing terraform-ls ###############"
