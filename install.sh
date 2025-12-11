@@ -36,8 +36,6 @@ else
     exit 1
 fi
 sudo apt-get install -y -qq unzip # stylua needs unzip to install
-echo "############### Installing packer ###############"
-git clone --depth 1 https://github.com/wbthomason/packer.nvim ~/.local/share/nvim/site/pack/packer/start/packer.nvim
 echo "############### Installing Ripgrep ###############"
 curl -fsSLO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
 sudo dpkg -i ripgrep_13.0.0_amd64.deb > /dev/null
