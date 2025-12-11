@@ -4,8 +4,12 @@ if [ "$GITHUB_REPOSITORY" = "gramatus/claude-reproductions" ]; then
     exit 0
 fi
 
+# Disable colors for cleaner log output
+export NO_COLOR=1
+export FORCE_COLOR=0
+
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
-sudo apt install -y zsh
+sudo apt-get install -y -qq zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
 sudo chsh -s /bin/zsh
 
@@ -22,40 +26,40 @@ ln -sr .bash_profile ~/.bash_profile
 
 echo "############### Installing Neovim ###############"
 NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage"
-if curl -fLO "$NVIM_URL"; then
+if curl -fsSLO "$NVIM_URL"; then
     chmod u+x nvim-linux-x86_64.appimage
-    ./nvim-linux-x86_64.appimage --appimage-extract
+    ./nvim-linux-x86_64.appimage --appimage-extract > /dev/null
     sudo mv squashfs-root /
     sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
     rm nvim-linux-x86_64.appimage
 else
     exit 1
 fi
-sudo apt install -y unzip # stylua needs unzip to install
+sudo apt-get install -y -qq unzip # stylua needs unzip to install
 echo "############### Installing packer ###############"
 git clone --depth 1 https://github.com/wbthomason/packer.nvim ~/.local/share/nvim/site/pack/packer/start/packer.nvim
 echo "############### Installing Ripgrep ###############"
-curl -LO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
-sudo dpkg -i ripgrep_13.0.0_amd64.deb
+curl -fsSLO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
+sudo dpkg -i ripgrep_13.0.0_amd64.deb > /dev/null
 
 echo "############### Installing xclip ###############"
-sudo apt-get update
-sudo apt-get install -y xclip
+sudo apt-get update -qq
+sudo apt-get install -y -qq xclip
 
 echo "############### Installing zsh autosuggestions  ###############"
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+git clone --quiet https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 echo "############### Installing theme (in case of running outside devcontainers) ###############"
-wget https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
+wget -q https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
 echo "############### Installing TMUX (and dependencies) ###############"
-sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
+sudo apt-get install -y -qq libevent-dev ncurses-dev build-essential bison pkg-config
 TMUX_VERSION="3.5a"
 TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
-if curl -fLO "$TMUX_URL"; then
+if curl -fsSLO "$TMUX_URL"; then
     tar -zxf tmux-${TMUX_VERSION}.tar.gz
     cd tmux-${TMUX_VERSION}/
-    ./configure --prefix=/usr
-    make && sudo make install
+    ./configure --prefix=/usr > /dev/null
+    make -s && sudo make -s install
     cd ..
     rm -rf tmux-${TMUX_VERSION} tmux-${TMUX_VERSION}.tar.gz
 else
@@ -85,19 +89,19 @@ echo "############### Fixing copilot login in codespaces ###############" # (see
 if ! which node; then
     echo "############### Installing node ###############"
     NODE_MAJOR=20
-    curl -fsSL https://deb.nodesource.com/setup_$NODE_MAJOR.x | sudo bash -
-    sudo apt-get install -y nodejs
+    curl -fsSL https://deb.nodesource.com/setup_$NODE_MAJOR.x | sudo bash - > /dev/null
+    sudo apt-get install -y -qq nodejs
 fi
 
 echo "############### Installing GitHub CLI ###############"
-(type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) \
+(type -p wget >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq wget)) \
   && sudo mkdir -p -m 755 /etc/apt/keyrings \
-        && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        && out=$(mktemp) && wget -q -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
   && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-  && sudo apt update \
-  && sudo apt install gh -y
+  && sudo apt-get update -qq \
+  && sudo apt-get install -y -qq gh
 
 echo "############### TODO: Download public signing key ###############"
 # TODO: figure out auth in this scenario
@@ -129,7 +133,7 @@ if ! command -v nvm &> /dev/null; then
     fi
 fi
 echo "############### Installing PrettierDaemon ###############"
-npm install -g @fsouza/prettierd
+npm install -g --loglevel=error @fsouza/prettierd
 
 echo "############### Prerunning lazy.nvim plugin sync ###############"
 # Run lazy.nvim sync headlessly - the ! makes it non-interactive
