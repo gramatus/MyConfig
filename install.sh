@@ -130,7 +130,9 @@ if ! command -v nvm &> /dev/null; then
 fi
 echo "############### Installing PrettierDaemon ###############"
 npm install -g @fsouza/prettierd
+
+echo "############### Prerunning lazy.nvim plugin sync ###############"
+# Run lazy.nvim sync headlessly - the ! makes it non-interactive
+nvim --headless "+Lazy! sync" +qa
+
 echo "############### finished install.sh ###############"
-# echo "############### Prerunning packer ###############" # doing this last, as it sometimes (always?) crashes
-# nvim --headless -c 'autocmd User PackerComplete quitall'
-# nvim --headless -c 'PackerSync' # See https://github.com/wbthomason/packer.nvim/issues/502
