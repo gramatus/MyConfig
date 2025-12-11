@@ -21,11 +21,16 @@ ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
 echo "############### Installing Neovim ###############"
-curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage
-chmod u+x nvim-linux-x86_64.appimage
-./nvim-linux-x86_64.appimage --appimage-extract
-sudo mv squashfs-root /
-sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
+NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage"
+if curl -fLO "$NVIM_URL"; then
+    chmod u+x nvim-linux-x86_64.appimage
+    ./nvim-linux-x86_64.appimage --appimage-extract
+    sudo mv squashfs-root /
+    sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
+    rm nvim-linux-x86_64.appimage
+else
+    exit 1
+fi
 sudo apt install -y unzip # stylua needs unzip to install
 echo "############### Installing packer ###############"
 git clone --depth 1 https://github.com/wbthomason/packer.nvim ~/.local/share/nvim/site/pack/packer/start/packer.nvim
@@ -44,12 +49,18 @@ wget https://raw.githubusercontent.com/devcontainers/features/main/src/common-ut
 
 echo "############### Installing TMUX (and dependencies) ###############"
 sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config
-curl -LO https://github.com/tmux/tmux/releases/download/3.3a/tmux-3.3a.tar.gz
-tar -zxf tmux-*.tar.gz # Extracts into subfolder with same name as archive
-cd tmux-*/
-./configure --prefix=/usr
-make && sudo make install
-cd ..
+TMUX_VERSION="3.5a"
+TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
+if curl -fLO "$TMUX_URL"; then
+    tar -zxf tmux-${TMUX_VERSION}.tar.gz
+    cd tmux-${TMUX_VERSION}/
+    ./configure --prefix=/usr
+    make && sudo make install
+    cd ..
+    rm -rf tmux-${TMUX_VERSION} tmux-${TMUX_VERSION}.tar.gz
+else
+    echo "WARNING: Failed to download TMUX source"
+fi
 
 # echo "############### Installing Neovim nightly build as DVIM ###############"
 # curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
