@@ -10,7 +10,7 @@ export FORCE_COLOR=0
 export DEBIAN_FRONTEND=noninteractive
 
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
-sudo apt-get install -y -qq zsh
+sudo apt-get install -y -qq zsh 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
 sudo chsh -s /bin/zsh
 
@@ -57,8 +57,8 @@ TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${
 if curl -fsSLO "$TMUX_URL"; then
     tar -zxf tmux-${TMUX_VERSION}.tar.gz
     cd tmux-${TMUX_VERSION}/
-    ./configure --prefix=/usr > /dev/null
-    make -s && sudo make -s install
+    ./configure --prefix=/usr > /dev/null 2>&1
+    make -s > /dev/null 2>&1 && sudo make -s install > /dev/null 2>&1
     cd ..
     rm -rf tmux-${TMUX_VERSION} tmux-${TMUX_VERSION}.tar.gz
 else
