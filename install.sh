@@ -137,6 +137,6 @@ npm install -g --silent @fsouza/prettierd
 echo "############### Prerunning lazy.nvim plugin sync ###############"
 # Run lazy.nvim sync headlessly - the ! makes it non-interactive
 # Silence all plugin operations but keep warnings/errors
-nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "^\[.*\] (clone|checkout|docs|fetch|status|build) \||Cloning into|Finished task|Running task|Updating files:|Submodule|Downloading tree-sitter|Creating temporary|Extracting tree-sitter|Compiling\.\.\.|Treesitter parser for .* has been installed|git submodule|make\[|/usr/bin/cc|shared jsregexp|cp "|rm -f" || true
+nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "^\[.*\] (clone|checkout|docs|fetch|status|build) \||Cloning into|Finished task|Running task|Updating files:|Submodule|Downloading tree-sitter|Creating temporary|Extracting tree-sitter|Compiling\.\.\.|Treesitter parser for .* has been installed|git submodule|make\[|/usr/bin/cc|shared jsregexp|cp |rm -f" || true
 
 echo "############### finished install.sh ###############"
