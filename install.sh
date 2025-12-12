@@ -7,6 +7,7 @@ fi
 # Disable colors for cleaner log output
 export NO_COLOR=1
 export FORCE_COLOR=0
+export DEBIAN_FRONTEND=noninteractive
 
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
 sudo apt-get install -y -qq zsh
@@ -38,11 +39,11 @@ fi
 sudo apt-get install -y -qq unzip # stylua needs unzip to install
 echo "############### Installing Ripgrep ###############"
 curl -fsSLO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
-sudo dpkg -i ripgrep_13.0.0_amd64.deb > /dev/null
+sudo dpkg -i ripgrep_13.0.0_amd64.deb 2>&1 | grep -Ev "^(Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing xclip ###############"
 sudo apt-get update -qq
-sudo apt-get install -y -qq xclip
+sudo apt-get install -y -qq xclip 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing zsh autosuggestions  ###############"
 git clone --quiet https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
@@ -50,7 +51,7 @@ echo "############### Installing theme (in case of running outside devcontainers
 wget -q https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
 echo "############### Installing TMUX (and dependencies) ###############"
-sudo apt-get install -y -qq libevent-dev ncurses-dev build-essential bison pkg-config
+sudo apt-get install -y -qq libevent-dev ncurses-dev build-essential bison pkg-config 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 TMUX_VERSION="3.5a"
 TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
 if curl -fsSLO "$TMUX_URL"; then
@@ -99,14 +100,14 @@ echo "############### Installing GitHub CLI ###############"
   && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
   && sudo apt-get update -qq \
-  && sudo apt-get install -y -qq gh
+  && sudo apt-get install -y -qq gh 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### TODO: Download public signing key ###############"
 # TODO: figure out auth in this scenario
 # mkdir -p ~/.ssh
 # gh api /users/torgst/ssh_signing_keys | jq '.[] | select(.title=="Commit signing") | .key' -r > ~/.ssh/id_ed25519.pub
 
-if which code; then
+if which code > /dev/null 2>&1; then
   echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
   code --install-extension "donjayamanne.githistory"
   code --install-extension "github.copilot"
@@ -135,6 +136,6 @@ npm install -g --silent @fsouza/prettierd
 
 echo "############### Prerunning lazy.nvim plugin sync ###############"
 # Run lazy.nvim sync headlessly - the ! makes it non-interactive
-nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "^[.*].*(clone|remote:|Receiving|Resolving)" || true
+nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "clone |remote:|Receiving objects|Resolving deltas|Counting objects|Compressing objects|Enumerating objects|Total [0-9]|pack-reused|^:" || true
 
 echo "############### finished install.sh ###############"
