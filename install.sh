@@ -11,13 +11,17 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
 sudo apt-get install -y -qq zsh 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+else
+    echo "oh-my-zsh already installed, skipping"
+fi
 sudo chsh -s /bin/zsh
 
 echo "############### Symlinking files and folders to HOME ###############"
 ln -sr scripts ~/scripts
-if [ ! -d "~/.config" ]; then
-    mkdir ~/.config;
+if [ ! -d "$HOME/.config" ]; then
+    mkdir "$HOME/.config"
 fi
 ln -sr .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in .config
 rm ~/.zshrc
