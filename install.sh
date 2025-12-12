@@ -131,10 +131,10 @@ if ! command -v nvm &> /dev/null; then
     fi
 fi
 echo "############### Installing PrettierDaemon ###############"
-npm install -g --loglevel=error @fsouza/prettierd
+npm install -g --silent @fsouza/prettierd
 
 echo "############### Prerunning lazy.nvim plugin sync ###############"
 # Run lazy.nvim sync headlessly - the ! makes it non-interactive
-nvim --headless "+Lazy! sync" +qa
+nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "^[.*].*(clone|remote:|Receiving|Resolving)" || true
 
 echo "############### finished install.sh ###############"
