@@ -169,6 +169,33 @@ _zshrc_log_once "xclip" "Clipboard support: xclip_working=$xclip_working"
 export DisableErrorHandlerMiddleware=true
 _zshrc_log_once "gnist" "Set DisableErrorHandlerMiddleware=true"
 
+# ============================================================================
+# For codespaces, installing extensions in dotfiles doesn't work as code is not "connected properly" yet. This is a hack to handle that.
+# ============================================================================
+if [[ "$CODESPACES" == "true" ]]; then
+    install_vscode_extension() {
+        local extension_id="$1"
+
+        # Check if extension directory exists and extension is installed
+        if [[ ! -d ~/.vscode-remote/extensions ]] || \
+           [[ -z $(find ~/.vscode-remote/extensions -maxdepth 1 -name "${extension_id}-*" 2>/dev/null) ]]; then
+            code --install-extension "$extension_id" 2>&1 || \
+                echo "Note: $extension_id will be installed when VS Code connects"
+        fi
+    }
+
+    # Read extension list from install.sh to keep them in sync
+    local dotfiles_dir="/workspaces/.codespaces/.persistedshare/dotfiles"
+    if [[ -f "$dotfiles_dir/install.sh" ]]; then
+        while IFS= read -r extension; do
+            [[ -n "$extension" ]] && install_vscode_extension "$extension"
+        done < <(grep -oP 'code --install-extension "\K[^"]+' "$dotfiles_dir/install.sh" 2>/dev/null)
+    fi
+fi
+
+# ============================================================================
+# Other stuff
+# ============================================================================
 # Set nvim as default editor
 export EDITOR=nvim
 export VISUAL=nvim
