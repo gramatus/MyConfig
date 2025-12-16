@@ -106,6 +106,11 @@ echo "############### Installing GitHub CLI ###############"
   && sudo apt-get update -qq \
   && sudo apt-get install -y -qq gh 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
+echo "############### Configuring git difftool to use VS Code ###############"
+git config --global diff.tool vscode
+git config --global difftool.vscode.cmd 'code --wait --diff $LOCAL $REMOTE'
+git config --global difftool.prompt false
+
 echo "############### TODO: Download public signing key ###############"
 # TODO: figure out auth in this scenario
 # mkdir -p ~/.ssh
