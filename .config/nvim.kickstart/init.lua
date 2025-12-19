@@ -191,6 +191,10 @@ vim.keymap.set('n', '<C-k><C-d>', function()
 end, { desc = 'Format buffer' })
 -- Show signature help (parameter info) with Ctrl+s in insert mode
 vim.keymap.set('i', '<C-s>', vim.lsp.buf.signature_help, { desc = 'Signature help' })
+-- Toggle comment with Ctrl+'
+vim.keymap.set('n', "<C-'>", 'gcc', { remap = true, desc = 'Toggle comment' })
+vim.keymap.set('v', "<C-'>", 'gc', { remap = true, desc = 'Toggle comment' })
+vim.keymap.set('i', "<C-'>", 'gcc', { remap = true, desc = 'Toggle comment' })
 
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
