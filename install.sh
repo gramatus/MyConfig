@@ -153,4 +153,34 @@ echo "############### Prerunning lazy.nvim plugin sync ###############"
 # Show plugin list ([plugin] docs |), warnings/errors, but hide clone/build noise
 nvim --headless "+Lazy! sync" +qa 2>&1 | grep -Ev "^\[.*\] +(clone|checkout|fetch|status|build) \||Cloning into|Finished task|Running task|Updating files:|Submodule|Downloading tree-sitter|Creating temporary|Extracting tree-sitter|Compiling\.\.\.|Treesitter parser for .* has been installed|git submodule|make\[|/usr/bin/cc|shared jsregexp|clone \| remote:|clone \| Receiving|clone \| Resolving|^ +[a-z].*clone \||^\[?[0-9]+\)|\(from [0-9]+\)|MiB/s|one\.|KiB|^$| +(docs|build|fetch|checkout) \| *$" || true
 
+echo "############### Checking for Nerd Font ###############"
+# Check if a Nerd Font is configured (heuristic: look for common nerd font names in terminal)
+# Since we're in WSL, we can't easily detect Windows fonts, so just show a reminder
+if [ -z "$NERD_FONT_INSTALLED" ]; then
+    echo ""
+    echo "=========================================="
+    echo "  OPTIONAL: Install a Nerd Font for icons"
+    echo "=========================================="
+    echo ""
+    echo "Nerd Fonts add file icons and symbols to neovim."
+    echo "To install:"
+    echo ""
+    echo "1. Download a font from: https://www.nerdfonts.com/font-downloads"
+    echo "   (Recommended: JetBrainsMono Nerd Font or FiraCode Nerd Font)"
+    echo ""
+    echo "2. Extract and install the .ttf files in Windows"
+    echo "   (Right-click -> Install for all users)"
+    echo ""
+    echo "3. Configure Windows Terminal:"
+    echo "   Settings -> Profiles -> Defaults -> Appearance -> Font face"
+    echo "   Select your installed Nerd Font"
+    echo ""
+    echo "4. Update neovim config (set to true):"
+    echo "   vim.g.have_nerd_font = true"
+    echo "   (in ~/.config/nvim/init.lua, near the top)"
+    echo ""
+    echo "To skip this message, set NERD_FONT_INSTALLED=1"
+    echo ""
+fi
+
 echo "############### finished install.sh ###############"
