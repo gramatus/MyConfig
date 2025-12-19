@@ -126,6 +126,10 @@ end)
 -- Enable break indent
 vim.opt.breakindent = true
 
+-- Enable auto/smart indentation
+vim.opt.autoindent = true
+vim.opt.smartindent = true
+
 -- Save undo history
 vim.opt.undofile = true
 
