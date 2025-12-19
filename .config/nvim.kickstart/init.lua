@@ -954,6 +954,7 @@ require('lazy').setup({
         'markdown',
         'markdown_inline',
         'query',
+        'tmux',
         'tsx',
         'typescript',
         'vim',
