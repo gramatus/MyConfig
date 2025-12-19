@@ -282,7 +282,56 @@ require('lazy').setup({
         topdelete = { text = '‾' },
         changedelete = { text = '~' },
       },
+      on_attach = function(bufnr)
+        local gs = require 'gitsigns'
+        local map = function(mode, l, r, desc)
+          vim.keymap.set(mode, l, r, { buffer = bufnr, desc = desc })
+        end
+        -- Hunk navigation
+        map('n', ']h', gs.next_hunk, 'Next [H]unk')
+        map('n', '[h', gs.prev_hunk, 'Prev [H]unk')
+        -- Hunk actions
+        map('n', '<leader>hs', gs.stage_hunk, '[H]unk [S]tage')
+        map('n', '<leader>hr', gs.reset_hunk, '[H]unk [R]eset')
+        map('v', '<leader>hs', function() gs.stage_hunk { vim.fn.line '.', vim.fn.line 'v' } end, '[H]unk [S]tage')
+        map('v', '<leader>hr', function() gs.reset_hunk { vim.fn.line '.', vim.fn.line 'v' } end, '[H]unk [R]eset')
+        map('n', '<leader>hu', gs.undo_stage_hunk, '[H]unk [U]ndo stage')
+        map('n', '<leader>hp', gs.preview_hunk, '[H]unk [P]review')
+        map('n', '<leader>hb', function() gs.blame_line { full = true } end, '[H]unk [B]lame')
+      end,
     },
+  },
+  { -- VS Code-like diff view with staging support
+    'sindrets/diffview.nvim',
+    dependencies = { 'nvim-lua/plenary.nvim' },
+    cmd = { 'DiffviewOpen', 'DiffviewFileHistory' },
+    keys = {
+      { '<leader>gd', '<cmd>DiffviewOpen<cr>', desc = '[G]it [D]iff view' },
+      { '<leader>gh', '<cmd>DiffviewFileHistory %<cr>', desc = '[G]it file [H]istory' },
+      { '<leader>gH', '<cmd>DiffviewFileHistory<cr>', desc = '[G]it repo [H]istory' },
+      { '<leader>gq', '<cmd>DiffviewClose<cr>', desc = '[G]it diff [Q]uit' },
+    },
+    opts = {
+      view = {
+        default = {
+          winbar_info = true,
+        },
+        file_history = {
+          winbar_info = true,
+        },
+      },
+      diff_binaries = false,
+      use_icons = false,
+      -- Show full file context (99999 lines)
+      default_args = {
+        DiffviewOpen = { '--imply-local' },
+      },
+    },
+    config = function(_, opts)
+      require('diffview').setup(opts)
+      -- Set diff context to show entire file
+      vim.opt.diffopt:append('context:99999')
+    end,
   },
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
   --
