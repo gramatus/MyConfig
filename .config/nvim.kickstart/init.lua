@@ -933,16 +933,11 @@ require('lazy').setup({
   },
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
+    branch = 'master',
     build = ':TSUpdate',
-    lazy = false,
-    config = function()
-      -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
-      require('nvim-treesitter').setup {
-        install_dir = vim.fn.stdpath 'data' .. '/site',
-      }
-
-      -- Install parsers (runs async, use :wait() for sync if needed)
-      local parsers = {
+    main = 'nvim-treesitter.configs',
+    opts = {
+      ensure_installed = {
         'bash',
         'c',
         'css',
@@ -960,25 +955,11 @@ require('lazy').setup({
         'vim',
         'vimdoc',
         'yaml',
-      }
-      require('nvim-treesitter').install(parsers)
-
-      -- Enable treesitter highlighting for all filetypes
-      vim.api.nvim_create_autocmd('FileType', {
-        group = vim.api.nvim_create_augroup('treesitter-highlight', { clear = true }),
-        callback = function()
-          pcall(vim.treesitter.start)
-        end,
-      })
-
-      -- Enable treesitter-based indentation
-      vim.api.nvim_create_autocmd('FileType', {
-        group = vim.api.nvim_create_augroup('treesitter-indent', { clear = true }),
-        callback = function()
-          vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
-        end,
-      })
-    end,
+      },
+      auto_install = true,
+      highlight = { enable = true },
+      indent = { enable = true },
+    },
     -- There are additional nvim-treesitter modules that you can use to interact
     -- with nvim-treesitter. You should go explore a few and see what interests you:
     --
