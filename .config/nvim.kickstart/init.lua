@@ -353,7 +353,6 @@ require('lazy').setup({
   { -- Fuzzy Finder (files, lsp, etc)
     'nvim-telescope/telescope.nvim',
     event = 'VimEnter',
-    branch = '0.1.x',
     dependencies = {
       'nvim-lua/plenary.nvim',
       { -- If encountering errors, see telescope-fzf-native README for installation instructions
@@ -683,12 +682,11 @@ require('lazy').setup({
           end,
         },
       }
-
     end,
   },
   {
-    "pmizio/typescript-tools.nvim",
-    dependencies = { "nvim-lua/plenary.nvim", "neovim/nvim-lspconfig" },
+    'pmizio/typescript-tools.nvim',
+    dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
     opts = {},
   },
 
@@ -924,11 +922,29 @@ require('lazy').setup({
     config = function()
       -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
       require('nvim-treesitter').setup {
-        install_dir = vim.fn.stdpath('data') .. '/site',
+        install_dir = vim.fn.stdpath 'data' .. '/site',
       }
 
       -- Install parsers (runs async, use :wait() for sync if needed)
-      local parsers = { 'bash', 'c', 'css', 'diff', 'html', 'javascript', 'json', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'tsx', 'typescript', 'vim', 'vimdoc', 'yaml' }
+      local parsers = {
+        'bash',
+        'c',
+        'css',
+        'diff',
+        'html',
+        'javascript',
+        'json',
+        'lua',
+        'luadoc',
+        'markdown',
+        'markdown_inline',
+        'query',
+        'tsx',
+        'typescript',
+        'vim',
+        'vimdoc',
+        'yaml',
+      }
       require('nvim-treesitter').install(parsers)
 
       -- Enable treesitter highlighting for all filetypes
