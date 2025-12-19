@@ -181,8 +181,10 @@ vim.keymap.set(
     .. ' Enter")<CR>',
   { desc = '[T]rigger code [R]un' }
 )
--- Other keymaps
-vim.keymap.set('n', '<C-k><C-d>', '<Cmd>Prettier<CR>')
+-- Format with Ctrl+k, Ctrl+d (uses conform.nvim)
+vim.keymap.set('n', '<C-k><C-d>', function()
+  require('conform').format { async = true, lsp_format = 'fallback' }
+end, { desc = 'Format buffer' })
 
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
@@ -272,12 +274,6 @@ require('lazy').setup({
       },
     },
   },
-  {
-    'windwp/nvim-autopairs',
-    event = 'InsertEnter',
-    opts = {}, -- this is equalent to setup({}) function
-  },
-
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
   --
   -- This is often very useful to both group configuration, as well as handle
@@ -685,11 +681,6 @@ require('lazy').setup({
         },
       }
 
-      -- require("mason-null-ls").setup({
-      --   handlers = {},
-      -- })
-
-      require('prettier').setup()
     end,
   },
   {
@@ -983,17 +974,9 @@ require('lazy').setup({
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
   --    For additional information, see `:help lazy.nvim-lazy.nvim-structuring-your-plugins`
   -- { import = 'custom.plugins' },
-  {
-    'jay-babu/mason-null-ls.nvim',
-    event = { 'BufReadPre', 'BufNewFile' },
-    dependencies = {
-      'williamboman/mason.nvim',
-      'jose-elias-alvarez/null-ls.nvim',
-    },
-  },
-  'MunifTanjim/prettier.nvim',
   'tpope/vim-commentary',
 }, {
+  checker = { enabled = true },
   ui = {
     -- If you are using a Nerd Font: set icons to an empty table which will use the
     -- default lazy.nvim defined Nerd Font icons, otherwise define a unicode icons table
