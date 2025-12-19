@@ -56,7 +56,8 @@ wget -q https://raw.githubusercontent.com/devcontainers/features/main/src/common
 
 echo "############### Installing TMUX (and dependencies) ###############"
 sudo apt-get install -y -qq libevent-dev ncurses-dev build-essential bison pkg-config 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
-TMUX_VERSION="3.5a"
+TMUX_VERSION=$(curl -fsSL https://api.github.com/repos/tmux/tmux/releases/latest | jq -r .tag_name)
+TMUX_VERSION="${TMUX_VERSION:-3.6a}"  # fallback if API fails
 TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
 if curl -fsSLO "$TMUX_URL"; then
     tar -zxf tmux-${TMUX_VERSION}.tar.gz
@@ -89,7 +90,7 @@ echo "############### Fixing copilot login in codespaces ###############" # (see
 # echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 # sudo apt update && sudo apt install terraform-ls
 
-if ! which node; then
+if ! which node > /dev/null; then
     echo "############### Installing node ###############"
     NODE_MAJOR=20
     curl -fsSL https://deb.nodesource.com/setup_$NODE_MAJOR.x | sudo bash - > /dev/null
