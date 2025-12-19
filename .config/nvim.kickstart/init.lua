@@ -185,6 +185,8 @@ vim.keymap.set(
 vim.keymap.set('n', '<C-k><C-d>', function()
   require('conform').format { async = true, lsp_format = 'fallback' }
 end, { desc = 'Format buffer' })
+-- Show signature help (parameter info) with Ctrl+s in insert mode
+vim.keymap.set('i', '<C-s>', vim.lsp.buf.signature_help, { desc = 'Signature help' })
 
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
@@ -688,6 +690,16 @@ require('lazy').setup({
     'pmizio/typescript-tools.nvim',
     dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
     opts = {},
+  },
+  { -- Show function signature help as you type
+    'ray-x/lsp_signature.nvim',
+    event = 'LspAttach',
+    opts = {
+      hint_enable = false, -- disable virtual text hints
+      handler_opts = {
+        border = 'rounded',
+      },
+    },
   },
 
   { -- Autoformat
