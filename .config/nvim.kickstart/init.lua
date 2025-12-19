@@ -928,7 +928,7 @@ require('lazy').setup({
       }
 
       -- Install parsers (runs async, use :wait() for sync if needed)
-      local parsers = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
+      local parsers = { 'bash', 'c', 'css', 'diff', 'html', 'javascript', 'json', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'tsx', 'typescript', 'vim', 'vimdoc', 'yaml' }
       require('nvim-treesitter').install(parsers)
 
       -- Enable treesitter highlighting for all filetypes
@@ -979,6 +979,7 @@ require('lazy').setup({
   -- { import = 'custom.plugins' },
   'tpope/vim-commentary',
 }, {
+  rocks = { enabled = false },
   checker = { enabled = true },
   ui = {
     -- If you are using a Nerd Font: set icons to an empty table which will use the
