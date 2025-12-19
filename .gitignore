@@ -7,3 +7,7 @@ scripts/scripts
 .config/nvim/nvim
 squashfs-root/
 lazy-lock.json
+
+# Claude temporary input
+.claude/input/
+
