@@ -44,6 +44,8 @@ sudo apt-get install -y -qq unzip # stylua needs unzip to install
 echo "############### Installing Ripgrep ###############"
 curl -fsSLO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
 sudo dpkg -i ripgrep_13.0.0_amd64.deb 2>&1 | grep -Ev "^(Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
+echo "############### Installing fd-find (for telescope) ###############"
+sudo apt-get install -y -qq fd-find 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing xclip ###############"
 sudo apt-get update -qq
