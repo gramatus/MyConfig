@@ -777,7 +777,6 @@ require('lazy').setup({
       local cmp = require 'cmp'
       local luasnip = require 'luasnip'
       luasnip.config.setup {}
-      local cmp_autopairs = require 'nvim-autopairs.completion.cmp'
 
       cmp.setup {
         snippet = {
@@ -850,8 +849,6 @@ require('lazy').setup({
           { name = 'path' },
         },
       }
-
-      cmp.event:on('confirm_done', cmp_autopairs.on_confirm_done())
     end,
   },
 
