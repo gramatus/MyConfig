@@ -141,7 +141,7 @@ _zshrc_log_once "vi_mode" "Enabled vi mode"
 # Save initial folder as WORKSPACE_FOLDER (useful in Codespaces/VSCode/DevContainers)
 export WORKSPACE_FOLDER=$PWD
 # Setup paths
-export PATH=$PATH:~/scripts
+export PATH=$HOME/.npm-global/bin:$PATH:~/scripts
 _zshrc_log_once "env" "Set WORKSPACE_FOLDER=$WORKSPACE_FOLDER, added ~/scripts to PATH"
 
 # Setup aliases
@@ -201,3 +201,11 @@ export EDITOR=nvim
 export VISUAL=nvim
 export GIT_EDITOR=nvim
 _zshrc_log_once "editor" "Set EDITOR=nvim"
+
+# ============================================================================
+# Auto-start tmux (the check at the top means it does not start in interactive terminals)
+# ============================================================================
+if [[ -z "$TMUX" ]]; then
+  exec tmux new-session
+  # To connect existing session: Ctrl-b s
+fi
