@@ -939,6 +939,53 @@ require('lazy').setup({
     end,
   },
 
+  { -- Buffer tabs at the top
+    'akinsho/bufferline.nvim',
+    version = '*',
+    dependencies = { 'nvim-tree/nvim-web-devicons' },
+    event = 'VimEnter', -- Load on startup so the bufferline is always visible
+    opts = {
+      options = {
+        mode = 'buffers',
+        separator_style = 'thin',
+        show_buffer_close_icons = false,
+        show_close_icon = false,
+        diagnostics = 'nvim_lsp',
+        always_show_bufferline = true,
+        numbers = 'none',
+      },
+    },
+    keys = {
+      { '<leader>bn', '<cmd>BufferLineCycleNext<cr>', desc = '[B]uffer [N]ext' },
+      { '<leader>bp', '<cmd>BufferLineCyclePrev<cr>', desc = '[B]uffer [P]rev' },
+      { '<leader>bx', '<cmd>bdelete<cr>', desc = '[B]uffer close' },
+      { '<leader><Tab>', '<cmd>b#<cr>', desc = 'Switch to last buffer' },
+      { '<C-PageDown>', '<cmd>BufferLineCycleNext<cr>', desc = 'Next buffer' },
+      { '<C-PageUp>', '<cmd>BufferLineCyclePrev<cr>', desc = 'Prev buffer' },
+    },
+  },
+
+  { -- Harpoon for quick file switching (mark files, jump to them with number keys)
+    'ThePrimeagen/harpoon',
+    branch = 'harpoon2',
+    dependencies = { 'nvim-lua/plenary.nvim' },
+    config = function()
+      local harpoon = require 'harpoon'
+      harpoon:setup()
+
+      vim.keymap.set('n', '<leader>ha', function() harpoon:list():add() end, { desc = '[H]arpoon [A]dd file' })
+      vim.keymap.set('n', '<leader>hh', function() harpoon.ui:toggle_quick_menu(harpoon:list()) end, { desc = '[H]arpoon menu' })
+      vim.keymap.set('n', '<leader>hr', function() harpoon:list():remove() end, { desc = '[H]arpoon [R]emove file' })
+      vim.keymap.set('n', '<leader>hc', function() harpoon:list():clear() end, { desc = '[H]arpoon [C]lear all' })
+
+      -- Quick jump to harpoon files 1-4
+      vim.keymap.set('n', '<leader>1', function() harpoon:list():select(1) end, { desc = 'Harpoon file 1' })
+      vim.keymap.set('n', '<leader>2', function() harpoon:list():select(2) end, { desc = 'Harpoon file 2' })
+      vim.keymap.set('n', '<leader>3', function() harpoon:list():select(3) end, { desc = 'Harpoon file 3' })
+      vim.keymap.set('n', '<leader>4', function() harpoon:list():select(4) end, { desc = 'Harpoon file 4' })
+    end,
+  },
+
   -- Highlight todo, notes, etc in comments
   {
     'folke/todo-comments.nvim',
