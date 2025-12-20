@@ -958,7 +958,7 @@ require('lazy').setup({
     keys = {
       { '<leader>bn', '<cmd>BufferLineCycleNext<cr>', desc = '[B]uffer [N]ext' },
       { '<leader>bp', '<cmd>BufferLineCyclePrev<cr>', desc = '[B]uffer [P]rev' },
-      { '<leader>bx', '<cmd>bdelete<cr>', desc = '[B]uffer close' },
+      { '<leader>bx', '<cmd>bdelete<cr>', desc = '[B]uffer [X] (close)' },
       { '<leader><Tab>', '<cmd>b#<cr>', desc = 'Switch to last buffer' },
       { '<C-PageDown>', '<cmd>BufferLineCycleNext<cr>', desc = 'Next buffer' },
       { '<C-PageUp>', '<cmd>BufferLineCyclePrev<cr>', desc = 'Prev buffer' },

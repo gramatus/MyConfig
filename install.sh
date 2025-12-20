@@ -24,6 +24,7 @@ if [ ! -d "$HOME/.config" ]; then
     mkdir "$HOME/.config"
 fi
 ln -sr .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in .config
+ln -sr docs/KEYMAPS.md ~/nvim-keymaps.md
 rm ~/.zshrc
 ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
