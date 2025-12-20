@@ -218,6 +218,10 @@ for _, char in ipairs({ 'ø', 'æ', 'Ø', 'Æ' }) do
   vim.keymap.set('n', 'r' .. char, 'r' .. target)
 end
 
+-- Swap ; and , for f/t repeat navigation (forward with , and backward with ;)
+vim.keymap.set({ 'n', 'v', 'o' }, ',', ';', { desc = 'Repeat f/t forward' })
+vim.keymap.set({ 'n', 'v', 'o' }, ';', ',', { desc = 'Repeat f/t backward' })
+
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
