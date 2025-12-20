@@ -196,6 +196,28 @@ vim.keymap.set('n', '<C-]>', 'gcc', { remap = true, desc = 'Toggle comment' })
 vim.keymap.set('v', '<C-]>', 'gc', { remap = true, desc = 'Toggle comment' })
 vim.keymap.set('i', '<C-]>', '<Esc>gcc', { remap = true, desc = 'Toggle comment' })
 
+-- Norwegian keyboard: Alt+ø/æ for [ or ], Alt+Shift+ø/æ for { or }
+vim.keymap.set({ 'n', 'v', 'o' }, '<M-ø>', '[', { remap = true, desc = 'Norwegian [' })
+vim.keymap.set({ 'n', 'v', 'o' }, '<M-æ>', ']', { remap = true, desc = 'Norwegian ]' })
+vim.keymap.set({ 'n', 'v', 'o' }, '<M-Ø>', '{', { remap = true, desc = 'Norwegian {' })
+vim.keymap.set({ 'n', 'v', 'o' }, '<M-Æ>', '}', { remap = true, desc = 'Norwegian }' })
+vim.keymap.set('i', '<M-ø>', '[', { desc = 'Norwegian [' })
+vim.keymap.set('i', '<M-æ>', ']', { desc = 'Norwegian ]' })
+vim.keymap.set('i', '<M-Ø>', '{', { desc = 'Norwegian {' })
+vim.keymap.set('i', '<M-Æ>', '}', { desc = 'Norwegian }' })
+-- The above doesn't work for some normal mode commands like f/t/r, however we don't need øæØÆ in normal mode
+-- We use "langmap" as an addition (affect all modes except insert!) to map without alt in other modes than insert
+-- langmap has a bug with multibyte chars for f/t/r, so we use explicit mappings
+vim.opt.langmap = 'ø[,æ],Ø{,Æ}'
+-- Explicit f/F/t/T/r mappings to work around the multibyte langmap bug
+for _, char in ipairs({ 'ø', 'æ', 'Ø', 'Æ' }) do
+  local target = ({ ['ø'] = '[', ['æ'] = ']', ['Ø'] = '{', ['Æ'] = '}' })[char]
+  for _, cmd in ipairs({ 'f', 'F', 't', 'T' }) do
+    vim.keymap.set({ 'n', 'v', 'o' }, cmd .. char, cmd .. target)
+  end
+  vim.keymap.set('n', 'r' .. char, 'r' .. target)
+end
+
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
