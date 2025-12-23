@@ -201,10 +201,10 @@ vim.keymap.set({ 'n', 'v', 'o' }, '<M-ø>', '[', { remap = true, desc = 'Norwegi
 vim.keymap.set({ 'n', 'v', 'o' }, '<M-æ>', ']', { remap = true, desc = 'Norwegian ]' })
 vim.keymap.set({ 'n', 'v', 'o' }, '<M-Ø>', '{', { remap = true, desc = 'Norwegian {' })
 vim.keymap.set({ 'n', 'v', 'o' }, '<M-Æ>', '}', { remap = true, desc = 'Norwegian }' })
-vim.keymap.set('i', '<M-ø>', '[', { desc = 'Norwegian [' })
-vim.keymap.set('i', '<M-æ>', ']', { desc = 'Norwegian ]' })
-vim.keymap.set('i', '<M-Ø>', '{', { desc = 'Norwegian {' })
-vim.keymap.set('i', '<M-Æ>', '}', { desc = 'Norwegian }' })
+vim.keymap.set('i', '<M-ø>', '[', { remap = true, desc = 'Norwegian [' })
+vim.keymap.set('i', '<M-æ>', ']', { remap = true, desc = 'Norwegian ]' })
+vim.keymap.set('i', '<M-Ø>', '{', { remap = true, desc = 'Norwegian {' })
+vim.keymap.set('i', '<M-Æ>', '}', { remap = true, desc = 'Norwegian }' })
 -- The above doesn't work for some normal mode commands like f/t/r, however we don't need øæØÆ in normal mode
 -- We use "langmap" as an addition (affect all modes except insert!) to map without alt in other modes than insert
 -- langmap has a bug with multibyte chars for f/t/r, so we use explicit mappings
