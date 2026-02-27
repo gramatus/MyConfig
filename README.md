@@ -66,3 +66,7 @@ git clone https://github.com/torgst/MyConfig.git
 cd MyConfig/
 ./install.sh
 ```
+
+# primeconfig
+
+This directory contains a Neovim configuration based on [ThePrimeagen's init.lua](https://github.com/ThePrimeagen/init.lua), kept here as a reference and starting point.
