@@ -207,7 +207,7 @@ _zshrc_log_once "editor" "Set EDITOR=nvim"
 # ============================================================================
 if [[ -z "$TMUX" ]]; then
     # To connect existing session: Ctrl-b s
-    tmux new-session
+    # tmux new-session
     # Use exec to *replace* the current zsh-session. I.e., without `exec`, you will return to zsh when exiting (and you will have one more process).
     #   zsh → tmux → zsh (inside tmux)
     # Hoever, I prefer to be able to exit out to zsh (I think)
