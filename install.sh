@@ -115,6 +115,7 @@ echo "############### Configuring git difftool to use VS Code ###############"
 git config --global diff.tool vscode
 git config --global difftool.vscode.cmd 'code --wait --diff $LOCAL $REMOTE'
 git config --global difftool.prompt false
+git config --global rebase.updateRefs true
 
 echo "############### TODO: Download public signing key ###############"
 # TODO: figure out auth in this scenario
