@@ -32,7 +32,8 @@ ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
 echo "############### Installing Neovim ###############"
-NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage"
+NVIM_VERSION="latest"
+NVIM_URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.appimage"
 if curl -fsSLO "$NVIM_URL"; then
     chmod u+x nvim-linux-x86_64.appimage
     ./nvim-linux-x86_64.appimage --appimage-extract > /dev/null
