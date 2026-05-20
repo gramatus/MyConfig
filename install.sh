@@ -33,7 +33,9 @@ ln -sr .bash_profile ~/.bash_profile
 
 echo "############### Installing Neovim ###############"
 NVIM_VERSION="latest"
-NVIM_URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.appimage"
+#NVIM_URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.appimage"
+# latest has a different form for the url
+NVIM_URL="https://github.com/neovim/neovim/releases/${NVIM_VERSION}/download//nvim-linux-x86_64.appimage"
 if curl -fsSLO "$NVIM_URL"; then
     chmod u+x nvim-linux-x86_64.appimage
     ./nvim-linux-x86_64.appimage --appimage-extract > /dev/null
