@@ -1,8 +1,13 @@
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 
-# Skip ALL shell config for non-interactive shells
-[[ ! -o interactive ]] && return
+# Skip ALL shell config for non-interactive shells, AND for shells spawned
+# only to capture env via `zsh -c <string>` (or `-ic`/`-lic`). VS Code's
+# Claude Code extension uses `zsh -lic 'printenv PATH'` on every webview
+# init; without the second check the install-extension retry block below
+# runs synchronously for 6+s and starves the extension host event loop,
+# blowing the WebSocket heartbeat. See docs/codespace-claude-extension-loop.md
+[[ ! -o interactive || -n "$ZSH_EXECUTION_STRING" ]] && return
 
 # ============================================================================
 # Daily Logging Helper
