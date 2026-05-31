@@ -1,0 +1,16 @@
+{
+  "theme": "auto",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/block-askuserquestion.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

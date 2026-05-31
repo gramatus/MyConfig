@@ -31,6 +31,15 @@ ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
+echo "############### Symlinking Claude Code settings + AskUserQuestion block ###############"
+# -f forces overwrite: Claude Code may have already written a real
+# ~/.claude/settings.json (e.g. theme), and we want our canonical copy to
+# win — same as the .zshrc handling above. Only these two paths are linked;
+# the rest of ~/.claude (credentials, history, sessions) is left untouched.
+mkdir -p ~/.claude/hooks
+ln -srf .claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
+ln -srf .claude/settings.json ~/.claude/settings.json
+
 echo "############### Installing Neovim ###############"
 NVIM_VERSION="latest"
 #NVIM_URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.appimage"
