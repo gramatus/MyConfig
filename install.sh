@@ -31,14 +31,16 @@ ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
-echo "############### Symlinking Claude Code settings + AskUserQuestion block ###############"
+echo "############### Symlinking reusable Claude Code content ###############"
 # -f forces overwrite: Claude Code may have already written a real
 # ~/.claude/settings.json (e.g. theme), and we want our canonical copy to
-# win — same as the .zshrc handling above. Only these two paths are linked;
-# the rest of ~/.claude (credentials, history, sessions) is left untouched.
+# win — same as the .zshrc handling above. Only these paths are
+# linked; the rest of ~/.claude (credentials, history, sessions) is left
+# untouched.
 mkdir -p ~/.claude/hooks
 ln -srf .claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
 ln -srf .claude/settings.json ~/.claude/settings.json
+ln -srf .claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 echo "############### Installing Neovim ###############"
 NVIM_VERSION="latest"
