@@ -31,6 +31,34 @@ ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
+# Codespaces only: $HOME is reset on every container *rebuild* (only
+# /workspaces survives a rebuild — stop/start keeps everything), so
+# ~/.claude (sessions, memory, todos, login) and ~/.claude.json vanish.
+# Locally (e.g. WSL) $HOME already persists, so this is skipped there.
+if [ "$CODESPACES" = "true" ]; then
+    echo "############### Persisting Claude Code state across rebuilds ###############"
+    # Park ~/.claude + ~/.claude.json under /workspaces and symlink back into
+    # $HOME. The store is a sibling of the repo dir, so it is never
+    # git-tracked. NOTE: this also persists credentials/login across rebuilds
+    # — drop the claude.json line below if you would rather re-auth each time.
+    CLAUDE_PERSIST="/workspaces/.claude-persist"
+    mkdir -p "$CLAUDE_PERSIST/dot-claude"
+
+    # ~/.claude -> persistent dir (migrate a pre-existing real dir on first run)
+    if [ -e "$HOME/.claude" ] && [ ! -L "$HOME/.claude" ]; then
+        cp -an "$HOME/.claude/." "$CLAUDE_PERSIST/dot-claude/" 2>/dev/null || true
+        rm -rf "$HOME/.claude"
+    fi
+    ln -sfn "$CLAUDE_PERSIST/dot-claude" "$HOME/.claude"
+
+    # ~/.claude.json -> persistent file (project history + login state)
+    if [ -e "$HOME/.claude.json" ] && [ ! -L "$HOME/.claude.json" ]; then
+        mv -n "$HOME/.claude.json" "$CLAUDE_PERSIST/claude.json"
+    fi
+    [ -e "$CLAUDE_PERSIST/claude.json" ] || touch "$CLAUDE_PERSIST/claude.json"
+    ln -sf "$CLAUDE_PERSIST/claude.json" "$HOME/.claude.json"
+fi
+
 echo "############### Symlinking reusable Claude Code content ###############"
 # -f forces overwrite: Claude Code may have already written a real
 # ~/.claude/settings.json (e.g. theme), and we want our canonical copy to
