@@ -20,7 +20,7 @@ cat <<'JSON'
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "AskUserQuestion is disabled on this machine (personal preference). If you need to clarify something, ask in plain prose in your normal response instead of using the multiple-choice tool."
+    "permissionDecisionReason": "AskUserQuestion is disabled on this machine (personal preference). The text you already wrote above this tool call is visible to the user — do NOT repeat your analysis, diagnosis, or context. Just take the question and options from this blocked call and render them as a short numbered list (one line each), then stop and wait for the answer. No preamble, no restating what the user has already seen."
   }
 }
 JSON
