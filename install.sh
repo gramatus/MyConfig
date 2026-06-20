@@ -9,6 +9,13 @@ export NO_COLOR=1
 export FORCE_COLOR=0
 export DEBIAN_FRONTEND=noninteractive
 
+# Refresh apt lists up front: the base image ships with them pruned, so the
+# first apt-get install (zsh, fd-find, ...) can otherwise fail with "Unable to
+# locate package" depending on container state. One update here covers every
+# foreground apt install below.
+echo "############### Refreshing apt package lists ###############"
+sudo apt-get update -qq
+
 echo "############### Installing zsh and oh-my-zsh if not present ###############"
 sudo apt-get install -y -qq zsh 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
@@ -92,7 +99,6 @@ echo "############### Installing fd-find (for telescope) ###############"
 sudo apt-get install -y -qq fd-find 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing xclip ###############"
-sudo apt-get update -qq
 sudo apt-get install -y -qq xclip 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing zsh autosuggestions  ###############"
