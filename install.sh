@@ -100,21 +100,34 @@ git clone --quiet https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:
 echo "############### Installing theme (in case of running outside devcontainers) ###############"
 wget -q https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
-echo "############### Installing TMUX (and dependencies) ###############"
-sudo apt-get install -y -qq libevent-dev ncurses-dev build-essential bison pkg-config 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
-TMUX_VERSION=$(curl -fsSL https://api.github.com/repos/tmux/tmux/releases/latest | jq -r .tag_name)
-TMUX_VERSION="${TMUX_VERSION:-3.6a}"  # fallback if API fails
-TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
-if curl -fsSLO "$TMUX_URL"; then
-    tar -zxf tmux-${TMUX_VERSION}.tar.gz
-    cd tmux-${TMUX_VERSION}/
-    ./configure --prefix=/usr > /dev/null 2>&1
-    make -s > /dev/null 2>&1 && sudo make -s install > /dev/null 2>&1
-    cd ..
-    rm -rf tmux-${TMUX_VERSION} tmux-${TMUX_VERSION}.tar.gz
-else
-    echo "WARNING: Failed to download TMUX source"
-fi
+echo "############### Installing TMUX in background (compile from source) ###############"
+# tmux 3.6a isn't packaged for bookworm, so we build it from source — but that's
+# ~35s (about half of install.sh) and tmux isn't needed for the codespace to be
+# usable. Detach it with setsid so it lands in its own session and survives
+# install.sh exiting; it compiles while the rest of this script (and the editor)
+# carries on. Progress / errors: tail -f /tmp/dotfiles-tmux.log
+setsid bash -c '
+    export DEBIAN_FRONTEND=noninteractive
+    # Lock::Timeout=-1: wait for the foreground gh apt run instead of erroring on
+    # the dpkg lock (this block now overlaps the rest of install.sh).
+    sudo apt-get install -y -qq -o DPkg::Lock::Timeout=-1 libevent-dev ncurses-dev build-essential bison pkg-config
+    TMUX_VERSION=$(curl -fsSL https://api.github.com/repos/tmux/tmux/releases/latest | jq -r .tag_name)
+    TMUX_VERSION="${TMUX_VERSION:-3.6a}"   # fallback if the API call fails
+    workdir=$(mktemp -d)                   # build off the repo tree so nothing is left in git status
+    cd "$workdir"
+    if curl -fsSLO "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"; then
+        tar -zxf "tmux-${TMUX_VERSION}.tar.gz"
+        cd "tmux-${TMUX_VERSION}/"
+        ./configure --prefix=/usr > /dev/null 2>&1
+        make -s > /dev/null 2>&1 && sudo make -s install > /dev/null 2>&1
+        echo "Installed $(tmux -V)"
+    else
+        echo "WARNING: Failed to download TMUX source"
+    fi
+    rm -rf "$workdir"
+' < /dev/null > /tmp/dotfiles-tmux.log 2>&1 &
+disown 2>/dev/null || true
+echo "  -> tmux is compiling in the background (log: /tmp/dotfiles-tmux.log)"
 
 # echo "############### Installing Neovim nightly build as DVIM ###############"
 # curl -Lo dvim.appimage https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage
