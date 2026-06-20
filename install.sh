@@ -38,6 +38,20 @@ ln -sr .zshrc ~/.zshrc
 ln -sr .tmux.conf ~/.tmux.conf
 ln -sr .bash_profile ~/.bash_profile
 
+echo "############### Seeding personal branchlist.md (if missing) ###############"
+# branchlist.md is personal scratch (gitignored) consumed by
+# scripts/generate-branchcommands.sh. Seed a basic version for the codespace's
+# checked-out repo so it exists before first use. The script self-seeds in any
+# repo, so we just invoke it here — it writes the template and exits when the
+# file is absent, and is a no-op for us otherwise. ~/scripts was linked above.
+if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    SEED_REPO="/workspaces/$(basename "$GITHUB_REPOSITORY")"
+    SEED_FILE="$SEED_REPO/.agent-context/active-work-context/branchlist.md"
+    if [ -d "$SEED_REPO/.git" ] && [ ! -f "$SEED_FILE" ]; then
+        ( cd "$SEED_REPO" && bash ~/scripts/generate-branchcommands.sh ) || true
+    fi
+fi
+
 # Codespaces only: $HOME is reset on every container *rebuild* (only
 # /workspaces survives a rebuild — stop/start keeps everything), so
 # ~/.claude (sessions, memory, todos, login) and ~/.claude.json vanish.
