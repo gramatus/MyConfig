@@ -26,17 +26,21 @@ fi
 sudo chsh -s /bin/zsh
 
 echo "############### Symlinking files and folders to HOME ###############"
-ln -sr scripts ~/scripts
+# -srfn so reruns overwrite cleanly: -f replaces an existing file/link, and -n
+# (no-dereference) replaces a symlink-to-directory *in place* rather than
+# creating the new link inside it (which on a second run would nest, e.g.
+# ~/scripts/scripts or ~/.config/nvim/nvim.kickstart). -f also subsumes the
+# old `rm ~/.zshrc` for the real .zshrc oh-my-zsh writes on first install.
+ln -srfn scripts ~/scripts
 if [ ! -d "$HOME/.config" ]; then
     mkdir "$HOME/.config"
 fi
-ln -sr .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in .config
-ln -sr docs/KEYMAPS.md ~/nvim-keymaps.md
-ln -sr docs/motions.md ~/nvim-motions.md
-rm ~/.zshrc
-ln -sr .zshrc ~/.zshrc
-ln -sr .tmux.conf ~/.tmux.conf
-ln -sr .bash_profile ~/.bash_profile
+ln -srfn .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in .config
+ln -srfn docs/KEYMAPS.md ~/nvim-keymaps.md
+ln -srfn docs/motions.md ~/nvim-motions.md
+ln -srfn .zshrc ~/.zshrc
+ln -srfn .tmux.conf ~/.tmux.conf
+ln -srfn .bash_profile ~/.bash_profile
 
 echo "############### Seeding personal branchlist.md (if missing) ###############"
 # branchlist.md is personal scratch (gitignored) consumed by
@@ -98,9 +102,11 @@ NVIM_VERSION="latest"
 NVIM_URL="https://github.com/neovim/neovim/releases/${NVIM_VERSION}/download//nvim-linux-x86_64.appimage"
 if curl -fsSLO "$NVIM_URL"; then
     chmod u+x nvim-linux-x86_64.appimage
+    rm -rf squashfs-root                        # drop any stale extract dir before re-extracting
     ./nvim-linux-x86_64.appimage --appimage-extract > /dev/null
+    sudo rm -rf /squashfs-root                  # else `mv` nests into /squashfs-root/squashfs-root on rerun
     sudo mv squashfs-root /
-    sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
+    sudo ln -sf /squashfs-root/AppRun /usr/bin/nvim
     rm nvim-linux-x86_64.appimage
 else
     exit 1
@@ -116,7 +122,10 @@ echo "############### Installing xclip ###############"
 sudo apt-get install -y -qq xclip 2>&1 | grep -Ev "^(debconf:|dpkg-preconfigure:|Selecting|Preparing|Unpacking|Setting|Processing|\(Reading database)" || true
 
 echo "############### Installing zsh autosuggestions  ###############"
-git clone --quiet https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+ZSH_AUTOSUGGEST_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
+if [ ! -d "$ZSH_AUTOSUGGEST_DIR" ]; then
+    git clone --quiet https://github.com/zsh-users/zsh-autosuggestions "$ZSH_AUTOSUGGEST_DIR"
+fi
 echo "############### Installing theme (in case of running outside devcontainers) ###############"
 wget -q https://raw.githubusercontent.com/devcontainers/features/main/src/common-utils/scripts/devcontainers.zsh-theme -O ~/.oh-my-zsh/custom/themes/devcontainers.zsh-theme
 
