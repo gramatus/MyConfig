@@ -1,6 +1,6 @@
 {
   "theme": "auto",
-  "remoteControlAtStartup": true,
+  "remoteControlAtStartup": false,
   "autoUpdatesChannel": "stable",
   "hooks": {
     "PreToolUse": [
