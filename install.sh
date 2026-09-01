@@ -154,7 +154,7 @@ echo "############### Fixing copilot login in codespaces ###############" # (see
 
 if ! which node > /dev/null; then
     echo "############### Installing node ###############"
-    NODE_MAJOR=20
+    NODE_MAJOR=24
     curl -fsSL https://deb.nodesource.com/setup_$NODE_MAJOR.x | sudo bash - > /dev/null
     sudo apt-get install -y -qq nodejs
 fi
