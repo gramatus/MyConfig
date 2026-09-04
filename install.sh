@@ -92,6 +92,7 @@ echo "############### Symlinking reusable Claude Code content ###############"
 # untouched.
 mkdir -p ~/.claude/hooks
 ln -srf .claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
+ln -srf .claude/hooks/pause-skill-reload-on-rebase.sh ~/.claude/hooks/pause-skill-reload-on-rebase.sh
 ln -srf .claude/settings.json ~/.claude/settings.json
 ln -srf .claude/CLAUDE.md ~/.claude/CLAUDE.md
 

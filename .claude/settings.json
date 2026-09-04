@@ -3,6 +3,17 @@
   "remoteControlAtStartup": false,
   "autoUpdatesChannel": "stable",
   "hooks": {
+    "ConfigChange": [
+      {
+        "matcher": "skills",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/pause-skill-reload-on-rebase.sh\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
