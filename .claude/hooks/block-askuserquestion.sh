@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# User-level PreToolUse(AskUserQuestion) block — personal preference,
+# User-level PreToolUse block on question dialogs — personal preference,
 # applies to every project on every machine these dotfiles install to.
 #
 # Self-contained on purpose: user-level hooks run in any repo, so this
@@ -14,8 +14,10 @@
 # A matcher is an optimisation; it is never a guarantee. The body therefore
 # checks tool_name itself and stands down when the call is something else.
 #
-# tool_name is spelled differently per harness (Claude: tool_name, Copilot
-# and Cursor camelCase variants also appear), so both spellings are matched.
+# The tool has a different NAME per harness, not merely a different key
+# spelling: Claude calls it AskUserQuestion, Copilot vscode_askQuestions
+# (measured 2026-09-05 in GitHub Copilot Chat Hooks.log). Both key
+# spellings are matched as well, the payload shape being undocumented.
 # Substring matching on raw JSON keeps this dependency-free — no jq, no node.
 #
 # Uses the JSON permissionDecision form (exit 0): permissionDecisionReason
@@ -29,7 +31,9 @@ payload=$(cat)
 
 case "$payload" in
   *'"tool_name":"AskUserQuestion"'* | *'"tool_name": "AskUserQuestion"'* | \
-  *'"toolName":"AskUserQuestion"'*  | *'"toolName": "AskUserQuestion"'*) ;;
+  *'"toolName":"AskUserQuestion"'*  | *'"toolName": "AskUserQuestion"'* | \
+  *'"tool_name":"vscode_askQuestions"'* | *'"tool_name": "vscode_askQuestions"'* | \
+  *'"toolName":"vscode_askQuestions"'*  | *'"toolName": "vscode_askQuestions"'*) ;;
   *)
     # Not our tool, or a payload shape we do not recognise. Stand down
     # rather than guess: a false deny here disables the agent entirely,
@@ -43,7 +47,7 @@ cat <<'JSON'
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "AskUserQuestion is disabled on this machine (personal preference). The text you already wrote above this tool call is visible to the user — do NOT repeat your analysis, diagnosis, or context. Just take the question and options from this blocked call and render them as a short numbered list (one line each), then stop and wait for the answer. No preamble, no restating what the user has already seen."
+    "permissionDecisionReason": "Question dialogs are disabled on this machine (personal preference) — ask in prose instead, and prefer doing that up front rather than reaching for the tool. If nobody can answer, because you are a headless or scheduled run, do not stop: say which option you are assuming and carry on, since a question handed back as a result is one nobody reads. Otherwise: the text you already wrote above this tool call is visible to the user — do NOT repeat your analysis, diagnosis, or context. Just take the question and options from this blocked call and render them as a short numbered list (one line each), then stop and wait for the answer. No preamble, no restating what the user has already seen."
   }
 }
 JSON
