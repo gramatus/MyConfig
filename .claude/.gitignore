@@ -1,0 +1,33 @@
+# Shared content, COPIED into each consuming repo by the harness — git will not read an
+# ignore file through a symlink. Edit it in the harness, not in a consuming repo: a local
+# edit is overwritten on the next run, and comments here are not rescued.
+#
+# READ scripts/README.md IN THE HARNESS -> "The two copied files" BEFORE DELETING A LINE.
+# Some entries below look redundant and are not, and `.claude/settings.local.json` is
+# deliberately absent rather than overlooked. Patterns a repo adds for itself go below the
+# marker the refresh writes at the end.
+
+# A safety net for the old layout, not duplication — read the README.
+active-work-context/*
+sessions/
+*-status.log
+*hook-payloads/
+
+logging-config.json
+
+agent-status.log
+agent-state*.json
+agent-state.json.lock
+responses/
+
+# These land inside the harness checkout, where one untracked file freezes updates for
+# every repo on the machine. Read the README before dropping either.
+hooks/log.jsonl
+hooks/state/
+
+# Resolves to the CONSUMER's .claude/local/, not this checkout — read the README.
+local/
+
+input/*
+!input/README.md
+scheduled_tasks.lock

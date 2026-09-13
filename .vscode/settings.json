@@ -1,0 +1,178 @@
+{
+  // ─── managed by the agent harness — do not edit below ───
+  // ─── start of agent-harness managed scalar entries ───
+  // Edits here are replaced on the next run — change managed/vscode-settings.jsonc in the harness instead.
+  "chat.agent.maxRequests": 500,
+  "github.copilot.chat.agentDebugLog.fileLogging.enabled": true,
+  "chat.useClaudeHooks": true,
+  // ─── end of agent-harness managed scalar entries ───
+  "chat.instructionsFilesLocations": {
+    // ─── managed by the agent harness — do not edit below ───
+    // Edits here are replaced on the next run — change managed/vscode-settings.jsonc in the harness
+    // instead. Entries below the repo-specific marker are yours and are preserved.
+
+    ".github/instructions": true,
+    ".alz-ai/.github/instructions": true
+    // ─── end of agent-harness managed entries ───
+  },
+  "search.exclude": {
+    // ─── managed by the agent harness — do not edit below ───
+    // Edits here are replaced on the next run — change managed/vscode-settings.jsonc in the harness
+    // instead. Entries below the repo-specific marker are yours and are preserved.
+
+    "**/.agent-context/.tmp": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.env": true,
+    "**/.env.*": true
+    // ─── end of agent-harness managed entries ───
+  },
+  "chat.tools.terminal.autoApprove": {
+    // ─── managed by the agent harness — do not edit below ───
+    // Edits here are replaced on the next run — change managed/vscode-settings.jsonc in the harness
+    // instead. Entries below the repo-specific marker are yours and are preserved.
+
+    "git add": false,
+    "git commit": false,
+    "git stash": false,
+    "/^git merge(\\s|$)/": false,
+    // Read managed/README.md before deleting this line.
+    "git mergetool": false,
+    "git rebase": false,
+    "sudo": false,
+    "chmod": false,
+    "chown": false,
+    "ssh": false,
+    "scp": false,
+    "nc": false,
+    "ncat": false,
+    "netcat": false,
+    "xargs": false,
+    "for": false,
+    "eval": false,
+    "git -C": false,
+
+    "git checkout": false,
+    "git pull": false,
+    "git push": false,
+    "git reset": false,
+    "git clean": false,
+    "rm": false,
+    "cp": false,
+    "mv": false,
+    "curl": false,
+    "wget": false,
+
+    "npx": false,
+    "yarn workspaces": false,
+    "yarn workspace": false,
+
+    "git branch": false,
+    "git fetch": false,
+    "git reflog": false,
+
+    "git difftool": false,
+
+    "git status": true,
+    "/^git diff(\\s|$)/": true,
+    "git log": true,
+    "git blame": true,
+    "git ls-tree": true,
+    "git show": true,
+    "git cat-file": true,
+    "git check-ignore": true,
+    "git rev-parse": true,
+    "git merge-base": true,
+    "git ls-files": true,
+    "git for-each-ref": true,
+    "git remote get-url": true,
+    "git remote show": true,
+    "git tag --list": true,
+    "git worktree add": true,
+    "git worktree list": true,
+    "git worktree remove": true,
+    "git worktree prune": true,
+    "gh repo view": true,
+
+    "npm run": true,
+    "npm test": true,
+    "npm start": true,
+    "npm list": true,
+    "npm ls": true,
+    "npm outdated": true,
+    "npm view": true,
+    "npm info": true,
+    "npm --version": true,
+    "npm -v": true,
+    "yarn run": true,
+    "yarn list": true,
+    "yarn info": true,
+    "yarn why": true,
+    "yarn --version": true,
+    "yarn -v": true,
+
+    "/^node(\\s|$)/": true,
+    "sed": true,
+    "rg": true,
+    "git grep": true,
+    "perl": true,
+    "awk": true,
+    "find": true,
+    "actionlint": true,
+    "docker": true,
+    "docker-compose": true,
+
+    "tsc": true,
+    "jest": true,
+    "vitest": true,
+    "eslint": true,
+    "prettier": true,
+    "turbo": true,
+    "dotnet build": true,
+    "dotnet restore": true,
+    "dotnet test": true,
+    "terraform fmt": true,
+    "terraform validate": true,
+    "terraform version": true,
+
+    // Read managed/README.md before deleting this line — omission would not retract it.
+    "terraform init": false,
+
+    "terraform apply": false,
+    "terraform destroy": false,
+    "terraform import": false,
+    "terraform state": false,
+
+    "grep": true,
+    "cat": true,
+    "mkdir": true,
+    "touch": true,
+    "jq": true,
+    "diff": true,
+    "wc": true,
+    "head": true,
+    "sort": true,
+    "uniq": true,
+    "/^tail(\\s|$)/": true,
+
+    "which": true,
+    "command -v": true,
+    "/^pwd(\\s|$)/": true,
+    "echo": true,
+    "printf": true,
+    "/^date(\\s|$)/": true,
+    "ls": true,
+    "readlink": true,
+    "/^test(\\s|$)/": true,
+    "shellcheck": true,
+    "/^bash -n(\\s|$)/": true,
+    "python3 --version": true,
+    "pwsh --version": true,
+    "bash --version": true,
+
+    // Read managed/README.md before deleting this line — omission would not retract it.
+    "env": false
+    // ─── end of agent-harness managed entries ───
+  }
+
+}

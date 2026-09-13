@@ -1,0 +1,32 @@
+# >>> agent-harness managed >>>
+# Managed by <harness>/scripts/link-harness.mjs — edit there, not below.
+# Mirrors the link set: shared content is formatted in the harness workspace,
+# where its own per-directory .prettierrc.yml applies, never from a consumer.
+/.agent-harness/
+/.alz-ai/
+
+# Every linked path, because prettier follows symlinks but resolves config from
+# the path given — the harness's own .prettierrc.yml is bypassed through a link.
+agent-common
+.github/copilot-instructions.md
+.github/agent-common
+.github/agents
+.github/prompts
+.github/instructions/alz-ai.instructions.md
+.github/instructions/terraform-evaluation.instructions.md
+.claude/settings.json
+.claude/agents
+.claude/commands
+.claude/hooks
+.claude/rules
+.cursor/skills
+.cursor/rules
+
+# Guard files — real files, but their wording is owned and refreshed by the
+# harness, so a consumer-side reformat would only start a rewrite war.
+CLAUDE.md
+AGENTS.md
+
+# Agent-generated output.
+.agent-context
+# <<< agent-harness managed <<<

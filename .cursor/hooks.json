@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "node \".claude/hooks/dist/hooks.mjs\""
+      }
+    ]
+  }
+
+}

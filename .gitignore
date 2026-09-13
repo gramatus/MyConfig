@@ -8,3 +8,14 @@ scripts/scripts
 squashfs-root/
 lazy-lock.json
 
+# Stuff from the agent harness that don't belong here
+.github/instructions/alz-ai.instructions.md
+
+# >>> agent-harness managed >>>
+# Shared content checked out into this repo — the agent harness and the guidance
+# repositories it fetches. Cloned and kept current by the devcontainer's postStart;
+# never committed here.
+# Managed by <harness>/scripts/link-harness.mjs — edit there, not below.
+/.agent-harness/
+/.alz-ai/
+# <<< agent-harness managed <<<
