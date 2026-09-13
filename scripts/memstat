@@ -1,0 +1,9 @@
+#!/bin/sh
+# One line of memory and swap headroom. Kept as awk so it stays instant on a machine
+# that is already thrashing — which is when you reach for it.
+#
+# `claude-ps` prints this same line as part of its report and computes it separately.
+# If you change the wording here, change it there too.
+awk '/^MemTotal:/{mt=$2} /^MemAvailable:/{ma=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2}
+END{printf "mem avail: %5d of %5d MiB (%5.2f%%), swap free: %4d of %4d MiB (%5.2f%%)\n",
+    ma/1024, mt/1024, ma*100/mt, sf/1024, st/1024, (st?sf*100/st:0)}' /proc/meminfo

@@ -1,0 +1,44 @@
+// Editor diagnostics for the .mts scripts in this folder.
+//
+// Without this, VS Code falls back to an inferred project with no @types/node, so every
+// `node:` import is "cannot find module" and `process` / `Buffer` are undefined names —
+// hundreds of errors on a script that runs fine. Nothing compiles these files: `noEmit`
+// is set and node strips the types at run time. This exists only so the editor is quiet
+// and honest.
+//
+// It borrows the toolchain rather than adding one, the same way
+// .agent-harness/scripts/tsconfig.json does. This repository has no package.json and no
+// node_modules of its own, and typescript + @types/node are already sitting in the agent
+// harness's hook tooling, reached here through the .claude/hooks symlink. The cost is a
+// dependency on the harness being checked out — if `.agent-harness/` is missing, these
+// paths dangle and the node types go unresolved again. The devcontainer's postStart
+// clones it on every start, and CLAUDE.md already treats its absence as a stop condition.
+//
+// `include` is deliberately non-recursive: scripts/ holds a `scripts -> .` self-symlink
+// (gitignored, line 6 of .gitignore), and a `**/*` glob would descend it forever.
+{
+  "compilerOptions": {
+    "noEmit": true,
+
+    // es2023 target/lib to match the harness config and Node 22, which is the floor for
+    // running these at all.
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    // These scripts are run with bare `node`, which strips types rather than compiling
+    // them: enum, namespace and parameter properties are refused outright, and an
+    // unmarked type import survives into the emitted module and fails at run time.
+    // Without this pair the checker accepts all four and only running the script finds
+    // out. Same reasoning as .agent-harness/scripts/tsconfig.json.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+
+    "types": ["node"],
+    "typeRoots": ["../.claude/hooks/node_modules/@types"]
+  },
+  "include": ["*.mts", "*.mjs"]
+}
