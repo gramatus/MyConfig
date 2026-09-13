@@ -67,6 +67,12 @@ cd MyConfig/
 ./install.sh
 ```
 
+# home
+
+Files that `install.sh` symlinks into `$HOME`, laid out under the path they get installed to — `home/.claude/settings.json` becomes `~/.claude/settings.json`, and so on.
+
+This exists to keep user-level config out of `.claude/` at the repo root. A shared agent harness takes that directory over: it replaces `settings.json`, `hooks/`, `agents/`, `commands/` and `rules/` with symlinks into its own gitignored checkout. Anything personal left there is either overwritten or blocks the link. Put user-level Claude config in `home/.claude/`, and let `.claude/` belong entirely to whatever harness the repo uses.
+
 # primeconfig
 
 This directory contains a Neovim configuration based on [ThePrimeagen's init.lua](https://github.com/ThePrimeagen/init.lua), kept here as a reference and starting point.

@@ -8,6 +8,3 @@ scripts/scripts
 squashfs-root/
 lazy-lock.json
 
-# Claude temporary input
-.claude/input/
-

@@ -90,11 +90,20 @@ echo "############### Symlinking reusable Claude Code content ###############"
 # win — same as the .zshrc handling above. Only these paths are
 # linked; the rest of ~/.claude (credentials, history, sessions) is left
 # untouched.
+#
+# Source is `home/.claude/`, NOT this repo's own `.claude/`. The two are
+# different things and used to be the same directory, which broke as soon as
+# a shared agent harness was wired in: that harness owns `<repo>/.claude/` and
+# replaces settings.json, hooks/, agents/, commands/ and rules/ with symlinks
+# into its own checkout. Anything of ours left in there was either clobbered
+# or blocked the link. `home/` mirrors the destination path and nothing else
+# manages it, so the user-level config and the project-level config can no
+# longer collide.
 mkdir -p ~/.claude/hooks
-ln -srf .claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
-ln -srf .claude/hooks/pause-skill-reload-on-rebase.sh ~/.claude/hooks/pause-skill-reload-on-rebase.sh
-ln -srf .claude/settings.json ~/.claude/settings.json
-ln -srf .claude/CLAUDE.md ~/.claude/CLAUDE.md
+ln -srf home/.claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
+ln -srf home/.claude/hooks/pause-skill-reload-on-rebase.sh ~/.claude/hooks/pause-skill-reload-on-rebase.sh
+ln -srf home/.claude/settings.json ~/.claude/settings.json
+ln -srf home/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 echo "############### Installing Neovim ###############"
 NVIM_VERSION="latest"
