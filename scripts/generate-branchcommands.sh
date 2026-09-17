@@ -53,7 +53,26 @@ Do it on this branch (it contains all the changes from the reviewed branch). I.e
 ```shell
 git log --oneline --decorate --simplify-by-decoration main..HEAD
 git for-each-ref --merged HEAD --no-merged main --format='%(refname:short)' refs/heads/ --sort=-committerdate
+PAGER=cat git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse
 ```
+
+## Full rebase recover
+
+```shell
+for b in $(git for-each-ref --format='%(refname:short)' refs/heads); do
+  n=$(git reflog show "$b" --format='%gs' \
+      | grep -n -m1 -E 'rewritten during rebase|^rebase \(finish\)' \
+      | cut -d: -f1)
+  [ -n "$n" ] || continue
+  #echo "$b: $(git rev-parse --short "$b") -> $(git rev-parse --short "$b@{$n}")"
+  echo git update-ref "refs/heads/$b" "$b@{$n}"     # drop the echo to apply
+done
+```
+
+## Get write repos
+
+gh repo list helse-sorost --json name,viewerPermission -L 1000 --jq '.[] | select(.viewerPermission == "WRITE" or .viewerPermission == "MAINTAIN" or .viewerPermission == "ADMIN") | .name'
+
 EOF
   echo "Seeded a basic $INPUT — edit it (one branch per line, blank line to end) and re-run." >&2
   exit 0
@@ -102,7 +121,7 @@ branch_name() { echo "${1%% *}"; }
   for ((i = 1; i < ${#lines[@]}; i++)); do
     yyy="$(branch_name "${lines[i-1]}")"
     xxx="$(branch_name "${lines[i]}")"
-    echo -e "/pr-summary\ndo this for the ${xxx} branch with the ${yyy} branch as the base."
+    echo -e "/pr-summary-simple\ndo this for the ${xxx} branch with the ${yyy} branch as the base."
     echo ""
   done
 
