@@ -185,19 +185,15 @@ echo "############### TODO: Download public signing key ###############"
 
 if which code > /dev/null 2>&1; then
   echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
+    code --install-extension "anthropic.claude-code"
+    code --install-extension "asvetliakov.vscode-neovim"
     code --install-extension "esbenp.prettier-vscode"
     code --install-extension "redhat.vscode-xml"
     code --install-extension "redhat.vscode-yaml"
-    code --install-extension "donjayamanne.githistory"
-    code --install-extension "github.copilot-chat"
-    code --install-extension "ckolkman.vscode-postgres"
-    code --install-extension "usernamehw.errorlens"
-    code --install-extension "asvetliakov.vscode-neovim"
     code --install-extension "heaths.vscode-guid"
     code --install-extension "dbaeumer.vscode-eslint"
-    code --install-extension "ms-vsliveshare.vsliveshare"
     code --install-extension "eamodio.gitlens"
-    code --install-extension "anthropic.claude-code"
+    code --install-extension "bierner.markdown-preview-github-styles"
 fi
 
 # NVM handles global packages automatically. For non-NVM environments, set a user-local prefix to avoid needing sudo.
