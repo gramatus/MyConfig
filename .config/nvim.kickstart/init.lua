@@ -1,7 +1,7 @@
 -- To enable from MyConfig:
 -- cd ~/.dotfiles/MyConfig
--- rm ~/.config/nvim
--- ln -sr .config/nvim.kickstart ~/.config/nvim
+-- ln -srfn .config/nvim.kickstart ~/.config/nvim
+-- -fn replaces the existing link in place; without it a rerun nests inside this folder.
 
 --[[
 

@@ -3,8 +3,6 @@
 tmux-*/
 *.gz
 packer_compiled.lua
-scripts/scripts
-.config/nvim/nvim
 squashfs-root/
 lazy-lock.json
 
