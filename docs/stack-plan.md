@@ -125,7 +125,9 @@ That is `restore` rather than `git checkout <sha> .`, because `checkout` only wr
 - `<` — the commit was dropped.
 - `>` — the commit is new.
 
-The summary line starts with `✓` when every patch is unchanged, `!` when some changed and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 dropped · 0 added`, and each `!` entry has been read and understood.
+The summary line starts with `✓` when every patch is unchanged, `!` when some changed and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 dropped · 0 added`, and each `!` entry has been read and understood. In a terminal the entries keep git's own range-diff colours.
+
+Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 
 ## Where things live
 

@@ -13,10 +13,12 @@ const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MOVED_MARKER = '[moved]';
 
 // Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
+const colourOn = (stream: NodeJS.WriteStream) => !process.env.NO_COLOR && stream.isTTY === true;
 const style =
   (code: string, stream: NodeJS.WriteStream = process.stdout) =>
   (text: string) =>
-    !process.env.NO_COLOR && stream.isTTY ? `\x1b[${code}m${text}\x1b[0m` : text;
+    colourOn(stream) ? `\x1b[${code}m${text}\x1b[0m` : text;
+const stripColour = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const bold = style('1');
 const cyan = style('36');
 const yellow = style('33');
@@ -291,13 +293,19 @@ const verifyRebase = () => {
     console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
   } else good(`tree matches the pre-rebase tip ${short}`);
 
+  const output = git(
+    'range-diff',
+    colourOn(process.stdout) ? '--color=always' : '--no-color',
+    `${base}..${recorded}`,
+    `${base}..${wip}`,
+  );
   // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
   const header = /^\s*(?:\d+|-):\s+\S+\s+([=!<>])\s+(?:\d+|-):\s+\S+/;
   const counts: Record<string, number> = { '=': 0, '!': 0, '<': 0, '>': 0 };
   const shown: string[] = [];
   let showing = false;
-  for (const line of git('range-diff', '--no-color', `${base}..${recorded}`, `${base}..${wip}`).split('\n')) {
-    const match = header.exec(line);
+  for (const line of output.split('\n')) {
+    const match = header.exec(stripColour(line));
     if (match) {
       counts[match[1]]++;
       showing = match[1] !== '=';
