@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Tags each commit waiting on the current branch with its stack branch, as notes on refs/notes/target.
-// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway]
+// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway] [--rebase (apply only)]
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -324,6 +324,7 @@ const applyPlan = () => {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
     console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
   }
+  return targets;
 };
 
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
@@ -434,9 +435,11 @@ const rebaseBaseFor = (branches: string[], lowest: number) => {
   return below >= 0 ? branches[below] : base;
 };
 
-const rebaseStack = () => {
+const rebaseStack = (planned?: Map<string, string | undefined>) => {
   const wip = currentBranch();
   const { line, branches, pending } = readStack(wip);
+  // A dry-run apply writes no notes, so its planned targets stand in for them.
+  for (const commit of pending) if (planned?.has(commit.sha)) commit.note = planned.get(commit.sha) ?? '';
   const moves = pending.filter((commit) => commit.note !== wip && branches.includes(commit.note));
   heading(dryRun ? 'Plan (dry run)' : 'Plan');
   if (!moves.length) {
@@ -541,12 +544,15 @@ const editTodo = (todoPath: string) => {
 
 try {
   if (command === 'export') exportPlan();
-  else if (command === 'apply') applyPlan();
+  else if (command === 'apply') {
+    const planned = applyPlan();
+    if (rest.includes('--rebase')) rebaseStack(dryRun ? planned : undefined);
+  }
   else if (command === 'rebase') rebaseStack();
   else if (command === 'verify') verifyRebase();
   else if (command === '_todo') editTodo(rest[0]);
   else {
-    console.error('Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run]');
+    console.error('Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway] [--rebase (apply only)]');
     process.exit(2);
   }
 } catch (error) {

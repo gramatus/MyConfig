@@ -87,6 +87,8 @@ Commits made on top of the wip branch after the export are left untagged and lis
 
 `apply` checks the whole file before writing anything, and on any problem it writes no notes and names the offending line. Nearly every refusal comes from the wip branch having been rewritten or the stack having changed since export, and exporting again is the remedy.
 
+`apply --rebase` goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `--dry-run` and `--anyway` like the two commands do separately. A dry run writes no notes, so `apply --rebase --dry-run` previews the rebase with the file's placements in their stead: that is the way to preview an edit before any note is written.
+
 ### 4. Rebase
 
 The agents must be idle first: they all share one worktree and one HEAD, so a commit made mid-rebase lands on whatever commit the rebase has reached and is carried along from there.
