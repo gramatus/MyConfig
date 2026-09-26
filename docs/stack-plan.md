@@ -1,6 +1,6 @@
 # stack-plan: moving commits from a wip branch into the stack below it
 
-How to use `scripts/stack-plan` to decide which stacked branch each commit on a wip branch belongs to, keep that decision safe across rebases and aborts, and check the result afterwards. It is written for me returning to this after a while, knowing `git rebase -i` but not the details of this tool. The rebase itself is still run by hand, as described under "Not built yet".
+How to use `scripts/stack-plan` to decide which stacked branch each commit on a wip branch belongs to, keep that decision safe across rebases and aborts, and check the result afterwards. It is written for me returning to this after a while, knowing `git rebase -i` but not the details of this tool.
 
 ## Cheatsheet
 
@@ -8,7 +8,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | ------------------- | ------------------------------------------------------------------------------------------ |
 | `stack-plan export` | Replaces stackplan.txt. Commits with a note are put at the right place.                    |
 | `stack-plan apply`  | Adds notes to the commits about the target branch. Add `--dry-run` to see what it will do. |
-| (missing)           | Applies the rebase according to stackplan.txt                                              |
+| `stack-plan rebase` | Moves each tagged commit into its branch, then runs `verify`.                              |
 | `stack-plan verify` | Checks that the last rebase kept everything "as before", except the reordering.            |
 
 ## The problem it solves
@@ -86,17 +86,18 @@ Commits made on top of the wip branch after the export are left untagged and lis
 
 ### 4. Rebase
 
-This step is manual for now. The agents must be idle first: they all share one worktree and one HEAD, so a commit made mid-rebase lands on whatever commit the rebase has reached and is carried along from there.
+The agents must be idle first: they all share one worktree and one HEAD, so a commit made mid-rebase lands on whatever commit the rebase has reached and is carried along from there.
 
 ```shell
-git rebase -i <base>
+stack-plan rebase --dry-run
+stack-plan rebase
 ```
 
-In the todo, move each pick above the `update-ref` of the branch its note names. The `pre-rebase:` line in `stackplan.txt` is the tip `verify` compares against, and `apply` sets it to the tip it saw. Run the rebase right after `apply` with nothing committed in between, or run `apply` again first.
+The dry run lists each move and the base it would use. `rebase` reads the notes, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor: it takes each tagged pick out of git's todo and puts it back just above its branch's `update-ref` line. Then it opens the todo in the editor git would have used, with the picks already placed and marked `[moved]` after their hash. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
 
-The base has to sit below the lowest branch receiving a commit, because a branch whose tip is the base gets no `update-ref` line in the todo. Use the tip of the branch directly under the lowest receiving branch, or `origin/main` when the lowest branch of the stack receives. Everything above the base is rewritten either way, so a higher base only shortens the todo.
+The base is the branch directly under the lowest branch receiving a commit, or `--base` (`origin/main`) when the lowest branch of the stack receives. It has to sit below that branch, because a branch whose tip is the base gets no `update-ref` line in the todo.
 
-`git log --notes=target --oneline <base>..` shows the notes beside the commits while you edit.
+If the sequence editor cannot place a pick, because the commit is not in the todo or its branch has no `update-ref` line, it names the problem and exits non-zero. Git then does not start the rebase. When a pick conflicts, the rebase stops as usual: resolve it, `git rebase --continue`, then run `stack-plan verify` yourself.
 
 ### 5. Verify
 
@@ -131,6 +132,5 @@ After a clean reorder the count reads `0 dropped, 0 added`, and each `!` has bee
 
 ## Not built yet
 
-- Generating the rebase todo from the notes, and starting the rebase from the right base, so step 4 stops being manual.
 - A conflict preview before rebasing, simulating each move in memory with `git merge-tree --write-tree --merge-base`.
 - Removing notes from commits that have landed in their branch. Nothing reads them once the commit has left the wip branch, but they stay in `refs/notes/target`.

@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // Tags each commit waiting on the current branch with its stack branch, as notes on refs/notes/target.
-// Usage: stack-plan export|apply|verify [--base <ref>] [--dry-run]
+// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run]
 
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const NOTES_REF = 'refs/notes/target';
 const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of its branch ----';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
+const MOVED_MARKER = '[moved]';
 
 const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
@@ -241,12 +242,105 @@ const verifyRebase = () => {
   if (shown.length) console.log(shown.join('\n'));
 };
 
+// The branch below the lowest receiving one: a branch whose tip is the base gets no update-ref line.
+const rebaseBaseFor = (branches: string[], lowest: number) => {
+  const target = tipOf(branches[lowest]);
+  let below = lowest - 1;
+  while (below >= 0 && tipOf(branches[below]) === target) below--;
+  return below >= 0 ? branches[below] : base;
+};
+
+const rebaseStack = () => {
+  const wip = currentBranch();
+  const { branches, pending } = readStack(wip);
+  const moves = pending.filter((commit) => commit.note !== wip && branches.includes(commit.note));
+  if (!moves.length) {
+    console.log(`No tagged commits waiting on ${wip}; nothing to move`);
+    return;
+  }
+  const rebaseBase = rebaseBaseFor(branches, Math.min(...moves.map((commit) => branches.indexOf(commit.note))));
+  for (const commit of moves) console.log(`move ${commit.note.padEnd(40)} ${commit.sha.slice(0, 10)} ${commit.subject}`);
+  console.log(`base: ${rebaseBase}`);
+  if (dryRun) return;
+  if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
+
+  recordTip(tipOf(wip));
+  const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
+  const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
+  const args = ['rebase', '-i', '--update-refs', rebaseBase];
+  console.error(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`);
+  const result = spawnSync('git', args, {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      GIT_SEQUENCE_EDITOR: editor,
+      STACK_PLAN_EDITOR: reviewEditor,
+      STACK_PLAN_MOVES: JSON.stringify(Object.fromEntries(moves.map((commit) => [commit.sha, commit.note]))),
+    },
+  });
+  if (result.status !== 0) {
+    console.log('\nThe rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
+    process.exit(result.status ?? 1);
+  }
+  console.log('');
+  verifyRebase();
+};
+
+// Runs as git's sequence editor: moves each tagged pick above its branch's update-ref, then opens the user's editor.
+const editTodo = (todoPath: string) => {
+  const moves: Record<string, string> = JSON.parse(process.env.STACK_PLAN_MOVES ?? '{}');
+  const shas = Object.keys(moves);
+  const lifted = new Map<string, string[]>();
+  const kept: string[] = [];
+  const found = new Set<string>();
+  for (const line of readFileSync(todoPath, 'utf8').split('\n')) {
+    const abbrev = /^(?:pick|p)\s+([0-9a-f]+)/.exec(line)?.[1];
+    const sha = abbrev ? shas.find((candidate) => candidate.startsWith(abbrev)) : undefined;
+    if (!sha) {
+      kept.push(line);
+      continue;
+    }
+    found.add(sha);
+    // Git reads only the command and hash of a pick, so the rest of the line is free for a marker.
+    const marked = line.replace(/^(\S+\s+\S+)\s*/, `$1 ${MOVED_MARKER} `);
+    lifted.set(moves[sha], [...(lifted.get(moves[sha]) ?? []), marked]);
+  }
+
+  const out: string[] = [];
+  for (const line of kept) {
+    const branch = /^update-ref refs\/heads\/(\S+)$/.exec(line)?.[1];
+    if (branch && lifted.has(branch)) {
+      out.push(...lifted.get(branch)!);
+      lifted.delete(branch);
+    }
+    out.push(line);
+  }
+
+  const problems = [
+    ...shas.filter((sha) => !found.has(sha)).map((sha) => `${sha.slice(0, 10)} is not in the todo`),
+    ...[...lifted.keys()].map((branch) => `no update-ref line for ${branch}`),
+  ];
+  if (problems.length) {
+    console.error(`stack-plan: ${problems.join('; ')}. Rebase not started.`);
+    process.exit(1);
+  }
+  writeFileSync(todoPath, out.join('\n'));
+
+  const review = process.env.STACK_PLAN_EDITOR;
+  if (review) {
+    const result = spawnSync('sh', ['-c', `${review} "$1"`, 'sh', todoPath], { stdio: 'inherit' });
+    process.exit(result.status ?? 1);
+  }
+};
+
 try {
   if (command === 'export') exportPlan();
   else if (command === 'apply') applyPlan();
+  else if (command === 'rebase') rebaseStack();
   else if (command === 'verify') verifyRebase();
+  else if (command === '_todo') editTodo(rest[0]);
   else {
-    console.error('Usage: stack-plan export|apply|verify [--base <ref>] [--dry-run]');
+    console.error('Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run]');
     process.exit(2);
   }
 } catch (error) {
