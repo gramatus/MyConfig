@@ -36,8 +36,6 @@
     "tsc",
     "jest",
     "vitest",
-    "eslint",
-    "prettier",
     "turbo",
     "dotnet build",
     "dotnet restore",

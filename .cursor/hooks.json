@@ -1,11 +1,28 @@
 {
+  // ─── managed by the agent harness — do not edit below ───
+  // ─── start of agent-harness managed scalar entries ───
+  // Edits here are replaced on the next run — change managed/cursor-hooks.jsonc in the harness instead.
   "version": 1,
+  // ─── end of agent-harness managed scalar entries ───
   "hooks": {
-    "preToolUse": [
-      {
-        "command": "node \".claude/hooks/dist/hooks.mjs\""
-      }
-    ]
+    // ─── managed by the agent harness — do not edit below ───
+    // Edits here are replaced on the next run — change managed/cursor-hooks.jsonc in the harness
+    // instead. Entries below the repo-specific marker are yours and are preserved.
+
+    // run.mjs is the merged entry: it runs the guard AND telemetry dispatchers.
+    // hooks.mjs runs the guard alone and is PermissionRequest's entry elsewhere.
+    // failClosed is read here and nowhere else — a top-level copy is inert, measured.
+    "preToolUse": [{ "command": "node \".claude/hooks/dist/run.mjs\"", "failClosed": true }],
+    // The only event where an `ask` is enforced, and it outranks the user's own
+    // allowlist. NO failClosed here, deliberately: the bundle answers this event only to
+    // deny or ask, so no output is its ordinary "proceed" and the key would turn every
+    // shell call into a refusal. The crash the key covers is caught on preToolUse, which
+    // runs the same bundle first and does carry it.
+    "beforeShellExecution": [{ "command": "node \".claude/hooks/dist/run.mjs\"" }],
+    "sessionStart": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }],
+    "beforeSubmitPrompt": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }],
+    "stop": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }]
+    // ─── end of agent-harness managed entries ───
   }
 
 }

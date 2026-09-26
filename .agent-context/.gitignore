@@ -1,11 +1,13 @@
 # Shared content, COPIED into each consuming repo by the harness — git will not read an
-# ignore file through a symlink. Edit it in the harness, not in a consuming repo: a local
-# edit is overwritten on the next run, and comments here are not rescued.
+# ignore file through a symlink. Edit it in the harness, not in a consuming repo: the
+# harness rewrites this half of the file every run. A pattern you changed or added is not
+# lost — it moves below the marker at the end — and a comment survives only where it sits
+# directly above such a pattern.
 #
 # READ scripts/README.md IN THE HARNESS -> "The two copied files" BEFORE DELETING A LINE.
-# This is the single place that ignores everything the agent tooling writes, so several
-# shared commands assume these paths are uncommittable. Patterns a repo adds for itself go
-# below the marker the refresh writes at the end.
+# This is the single place that ignores everything the agent tooling writes into
+# .agent-context/, so several shared commands assume these paths are uncommittable.
+# Patterns a repo adds for itself go below the marker the refresh writes at the end.
 
 # Both globs are needed — read the README before dropping either.
 active-work-context/*
@@ -17,6 +19,8 @@ sessions/
 
 # Globbed, not listed — read the README before spelling these out.
 *-status.log
+# The rotated generations beside it, `claude-status.log.1` … `.3`.
+*-status.log.*
 
 hook-payloads/
 .tmp/

@@ -36,7 +36,7 @@
     "git commit": false,
     "git stash": false,
     "/^git merge(\\s|$)/": false,
-    // Read managed/README.md before deleting this line.
+    // Read managed/README.md in the harness before deleting this line.
     "git mergetool": false,
     "git rebase": false,
     "sudo": false,
@@ -112,6 +112,8 @@
     "yarn -v": true,
 
     "/^node(\\s|$)/": true,
+    // Read managed/README.md in the harness before deleting — it calls Azure DevOps as the user.
+    "node .claude/skills/ado-work-items/scripts/read.mts": false,
     "sed": true,
     "rg": true,
     "git grep": true,
@@ -125,8 +127,10 @@
     "tsc": true,
     "jest": true,
     "vitest": true,
-    "eslint": true,
-    "prettier": true,
+    // - Reached through the repository's own scripts — `npm run format`, `npm run lint`.
+    // - Read managed/README.md in the harness before deleting — omission would not retract them.
+    "eslint": false,
+    "prettier": false,
     "turbo": true,
     "dotnet build": true,
     "dotnet restore": true,
@@ -135,7 +139,7 @@
     "terraform validate": true,
     "terraform version": true,
 
-    // Read managed/README.md before deleting this line — omission would not retract it.
+    // Read managed/README.md in the harness before deleting — omission would not retract it.
     "terraform init": false,
 
     "terraform apply": false,
@@ -170,7 +174,7 @@
     "pwsh --version": true,
     "bash --version": true,
 
-    // Read managed/README.md before deleting this line — omission would not retract it.
+    // Read managed/README.md in the harness before deleting — omission would not retract it.
     "env": false
     // ─── end of agent-harness managed entries ───
   }

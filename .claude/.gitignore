@@ -1,6 +1,8 @@
 # Shared content, COPIED into each consuming repo by the harness — git will not read an
-# ignore file through a symlink. Edit it in the harness, not in a consuming repo: a local
-# edit is overwritten on the next run, and comments here are not rescued.
+# ignore file through a symlink. Edit it in the harness, not in a consuming repo: the
+# harness rewrites this half of the file every run. A pattern you changed or added is not
+# lost — it moves below the marker at the end — and a comment survives only where it sits
+# directly above such a pattern.
 #
 # READ scripts/README.md IN THE HARNESS -> "The two copied files" BEFORE DELETING A LINE.
 # Some entries below look redundant and are not, and `.claude/settings.local.json` is
@@ -11,6 +13,7 @@
 active-work-context/*
 sessions/
 *-status.log
+*-status.log.*
 *hook-payloads/
 
 logging-config.json

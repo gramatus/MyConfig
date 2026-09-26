@@ -19,8 +19,16 @@ agent-common
 .claude/commands
 .claude/hooks
 .claude/rules
+.claude/skills
 .cursor/skills
 .cursor/rules
+
+# Managed JSONC — real files whose byte layout belongs to the harness's splicer,
+# which edits one key's span and leaves the rest alone. That is how a consumer's
+# comments survive a refresh, and a reformat is what breaks it.
+.vscode/settings.json
+.cursor/permissions.json
+.cursor/hooks.json
 
 # Guard files — real files, but their wording is owned and refreshed by the
 # harness, so a consumer-side reformat would only start a rewrite war.
