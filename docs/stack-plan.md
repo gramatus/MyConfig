@@ -42,6 +42,8 @@ stack-plan export
 
 This writes `.agent-context/active-work-context/stackplan.txt`, beside `branchlist.md`. An existing file is copied to `stackplan.txt.bak` first. Success prints the path and how many commits are waiting and untagged.
 
+The header carries two SHAs with separate jobs. `exported-at:` is the wip tip at export, and `apply` uses it to tell commits added since from a rewritten branch. `pre-rebase:` is the tip before the last `stack-plan rebase`, and only `verify` reads it. Export copies `pre-rebase:` over from the old file, so exporting between a rebase and its `verify` leaves the comparison intact.
+
 Export again after any rebase of the wip branch, because the file's SHAs are then gone and `apply` refuses it. Commits that merely landed on top since the export leave the file usable, as step 3 describes. A re-export keeps only placements already applied as notes, and the edited file survives as `stackplan.txt.bak`.
 
 ### 2. Place each commit
@@ -50,7 +52,8 @@ The file is shaped like a rebase todo:
 
 ```text
 # stack-plan for gramatus/wip on origin/main, exported 2026-09-26T13:54:08.513Z
-# pre-rebase: c2db5abc775659028ed267814355ba53f1aa7047
+# exported-at: c2db5abc775659028ed267814355ba53f1aa7047
+# pre-rebase: bf0097a45ad1d2898dc1dc8ec57f9e6a1a8b16ab
 # A pick belongs to the first update-ref below it. ...
 
 pick acc88e23da docs(threat-model): record Azure DevOps token risk
@@ -80,7 +83,7 @@ stack-plan apply
 
 The dry run lists the notes it would write, grouped under their branch, and the ones it would remove under `untag`. Without `--dry-run` it writes them to `refs/notes/target`. Success ends with `✓` and the number of notes changed, or `notes already match the plan`.
 
-Commits made on top of the wip branch after the export are left untagged and listed as `left untagged, committed after export`. `apply` then rewrites the file's `pre-rebase:` line to the tip it checked, so `verify` compares against the state right before the rebase. Place such a commit in a later round, or add its `pick` line to the file before applying.
+Commits made on top of the wip branch after the export are left untagged and listed as `left untagged, committed after export`. `apply` then moves the file's `exported-at:` line to the tip it checked, which is the line it compares against next time. Place such a commit in a later round, or add its `pick` line to the file before applying.
 
 `apply` checks the whole file before writing anything, and on any problem it writes no notes and names the offending line. Nearly every refusal comes from the wip branch having been rewritten or the stack having changed since export, and exporting again is the remedy.
 
@@ -93,7 +96,7 @@ stack-plan rebase --dry-run
 stack-plan rebase
 ```
 
-The dry run lists each move and the base it would use. `rebase` reads the notes, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor: it takes each tagged pick out of git's todo and puts it back just above its branch's `update-ref` line. Then it opens the todo in the editor git would have used, with the picks already placed and marked `[moved]` after their hash. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
+The dry run lists each move and the base it would use. `rebase` reads the notes, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor: it takes each tagged pick out of git's todo and puts it back just above its branch's `update-ref` line. Then it opens the todo in the editor git would have used, with the picks already placed and marked `[moved]` after their hash. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
 
 The base is the branch directly under the lowest branch receiving a commit, or `--base` (`origin/main`) when the lowest branch of the stack receives. It has to sit below that branch, because a branch whose tip is the base gets no `update-ref` line in the todo.
 
@@ -127,6 +130,7 @@ The summary line starts with `✓` when every patch is unchanged, `!` when some 
 ## Where things live
 
 - The plan: `.agent-context/active-work-context/stackplan.txt` in the repository it was exported from, plus `stackplan.txt.bak`. It is gitignored scratch.
+- The rebase log: `stackplan-rebases.log` beside the plan, one `[yymmdd hhmm] <sha>` line per `stack-plan rebase`, newest first. Each SHA is the wip tip from before that rebase, the one to hand `git restore --source=` to go back.
 - The notes: `refs/notes/target`, shared across worktrees. Notes stay local, because the default push refspec leaves `refs/notes/*` out.
 - The script: [`scripts/stack-plan.mts`](../scripts/stack-plan.mts), with `scripts/stack-plan` linking to it.
 

@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 
 const NOTES_REF = 'refs/notes/target';
 const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of its branch ----';
+const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MOVED_MARKER = '[moved]';
 
@@ -67,18 +68,35 @@ const isAncestor = (ancestor: string, descendant: string) => {
   }
 };
 
-const recordTip = (sha: string) => {
-  const lines = readFileSync(planPath(), 'utf8').split('\n');
-  const updated = lines.map((line) => (line.startsWith(PRE_REBASE_PREFIX) ? `${PRE_REBASE_PREFIX}${sha}` : line));
-  writeFileSync(planPath(), updated.join('\n'));
+const readHeader = (prefix: string) =>
+  readFileSync(planPath(), 'utf8')
+    .split('\n')
+    .find((line) => line.startsWith(prefix))
+    ?.slice(prefix.length)
+    .trim();
+
+const requireHeader = (prefix: string, remedy: string) => {
+  const value = readHeader(prefix);
+  if (!value) throw new Error(`No "${prefix.trim()}" line in the plan; ${remedy}`);
+  return value;
 };
 
-const recordedTip = () => {
-  const header = readFileSync(planPath(), 'utf8')
-    .split('\n')
-    .find((line) => line.startsWith(PRE_REBASE_PREFIX));
-  if (!header) throw new Error(`No "${PRE_REBASE_PREFIX.trim()}" line in the plan; export again`);
-  return header.slice(PRE_REBASE_PREFIX.length).trim();
+const writeHeader = (prefix: string, sha: string) => {
+  const lines = readFileSync(planPath(), 'utf8').split('\n');
+  const index = lines.findIndex((line) => line.startsWith(prefix));
+  if (index >= 0) lines[index] = `${prefix}${sha}`;
+  else lines.splice(1, 0, `${prefix}${sha}`);
+  writeFileSync(planPath(), lines.join('\n'));
+};
+
+// Newest first, one line per rebase, so the SHA to go back to is at the top.
+const logPreRebase = (sha: string) => {
+  const path = join(dirname(planPath()), 'stackplan-rebases.log');
+  const now = new Date();
+  const two = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${two(now.getFullYear() % 100)}${two(now.getMonth() + 1)}${two(now.getDate())} ${two(now.getHours())}${two(now.getMinutes())}`;
+  const earlier = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  writeFileSync(path, `[${stamp}] ${sha}\n${earlier}`);
 };
 
 // Stack branches bottom to top, and the commits above the topmost one that still wait to move.
@@ -131,9 +149,12 @@ const exportPlan = () => {
     }
   }
 
+  // The pre-rebase tip belongs to the last rebase, not to this export, so it carries over.
+  const lastPreRebase = existsSync(planPath()) ? readHeader(PRE_REBASE_PREFIX) : undefined;
   const out = [
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
-    `${PRE_REBASE_PREFIX}${tipOf(wip)}`,
+    `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
+    ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move pick lines only, then run: stack-plan apply`,
     '',
@@ -198,7 +219,7 @@ const applyPlan = () => {
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
-  const recorded = recordedTip();
+  const recorded = requireHeader(EXPORTED_AT_PREFIX, 'export again');
   const current = tipOf(wip);
   // Commits added on top since export are fine; a rewritten wip means the file's SHAs are gone.
   const addedSinceExport = new Set<string>();
@@ -250,15 +271,15 @@ const applyPlan = () => {
     for (const commit of unplaced) console.log(commitLine(commit));
   }
   if (current !== recorded) {
-    if (!dryRun) recordTip(current);
-    console.log(`${dryRun ? 'would record' : 'recorded'} ${yellow(current.slice(0, 10))} as the pre-rebase tip`);
+    if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
+    console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
   }
 };
 
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
 const verifyRebase = () => {
   const wip = currentBranch();
-  const recorded = recordedTip();
+  const recorded = requireHeader(PRE_REBASE_PREFIX, 'stack-plan rebase records one when it starts');
   const short = yellow(recorded.slice(0, 10));
   heading('Verify');
 
@@ -313,7 +334,9 @@ const rebaseStack = () => {
   if (dryRun) return;
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
 
-  recordTip(tipOf(wip));
+  const preRebase = tipOf(wip);
+  writeHeader(PRE_REBASE_PREFIX, preRebase);
+  logPreRebase(preRebase);
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
   const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
   const args = ['rebase', '-i', '--update-refs', rebaseBase];
