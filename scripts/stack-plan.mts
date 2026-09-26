@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Tags each commit waiting on the current branch with its stack branch, as notes on refs/notes/target.
-// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run]
+// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway]
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -121,7 +121,52 @@ const readStack = (wip: string) => {
     return { sha, subject, branches: branches.filter((branch) => branch !== wip), note: note?.trim() ?? '' };
   });
   const topIndex = line.findLastIndex((commit) => commit.branches.length > 0);
-  return { branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1) };
+  return { line, branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1) };
+};
+
+// For loops of hundreds of calls, where echoing each one would bury the output.
+const gitQuiet = (...args: string[]) =>
+  execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
+
+type Simulation =
+  | { ok: true; picks: number; sameTree: boolean }
+  | { ok: false; picks: number; at: number; commit: Commit; files: string[] };
+
+// Replays the planned todo in memory: objects are written, no ref moves, and the worktree is untouched.
+const simulateRebase = (line: Commit[], branches: string[], moves: Commit[], wip: string): Simulation => {
+  const moved = new Set(moves.map((commit) => commit.sha));
+  const lowest = branches[Math.min(...moves.map((commit) => branches.indexOf(commit.note)))];
+  const start = line.findIndex((commit) => commit.branches.includes(lowest));
+  const sequence: Commit[] = [];
+  const placeMovesAfter = (commit: Commit) => {
+    for (const branch of commit.branches) sequence.push(...moves.filter((move) => move.note === branch));
+  };
+  placeMovesAfter(line[start]);
+  for (const commit of line.slice(start + 1)) {
+    if (moved.has(commit.sha)) continue;
+    sequence.push(commit);
+    placeMovesAfter(commit);
+  }
+
+  console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
+  console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
+  let state = line[start].sha;
+  for (const [index, commit] of sequence.entries()) {
+    let merged: string;
+    try {
+      merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${commit.sha}^`, state, commit.sha);
+    } catch (error) {
+      const failure = error as { status?: number; stdout?: string };
+      if (failure.status !== 1) throw error;
+      const listed = (failure.stdout ?? '').split('\n').slice(1);
+      const files = [...new Set(listed.slice(0, Math.max(0, listed.indexOf(''))))];
+      return { ok: false, picks: sequence.length, at: index, commit, files };
+    }
+    const tree = merged.split('\n')[0];
+    state = gitQuiet('commit-tree', tree, '-p', state, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
+  }
+  const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
+  return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip) };
 };
 
 // Prints commits under their branch, in stack order.
@@ -361,7 +406,7 @@ const rebaseBaseFor = (branches: string[], lowest: number) => {
 
 const rebaseStack = () => {
   const wip = currentBranch();
-  const { branches, pending } = readStack(wip);
+  const { line, branches, pending } = readStack(wip);
   const moves = pending.filter((commit) => commit.note !== wip && branches.includes(commit.note));
   heading(dryRun ? 'Plan (dry run)' : 'Plan');
   if (!moves.length) {
@@ -371,7 +416,26 @@ const rebaseStack = () => {
   const rebaseBase = rebaseBaseFor(branches, Math.min(...moves.map((commit) => branches.indexOf(commit.note))));
   printByBranch(branches, (commit) => commit.note, moves);
   console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
+
+  heading('Preview');
+  const started = Date.now();
+  const simulation = simulateRebase(line, branches, moves, wip);
+  const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
+  if (simulation.ok) {
+    good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
+    if (!simulation.sameTree) attention('the simulated result ends on a different tree than wip; verify will show where');
+  } else {
+    bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict (${took}):`);
+    console.log(commitLine(simulation.commit));
+    for (const file of simulation.files) console.log(`    ${file}`);
+    console.log('rerere may already hold a resolution for it; the preview cannot tell.');
+  }
   if (dryRun) return;
+  if (!simulation.ok && !rest.includes('--anyway')) {
+    console.log('\nNothing rewritten. Place the commit elsewhere (export, move, apply), or resolve it by hand:');
+    console.log('  stack-plan rebase --anyway');
+    process.exit(1);
+  }
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
 
   const preRebase = tipOf(wip);

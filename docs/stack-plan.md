@@ -96,7 +96,9 @@ stack-plan rebase --dry-run
 stack-plan rebase
 ```
 
-The dry run lists each move and the base it would use. `rebase` reads the notes, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor: it takes each tagged pick out of git's todo and puts it back just above its branch's `update-ref` line. Then it opens the todo in the editor git would have used, with the picks already placed and marked `[moved]` after their hash. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
+The dry run lists each move and the base it would use, then previews the rebase. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. A real `rebase` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan rebase --anyway` goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
+
+`rebase` reads the notes, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor: it takes each tagged pick out of git's todo and puts it back just above its branch's `update-ref` line. Then it opens the todo in the editor git would have used, with the picks already placed and marked `[moved]` after their hash. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
 
 The base is the branch directly under the lowest branch receiving a commit, or `--base` (`origin/main`) when the lowest branch of the stack receives. It has to sit below that branch, because a branch whose tip is the base gets no `update-ref` line in the todo.
 
@@ -138,5 +140,4 @@ Reading a printed entry: the body has two marker columns. The first compares the
 
 ## Not built yet
 
-- A conflict preview before rebasing, simulating each move in memory with `git merge-tree --write-tree --merge-base`.
 - Removing notes from commits that have landed in their branch. Nothing reads them once the commit has left the wip branch, but they stay in `refs/notes/target`.
