@@ -23,7 +23,7 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
 else
     echo "oh-my-zsh already installed, skipping"
 fi
-sudo chsh -s /bin/zsh
+sudo chsh -s /bin/zsh "$(id -un)"
 
 echo "############### Symlinking files and folders to HOME ###############"
 # -srfn so reruns overwrite cleanly: -f replaces an existing file/link, and -n
@@ -106,11 +106,13 @@ ln -srf home/.claude/settings.json ~/.claude/settings.json
 ln -srf home/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 echo "############### Installing Neovim ###############"
-NVIM_VERSION="latest"
-#NVIM_URL="https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.appimage"
-# latest has a different form for the url
-NVIM_URL="https://github.com/neovim/neovim/releases/${NVIM_VERSION}/download//nvim-linux-x86_64.appimage"
-if curl -fsSLO "$NVIM_URL"; then
+# The tag /releases/latest redirects to; empty when offline. Avoids the API's rate limit.
+NVIM_LATEST="$(curl -fsS -o /dev/null -w '%{redirect_url}' https://github.com/neovim/neovim/releases/latest || true)"
+NVIM_LATEST="${NVIM_LATEST##*/}"
+NVIM_CURRENT="$(nvim --version 2>/dev/null | head -n1 | cut -d' ' -f2)"
+if [ -n "$NVIM_CURRENT" ] && { [ -z "$NVIM_LATEST" ] || [ "$NVIM_CURRENT" = "$NVIM_LATEST" ]; }; then
+    echo "Keeping Neovim $NVIM_CURRENT (latest: ${NVIM_LATEST:-unknown})"
+elif curl -fsSLO "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.appimage"; then
     chmod u+x nvim-linux-x86_64.appimage
     rm -rf squashfs-root                        # drop any stale extract dir before re-extracting
     ./nvim-linux-x86_64.appimage --appimage-extract > /dev/null
@@ -118,6 +120,8 @@ if curl -fsSLO "$NVIM_URL"; then
     sudo mv squashfs-root /
     sudo ln -sf /squashfs-root/AppRun /usr/bin/nvim
     rm nvim-linux-x86_64.appimage
+elif [ -n "$NVIM_CURRENT" ]; then
+    echo "WARNING: Neovim download failed, keeping $NVIM_CURRENT"
 else
     exit 1
 fi
@@ -176,7 +180,14 @@ echo "############### Configuring git difftool to use VS Code ###############"
 git config --global diff.tool vscode
 git config --global difftool.vscode.cmd 'code --wait --diff $LOCAL $REMOTE'
 git config --global difftool.prompt false
+
+echo "############### Configuring git for stacked-branch rebases ###############"
 git config --global rebase.updateRefs true
+git config --global rebase.missingCommitsCheck error
+git config --global rerere.enabled true
+git config --global rerere.autoupdate true
+# Carries scripts/stack-plan's target notes onto rewritten commits.
+git config --global notes.rewriteRef refs/notes/target
 
 echo "############### TODO: Download public signing key ###############"
 # TODO: figure out auth in this scenario
@@ -232,22 +243,28 @@ setsid bash -c '
       && sudo apt-get install -y -qq -o DPkg::Lock::Timeout=-1 gh
 
     echo "=== Building tmux from source ==="
-    sudo apt-get install -y -qq -o DPkg::Lock::Timeout=-1 libevent-dev ncurses-dev build-essential bison pkg-config
-    TMUX_VERSION=$(curl -fsSL https://api.github.com/repos/tmux/tmux/releases/latest | jq -r .tag_name)
-    TMUX_VERSION="${TMUX_VERSION:-3.6a}"   # fallback if the API call fails
-    workdir=$(mktemp -d)                   # build off the repo tree so nothing is left in git status
-    cd "$workdir"
-    if curl -fsSLO "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"; then
-        tar -zxf "tmux-${TMUX_VERSION}.tar.gz"
-        cd "tmux-${TMUX_VERSION}/"
-        ./configure --prefix=/usr > /dev/null 2>&1
-        make -s > /dev/null 2>&1 && sudo make -s install > /dev/null 2>&1
-        echo "Installed $(tmux -V)"
+    TMUX_VERSION=$(curl -fsS -o /dev/null -w "%{redirect_url}" https://github.com/tmux/tmux/releases/latest || true)
+    TMUX_VERSION="${TMUX_VERSION##*/}"
+    TMUX_CURRENT=$(tmux -V 2>/dev/null | cut -d" " -f2)
+    if [ -n "$TMUX_CURRENT" ] && { [ -z "$TMUX_VERSION" ] || [ "$TMUX_CURRENT" = "$TMUX_VERSION" ]; }; then
+        echo "Keeping tmux $TMUX_CURRENT (latest: ${TMUX_VERSION:-unknown})"
     else
-        echo "WARNING: Failed to download TMUX source"
+        TMUX_VERSION="${TMUX_VERSION:-3.6a}"   # fallback when the latest tag could not be read
+        sudo apt-get install -y -qq -o DPkg::Lock::Timeout=-1 libevent-dev ncurses-dev build-essential bison pkg-config
+        workdir=$(mktemp -d)                   # build off the repo tree so nothing is left in git status
+        cd "$workdir"
+        if curl -fsSLO "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"; then
+            tar -zxf "tmux-${TMUX_VERSION}.tar.gz"
+            cd "tmux-${TMUX_VERSION}/"
+            ./configure --prefix=/usr > /dev/null 2>&1
+            make -s > /dev/null 2>&1 && sudo make -s install > /dev/null 2>&1
+            echo "Installed $(tmux -V)"
+        else
+            echo "WARNING: Failed to download TMUX source"
+        fi
+        cd /
+        rm -rf "$workdir"
     fi
-    cd /
-    rm -rf "$workdir"
 
     echo "=== Syncing lazy.nvim plugins ==="
     nvim --headless "+Lazy! sync" +qa
