@@ -11,10 +11,29 @@ const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MOVED_MARKER = '[moved]';
 
+// Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
+const style =
+  (code: string, stream: NodeJS.WriteStream = process.stdout) =>
+  (text: string) =>
+    !process.env.NO_COLOR && stream.isTTY ? `\x1b[${code}m${text}\x1b[0m` : text;
+const bold = style('1');
+const cyan = style('36');
+const yellow = style('33');
+const green = style('32');
+const red = style('31');
+const dimErr = style('2', process.stderr);
+const redErr = style('31', process.stderr);
+
+const heading = (title: string) => console.log(`\n${bold(`── ${title} ${'─'.repeat(Math.max(3, 46 - title.length))}`)}`);
+const good = (text: string) => console.log(`${green('✓')} ${text}`);
+const attention = (text: string) => console.log(`${yellow('!')} ${text}`);
+const bad = (text: string) => console.log(`${red('✗')} ${text}`);
+const commitLine = (commit: { sha: string; subject: string }) => `  ${yellow(commit.sha.slice(0, 10))}  ${commit.subject}`;
+
 const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
 const git = (...args: string[]) => {
-  console.error(`$ git ${args.map(shellQuote).join(' ')}`);
+  console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
   try {
     return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
@@ -33,7 +52,8 @@ const dryRun = rest.includes('--dry-run');
 
 type Commit = { sha: string; subject: string; branches: string[]; note: string };
 
-const repoRoot = () => git('rev-parse', '--show-toplevel').trim();
+let root: string | undefined;
+const repoRoot = () => (root ??= git('rev-parse', '--show-toplevel').trim());
 const planPath = () => join(repoRoot(), '.agent-context/active-work-context/stackplan.txt');
 const currentBranch = () => git('symbolic-ref', '--short', 'HEAD').trim();
 const tipOf = (ref: string) => git('rev-parse', ref).trim();
@@ -84,6 +104,16 @@ const readStack = (wip: string) => {
   return { branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1) };
 };
 
+// Prints commits under their branch, in stack order.
+const printByBranch = (order: string[], branchOf: (commit: Commit) => string, commits: Commit[], label = cyan) => {
+  for (const branch of order) {
+    const group = commits.filter((commit) => branchOf(commit) === branch);
+    if (!group.length) continue;
+    console.log(label(branch));
+    for (const commit of group) console.log(commitLine(commit));
+  }
+};
+
 const pickLine = (commit: Commit) => `pick ${commit.sha.slice(0, 10)} ${commit.subject}`;
 
 const exportPlan = () => {
@@ -91,11 +121,12 @@ const exportPlan = () => {
   const { branches, pending } = readStack(wip);
   const sections = new Map<string, Commit[]>([...branches, wip].map((branch) => [branch, []]));
   const untagged: Commit[] = [];
+  const strayNotes: Commit[] = [];
   for (const commit of pending) {
     const section = sections.get(commit.note);
     if (section) section.push(commit);
     else {
-      if (commit.note) console.error(`note "${commit.note}" on ${commit.sha.slice(0, 10)} names no stack branch`);
+      if (commit.note) strayNotes.push(commit);
       untagged.push(commit);
     }
   }
@@ -116,7 +147,13 @@ const exportPlan = () => {
   mkdirSync(dirname(path), { recursive: true });
   if (existsSync(path)) copyFileSync(path, `${path}.bak`);
   writeFileSync(path, out.join('\n'));
-  console.log(`Wrote ${path}: ${pending.length} commits, ${untagged.length} untagged, ${branches.length} stack branches`);
+
+  heading('Export');
+  console.log(`${bold('wrote')}  ${path}`);
+  console.log(`${pending.length} waiting · ${pending.length - untagged.length} placed · ${branches.length} stack branches`);
+  if (untagged.length) attention(`${untagged.length} untagged, below the marker`);
+  else good('every waiting commit is placed');
+  for (const commit of strayNotes) attention(`note "${commit.note}" names no stack branch:\n${commitLine(commit)}`);
 };
 
 const applyPlan = () => {
@@ -165,51 +202,56 @@ const applyPlan = () => {
   const current = tipOf(wip);
   // Commits added on top since export are fine; a rewritten wip means the file's SHAs are gone.
   const addedSinceExport = new Set<string>();
-  if (recorded !== current) {
-    if (isAncestor(recorded, current)) {
-      for (const sha of git('rev-list', '--first-parent', `${recorded}..${current}`).split('\n')) {
-        if (sha) addedSinceExport.add(sha);
+  const rewritten = recorded !== current && !isAncestor(recorded, current);
+  if (rewritten) {
+    // Every SHA in the file is gone, so per-line errors would only repeat this one.
+    errors.splice(0, errors.length, `${wip} was rewritten since export (was ${recorded.slice(0, 10)}); export again`);
+  } else {
+    for (const sha of git('rev-list', '--first-parent', `${recorded}..${current}`).split('\n')) {
+      if (sha) addedSinceExport.add(sha);
+    }
+    if (updateRefs.join('\n') !== branches.join('\n')) {
+      errors.push('the update-ref lines no longer match the stack; export again');
+    }
+    for (const commit of pending) {
+      if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
+        errors.push(`${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`);
       }
-    } else errors.push(`${wip} was rewritten since export (was ${recorded.slice(0, 10)}); export again`);
-  }
-  if (updateRefs.join('\n') !== branches.join('\n')) {
-    errors.push('the update-ref lines no longer match the stack; export again');
-  }
-  for (const commit of pending) {
-    if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
-      errors.push(`${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`);
     }
   }
+
+  heading(dryRun ? 'Apply (dry run)' : 'Apply');
   if (errors.length) {
-    console.error(`No notes written.\n${errors.join('\n')}`);
+    bad('no notes written');
+    for (const error of errors) console.log(`  ${error}`);
     process.exit(1);
   }
 
-  let changed = 0;
-  for (const commit of pending) {
-    if (!listed.has(commit.sha)) continue;
-    const want = targets.get(commit.sha);
-    if ((want ?? '') === commit.note) continue;
-    changed++;
-    const label = `${commit.sha.slice(0, 10)} ${commit.subject}`;
-    if (want) {
-      console.log(`${dryRun ? 'would tag' : 'tag'} ${want.padEnd(40)} ${label}`);
-      if (!dryRun) git('notes', `--ref=${NOTES_REF}`, 'add', '-f', '-m', want, commit.sha);
-    } else {
-      console.log(`${dryRun ? 'would untag' : 'untag'} ${label}`);
-      if (!dryRun) git('notes', `--ref=${NOTES_REF}`, 'remove', commit.sha);
-    }
+  const toTag = pending.filter((commit) => listed.has(commit.sha) && (targets.get(commit.sha) ?? '') !== commit.note);
+  const tagged = toTag.filter((commit) => targets.get(commit.sha));
+  const untagged = toTag.filter((commit) => !targets.get(commit.sha));
+  printByBranch([...branches, wip], (commit) => targets.get(commit.sha) ?? '', tagged, (branch) =>
+    cyan(branch === wip ? `${branch} (stays)` : branch),
+  );
+  if (untagged.length) {
+    console.log(yellow('untag'));
+    for (const commit of untagged) console.log(commitLine(commit));
   }
-  console.log(changed ? `${changed} notes ${dryRun ? 'would change' : 'changed'}` : 'Notes already match the plan');
+  if (!dryRun) {
+    for (const commit of tagged) git('notes', `--ref=${NOTES_REF}`, 'add', '-f', '-m', targets.get(commit.sha)!, commit.sha);
+    for (const commit of untagged) git('notes', `--ref=${NOTES_REF}`, 'remove', commit.sha);
+  }
+  if (toTag.length) good(`${toTag.length} notes ${dryRun ? 'would change' : 'changed'}`);
+  else good('notes already match the plan');
 
   const unplaced = pending.filter((commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha));
   if (unplaced.length) {
-    console.log(`Left untagged, committed after export:`);
-    for (const commit of unplaced) console.log(`  ${commit.sha.slice(0, 10)} ${commit.subject}`);
+    attention('left untagged, committed after export:');
+    for (const commit of unplaced) console.log(commitLine(commit));
   }
   if (current !== recorded) {
     if (!dryRun) recordTip(current);
-    console.log(`${dryRun ? 'Would record' : 'Recorded'} ${current.slice(0, 10)} as the pre-rebase tip`);
+    console.log(`${dryRun ? 'would record' : 'recorded'} ${yellow(current.slice(0, 10))} as the pre-rebase tip`);
   }
 };
 
@@ -217,13 +259,16 @@ const applyPlan = () => {
 const verifyRebase = () => {
   const wip = currentBranch();
   const recorded = recordedTip();
-  const short = recorded.slice(0, 10);
+  const short = yellow(recorded.slice(0, 10));
+  heading('Verify');
 
   const stat = git('diff', '--stat', recorded, wip).trimEnd();
   if (stat) {
-    console.log(`Tree differs from the pre-rebase tip ${short}:\n${stat}`);
-    console.log(`To put the pre-rebase tree back as uncommitted changes:\n  git restore --source=${short} --staged --worktree :/`);
-  } else console.log(`Tree matches the pre-rebase tip ${short}.`);
+    bad(`tree differs from the pre-rebase tip ${short}`);
+    console.log(stat);
+    console.log(`To put the pre-rebase tree back as uncommitted changes:`);
+    console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
+  } else good(`tree matches the pre-rebase tip ${short}`);
 
   // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
   const header = /^\s*(?:\d+|-):\s+\S+\s+([=!<>])\s+(?:\d+|-):\s+\S+/;
@@ -238,8 +283,11 @@ const verifyRebase = () => {
     }
     if (showing) shown.push(line);
   }
-  console.log(`\nrange-diff: ${counts['=']} unchanged, ${counts['!']} changed, ${counts['<']} dropped, ${counts['>']} added`);
-  if (shown.length) console.log(shown.join('\n'));
+  const summary = `range-diff  ${counts['=']} unchanged · ${counts['!']} changed · ${counts['<']} dropped · ${counts['>']} added`;
+  if (counts['<'] || counts['>']) bad(summary);
+  else if (counts['!']) attention(`${summary}; read the changed entries below`);
+  else good(summary);
+  if (shown.length) console.log(`\n${shown.join('\n')}`);
 };
 
 // The branch below the lowest receiving one: a branch whose tip is the base gets no update-ref line.
@@ -254,13 +302,14 @@ const rebaseStack = () => {
   const wip = currentBranch();
   const { branches, pending } = readStack(wip);
   const moves = pending.filter((commit) => commit.note !== wip && branches.includes(commit.note));
+  heading(dryRun ? 'Plan (dry run)' : 'Plan');
   if (!moves.length) {
-    console.log(`No tagged commits waiting on ${wip}; nothing to move`);
+    good(`no tagged commits waiting on ${wip}; nothing to move`);
     return;
   }
   const rebaseBase = rebaseBaseFor(branches, Math.min(...moves.map((commit) => branches.indexOf(commit.note))));
-  for (const commit of moves) console.log(`move ${commit.note.padEnd(40)} ${commit.sha.slice(0, 10)} ${commit.subject}`);
-  console.log(`base: ${rebaseBase}`);
+  printByBranch(branches, (commit) => commit.note, moves);
+  console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
   if (dryRun) return;
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
 
@@ -268,7 +317,8 @@ const rebaseStack = () => {
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
   const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
   const args = ['rebase', '-i', '--update-refs', rebaseBase];
-  console.error(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`);
+  heading('Rebase');
+  console.error(dimErr(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`));
   const result = spawnSync('git', args, {
     stdio: 'inherit',
     env: {
@@ -279,10 +329,9 @@ const rebaseStack = () => {
     },
   });
   if (result.status !== 0) {
-    console.log('\nThe rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
+    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
     process.exit(result.status ?? 1);
   }
-  console.log('');
   verifyRebase();
 };
 
@@ -321,7 +370,7 @@ const editTodo = (todoPath: string) => {
     ...[...lifted.keys()].map((branch) => `no update-ref line for ${branch}`),
   ];
   if (problems.length) {
-    console.error(`stack-plan: ${problems.join('; ')}. Rebase not started.`);
+    console.error(redErr(`✗ stack-plan: ${problems.join('; ')}. Rebase not started.`));
     process.exit(1);
   }
   writeFileSync(todoPath, out.join('\n'));
@@ -344,6 +393,6 @@ try {
     process.exit(2);
   }
 } catch (error) {
-  console.error((error as Error).message);
+  console.error(redErr(`✗ ${(error as Error).message}`));
   process.exit(1);
 }

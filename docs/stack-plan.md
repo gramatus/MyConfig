@@ -32,7 +32,7 @@ Notes rather than a `Target:` trailer in the commit message, because a note sits
 
 Every step runs from inside the repository, with the wip branch checked out. `--base <ref>` changes the ref the stack sits on, and defaults to `origin/main`.
 
-Each git command the script runs is echoed to stderr as `$ git …` before it runs, so the output doubles as a record of what it did. `2>/dev/null` hides that trace and keeps only the result.
+Each git command the script runs is echoed to stderr as `$ git …` before it runs, so the output doubles as a record of what it did. `2>/dev/null` hides that trace and keeps only the result. In a terminal the trace is dimmed and the results are coloured: branches cyan, SHAs yellow, and outcomes marked green `✓`, yellow `!` or red `✗`. Setting `NO_COLOR`, or piping the output, turns colour off.
 
 ### 1. Export the plan
 
@@ -78,9 +78,9 @@ stack-plan apply --dry-run
 stack-plan apply
 ```
 
-The dry run prints each `tag` and `untag` it would make. Without `--dry-run` it writes them to `refs/notes/target`. Success ends with the number of notes changed, or `Notes already match the plan`.
+The dry run lists the notes it would write, grouped under their branch, and the ones it would remove under `untag`. Without `--dry-run` it writes them to `refs/notes/target`. Success ends with `✓` and the number of notes changed, or `notes already match the plan`.
 
-Commits made on top of the wip branch after the export are left untagged and listed as `Left untagged, committed after export`. `apply` then rewrites the file's `pre-rebase:` line to the tip it checked, so `verify` compares against the state right before the rebase. Place such a commit in a later round, or add its `pick` line to the file before applying.
+Commits made on top of the wip branch after the export are left untagged and listed as `left untagged, committed after export`. `apply` then rewrites the file's `pre-rebase:` line to the tip it checked, so `verify` compares against the state right before the rebase. Place such a commit in a later round, or add its `pick` line to the file before applying.
 
 `apply` checks the whole file before writing anything, and on any problem it writes no notes and names the offending line. Nearly every refusal comes from the wip branch having been rewritten or the stack having changed since export, and exporting again is the remedy.
 
@@ -107,7 +107,7 @@ stack-plan verify
 
 A rebase that only moves commits leaves the wip branch's final tree exactly as it was, and `verify` checks that in two ways.
 
-`git diff --stat <pre-rebase> <wip>` should be empty, and then it prints `Tree matches the pre-rebase tip`. When the tree differs, it lists the files and prints the command that puts the old tree back as uncommitted changes:
+`git diff --stat <pre-rebase> <wip>` should be empty, and then it prints `✓ tree matches the pre-rebase tip`. When the tree differs, it lists the files and prints the command that puts the old tree back as uncommitted changes:
 
 ```shell
 git restore --source=<pre-rebase> --staged --worktree :/
@@ -122,7 +122,7 @@ That is `restore` rather than `git checkout <sha> .`, because `checkout` only wr
 - `<` — the commit was dropped.
 - `>` — the commit is new.
 
-After a clean reorder the count reads `0 dropped, 0 added`, and each `!` has been read and understood.
+The summary line starts with `✓` when every patch is unchanged, `!` when some changed and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 dropped · 0 added`, and each `!` entry has been read and understood.
 
 ## Where things live
 
