@@ -379,6 +379,15 @@ const verifyRebase = () => {
     console.log(`To put the pre-rebase tree back as uncommitted changes:`);
     console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
   } else good(`tree matches the pre-rebase tip ${short}`);
+  if (stat || droppedOrAdded.length) return;
+
+  // A note on a commit no longer waiting on wip has done its job; the pre-rebase commits keep their copies.
+  const { line, pending } = readStack(wip);
+  const waiting = new Set(pending.map((commit) => commit.sha));
+  const landed = line.filter((commit) => commit.note && !waiting.has(commit.sha));
+  if (!landed.length) return;
+  if (!dryRun) git('notes', `--ref=${NOTES_REF}`, 'remove', ...landed.map((commit) => commit.sha));
+  good(`${landed.length} notes ${dryRun ? 'would be removed' : 'removed'} from commits now in their branch`);
 };
 
 type Entry = { kind: '=' | '!' | '<' | '>' | 'context'; lines: string[] };
