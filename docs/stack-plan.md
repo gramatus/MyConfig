@@ -110,7 +110,7 @@ If the sequence editor cannot place a pick, because the commit is not in the tod
 stack-plan verify
 ```
 
-A rebase that only moves commits leaves the wip branch's final tree exactly as it was, and `verify` checks that in two ways.
+A rebase that only moves commits leaves the wip branch's final tree exactly as it was, and `verify` checks that in two ways. Any range-diff entries worth reading come first, under `Range diff changes`. The verdicts come last, under `Conclusion`, so the end of the output is the answer.
 
 `git diff --stat <pre-rebase> <wip>` should be empty, and then it prints `✓ tree matches the pre-rebase tip`. When the tree differs, it lists the files and prints the command that puts the old tree back as uncommitted changes:
 

@@ -28,6 +28,7 @@ const dimErr = style('2', process.stderr);
 const redErr = style('31', process.stderr);
 
 const heading = (title: string) => console.log(`\n${bold(`── ${title} ${'─'.repeat(Math.max(3, 46 - title.length))}`)}`);
+const subheading = (title: string) => console.log(`\n${bold(`────── ${title} ${'─'.repeat(Math.max(3, 42 - title.length))}`)}`);
 const good = (text: string) => console.log(`${green('✓')} ${text}`);
 const attention = (text: string) => console.log(`${yellow('!')} ${text}`);
 const bad = (text: string) => console.log(`${red('✗')} ${text}`);
@@ -35,8 +36,10 @@ const commitLine = (commit: { sha: string; subject: string }) => `  ${yellow(com
 
 const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
+const traceGit = (args: string[]) => console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+
 const git = (...args: string[]) => {
-  console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+  traceGit(args);
   try {
     return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
@@ -330,34 +333,52 @@ const verifyRebase = () => {
   const short = yellow(recorded.slice(0, 10));
   heading('Verify');
 
-  const stat = git('diff', '--stat', recorded, wip).trimEnd();
+  // Both run before anything prints, so the details come first and the verdict ends the output.
+  const rangeArgs = ['range-diff', colourOn(process.stdout) ? '--color=always' : '--no-color', `${base}..${recorded}`, `${base}..${wip}`];
+  const statArgs = ['diff', '--stat', recorded, wip];
+  const entries = splitRangeDiff(gitQuiet(...rangeArgs));
+  const stat = gitQuiet(...statArgs).trimEnd();
+
+  const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
+  if (worthReading.length) {
+    subheading('Range diff changes');
+    console.log(worthReading.map((entry) => entry.lines.join('\n').trimEnd()).join('\n\n'));
+  }
+
+  subheading('Conclusion');
+  traceGit(rangeArgs);
+  const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added`;
+  if (count('<') || count('>')) bad(`${summary}; read the entries above`);
+  else if (count('!')) attention(`${summary}; read the changed entries above`);
+  else good(summary);
+  const contextOnly = entries.filter((entry) => entry.kind === 'context');
+  if (contextOnly.length) {
+    console.log(`\nOnly the surrounding lines moved, the change itself is the same:`);
+    for (const entry of contextOnly) console.log(entry.lines[0]);
+  }
+  const changed = entries.filter((entry) => entry.kind === '!');
+  if (changed.length) {
+    console.log(
+      `\nThe change itself differs, full entries above. With a matching tree, part of a change moved between these` +
+        `\ncommits: the end result is the same, but each commit on its own may now read differently or not build:`,
+    );
+    for (const entry of changed) console.log(entry.lines[0]);
+  }
+  const droppedOrAdded = entries.filter((entry) => entry.kind === '<' || entry.kind === '>');
+  if (droppedOrAdded.length) {
+    console.log(`\nDropped (<) or added (>), full entries above:`);
+    for (const entry of droppedOrAdded) console.log(entry.lines[0]);
+  }
+
+  console.log('');
+  traceGit(statArgs);
   if (stat) {
     bad(`tree differs from the pre-rebase tip ${short}`);
     console.log(stat);
     console.log(`To put the pre-rebase tree back as uncommitted changes:`);
     console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
   } else good(`tree matches the pre-rebase tip ${short}`);
-
-  const output = git(
-    'range-diff',
-    colourOn(process.stdout) ? '--color=always' : '--no-color',
-    `${base}..${recorded}`,
-    `${base}..${wip}`,
-  );
-  const entries = splitRangeDiff(output);
-  const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
-  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added`;
-  if (count('<') || count('>')) bad(summary);
-  else if (count('!')) attention(`${summary}; read the changed entries below`);
-  else good(summary);
-
-  const contextOnly = entries.filter((entry) => entry.kind === 'context');
-  if (contextOnly.length) {
-    console.log(`\nOnly the surrounding lines moved, the change itself is the same:`);
-    for (const entry of contextOnly) console.log(entry.lines[0]);
-  }
-  const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
-  for (const entry of worthReading) console.log(`\n${entry.lines.join('\n')}`);
 };
 
 type Entry = { kind: '=' | '!' | '<' | '>' | 'context'; lines: string[] };
