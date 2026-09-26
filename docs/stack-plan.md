@@ -121,11 +121,11 @@ That is `restore` rather than `git checkout <sha> .`, because `checkout` only wr
 `git range-diff <base>..<pre-rebase> <base>..<wip>` then pairs each old commit with its rewritten version. `verify` prints a count per marker and the full entry for everything that is not `=`:
 
 - `=` — the patch is identical. A moved commit normally shows this.
-- `!` — the patch changed, and range-diff prints the diff between the two diffs beneath it. On a moved commit that can be only its context lines shifting, but a conflict resolution shows up here too, so read it.
+- `!` — the patch changed, and range-diff prints the diff between the two diffs beneath it. `verify` splits these in two. When only the context lines around the change differ, which is normal for a moved commit, it counts the entry as `context only` and prints just its header line. When the change itself differs, as after a conflict resolution, it counts it as `changed` and prints the whole entry.
 - `<` — the commit was dropped.
 - `>` — the commit is new.
 
-The summary line starts with `✓` when every patch is unchanged, `!` when some changed and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 dropped · 0 added`, and each `!` entry has been read and understood. In a terminal the entries keep git's own range-diff colours.
+The summary line starts with `✓` when no change differs, `!` when some did and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 changed · 0 dropped · 0 added`. In a terminal the entries keep git's own range-diff colours.
 
 Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 

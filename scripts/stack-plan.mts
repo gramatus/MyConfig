@@ -299,24 +299,56 @@ const verifyRebase = () => {
     `${base}..${recorded}`,
     `${base}..${wip}`,
   );
-  // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
-  const header = /^\s*(?:\d+|-):\s+\S+\s+([=!<>])\s+(?:\d+|-):\s+\S+/;
-  const counts: Record<string, number> = { '=': 0, '!': 0, '<': 0, '>': 0 };
-  const shown: string[] = [];
-  let showing = false;
-  for (const line of output.split('\n')) {
-    const match = header.exec(stripColour(line));
-    if (match) {
-      counts[match[1]]++;
-      showing = match[1] !== '=';
-    }
-    if (showing) shown.push(line);
-  }
-  const summary = `range-diff  ${counts['=']} unchanged · ${counts['!']} changed · ${counts['<']} dropped · ${counts['>']} added`;
-  if (counts['<'] || counts['>']) bad(summary);
-  else if (counts['!']) attention(`${summary}; read the changed entries below`);
+  const entries = splitRangeDiff(output);
+  const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added`;
+  if (count('<') || count('>')) bad(summary);
+  else if (count('!')) attention(`${summary}; read the changed entries below`);
   else good(summary);
-  if (shown.length) console.log(`\n${shown.join('\n')}`);
+
+  const contextOnly = entries.filter((entry) => entry.kind === 'context');
+  if (contextOnly.length) {
+    console.log(`\nOnly the surrounding lines moved, the change itself is the same:`);
+    for (const entry of contextOnly) console.log(entry.lines[0]);
+  }
+  const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
+  for (const entry of worthReading) console.log(`\n${entry.lines.join('\n')}`);
+};
+
+type Entry = { kind: '=' | '!' | '<' | '>' | 'context'; lines: string[] };
+
+// Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
+const RANGE_DIFF_HEADER = /^\s*(?:\d+|-):\s+\S+\s+([=!<>])\s+(?:\d+|-):\s+\S+/;
+
+// Splits range-diff output per commit, and marks a ! entry "context" when only its context lines differ.
+const splitRangeDiff = (output: string) => {
+  const entries: Entry[] = [];
+  for (const line of output.split('\n')) {
+    const marker = RANGE_DIFF_HEADER.exec(stripColour(line))?.[1];
+    if (marker) entries.push({ kind: marker as Entry['kind'], lines: [line] });
+    else entries.at(-1)?.lines.push(line);
+  }
+  for (const entry of entries) {
+    if (entry.kind === '!' && onlyContextDiffers(entry.lines.slice(1).map(stripColour))) entry.kind = 'context';
+  }
+  return entries;
+};
+
+// Body lines are indented four spaces, then the outer marker (old vs new patch), then the patch's own marker.
+const onlyContextDiffers = (body: string[]) => {
+  let inMessage = false;
+  for (const line of body) {
+    const outer = line[4];
+    const inner = line[5];
+    if (outer === '@' && line[5] === '@') {
+      inMessage = line.slice(4).startsWith('@@ Commit message');
+      continue;
+    }
+    if (line.slice(6).startsWith('## ')) inMessage = false;
+    if (outer !== '+' && outer !== '-') continue;
+    if (inMessage || inner === '+' || inner === '-') return false;
+  }
+  return true;
 };
 
 // The branch below the lowest receiving one: a branch whose tip is the base gets no update-ref line.
