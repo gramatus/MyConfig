@@ -10,7 +10,7 @@ const NOTES_REF = 'refs/notes/target';
 const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of its branch ----';
 const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
-const MOVED_MARKER = '[moved]';
+const MOVED_MARKER = '>>> [moved]';
 
 // Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
 const colourOn = (stream: NodeJS.WriteStream) => !process.env.NO_COLOR && stream.isTTY === true;
