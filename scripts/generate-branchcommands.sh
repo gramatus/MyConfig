@@ -140,7 +140,7 @@ branch_name() { echo "${1%% *}"; }
   # Push to origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     xxx="$(branch_name "${lines[i]}")"
-    echo "git push origin ${xxx} --force"
+    echo "git push -u origin ${xxx} --force"
   done
 
   echo ""
