@@ -2,6 +2,15 @@
 
 How to use `scripts/stack-plan` to decide which stacked branch each commit on a wip branch belongs to, keep that decision safe across rebases and aborts, and check the result afterwards. It is written for me returning to this after a while, knowing `git rebase -i` but not the details of this tool. The rebase itself is still run by hand, as described under "Not built yet".
 
+## Cheatsheet
+
+| Command             | What it does                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `stack-plan export` | Replaces stackplan.txt. Commits with a note are put at the right place.                    |
+| `stack-plan apply`  | Adds notes to the commits about the target branch. Add `--dry-run` to see what it will do. |
+| (missing)           | Applies the rebase according to stackplan.txt                                              |
+| `stack-plan verify` | Checks that the last rebase kept everything "as before", except the reordering.            |
+
 ## The problem it solves
 
 Work lands on a wip branch sitting on top of a stack of feature branches, and every so often an interactive rebase moves those commits down into the branches they belong to. Remembering where each commit goes is the hard part, and an aborted rebase used to throw the whole plan away with it. `stack-plan` stores the plan as git notes on the commits themselves, so it survives an abort, a re-export and any number of rebases in between.
