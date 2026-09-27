@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tags each commit waiting on the current branch with its stack branch, as notes on refs/notes/target.
+// Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
 // Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway] [--rebase (apply only)]
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -11,6 +11,10 @@ const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of
 const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MOVED_MARKER = '>>> [moved]';
+const MOVED_BRANCH_MARKER = '>>> [moved branch]';
+const NEW_BRANCH_MARKER = '>>> [new branch]';
+const ORDER_KEY = 'stackplan.order';
+const NEW_KEY = 'stackplan.new';
 
 // Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
 const colourOn = (stream: NodeJS.WriteStream) => !process.env.NO_COLOR && stream.isTTY === true;
@@ -64,13 +68,50 @@ const planPath = () => join(repoRoot(), '.agent-context/active-work-context/stac
 const currentBranch = () => git('symbolic-ref', '--short', 'HEAD').trim();
 const tipOf = (ref: string) => git('rev-parse', ref).trim();
 
-const isAncestor = (ancestor: string, descendant: string) => {
+const gitSucceeds = (...args: string[]) => {
   try {
-    git('merge-base', '--is-ancestor', ancestor, descendant);
+    git(...args);
     return true;
   } catch {
     return false;
   }
+};
+const isAncestor = (ancestor: string, descendant: string) => gitSucceeds('merge-base', '--is-ancestor', ancestor, descendant);
+const branchExists = (branch: string) => gitSucceeds('show-ref', '--verify', '--quiet', `refs/heads/${branch}`);
+
+const words = (value: string) => value.split(/\s+/).filter(Boolean);
+const readConfig = (key: string) => {
+  try {
+    return git('config', '--get', key).trim();
+  } catch {
+    return '';
+  }
+};
+
+// The order apply saved, while it still covers the stack; a missing branch counts only while it waits to be created.
+const desiredOrder = (current: string[]) => {
+  const waiting = words(readConfig(NEW_KEY));
+  const stored = words(readConfig(ORDER_KEY)).filter((branch) => current.includes(branch) || waiting.includes(branch));
+  return current.every((branch) => stored.includes(branch)) ? stored : current;
+};
+
+// The fewest branches that count as moved: those outside the longest run that keeps its relative order.
+const movedBranches = (current: string[], order: string[]) => {
+  const existing = order.filter((branch) => current.includes(branch));
+  const positions = existing.map((branch) => current.indexOf(branch));
+  const run = positions.map(() => 1);
+  const previous = positions.map(() => -1);
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (positions[j] < positions[i] && run[j] + 1 > run[i]) {
+        run[i] = run[j] + 1;
+        previous[i] = j;
+      }
+    }
+  }
+  const kept = new Set<string>();
+  for (let i = run.indexOf(Math.max(0, ...run)); i >= 0; i = previous[i]) kept.add(existing[i]);
+  return existing.filter((branch) => !kept.has(branch));
 };
 
 const readHeader = (prefix: string) =>
@@ -104,8 +145,11 @@ const logPreRebase = (sha: string) => {
   writeFileSync(path, `[${stamp}] ${sha}\n${earlier}`);
 };
 
-// Stack branches bottom to top, and the commits above the topmost one that still wait to move.
+// Stack branches bottom to top, each one's own commits, and the commits above the topmost one that still wait to move.
 const readStack = (wip: string) => {
+  const stored = words(readConfig(ORDER_KEY));
+  // Branches sharing a commit have no order in git, so the saved order decides.
+  const rank = (branch: string) => (stored.includes(branch) ? stored.indexOf(branch) : stored.length);
   const records = git(
     'log',
     '--reverse',
@@ -121,10 +165,26 @@ const readStack = (wip: string) => {
   const line: Commit[] = records.map((record) => {
     const [sha, subject, refs, note] = record.split('\x1f');
     const branches = refs ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, '')) : [];
-    return { sha, subject, branches: branches.filter((branch) => branch !== wip), note: note?.trim() ?? '' };
+    const stack = branches.filter((branch) => branch !== wip).sort((a, b) => rank(a) - rank(b));
+    return { sha, subject, branches: stack, note: note?.trim() ?? '' };
   });
   const topIndex = line.findLastIndex((commit) => commit.branches.length > 0);
-  return { line, branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1) };
+  const own = new Map<string, Commit[]>();
+  let segment: Commit[] = [];
+  for (const commit of line.slice(0, topIndex + 1)) {
+    segment.push(commit);
+    for (const branch of commit.branches) {
+      own.set(branch, segment);
+      segment = [];
+    }
+  }
+  return { line, branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1), own };
+};
+
+const printOrderChanges = (current: string[], order: string[]) => {
+  const below = (branch: string) => order[order.indexOf(branch) - 1] ?? base;
+  for (const branch of order.filter((name) => !current.includes(name))) console.log(`${cyan(branch)}  new, above ${below(branch)}`);
+  for (const branch of movedBranches(current, order)) console.log(`${cyan(branch)}  moves above ${below(branch)}`);
 };
 
 // For loops of hundreds of calls, where echoing each one would bury the output.
@@ -135,25 +195,11 @@ type Simulation =
   | { ok: true; picks: number; sameTree: boolean }
   | { ok: false; picks: number; at: number; commit: Commit; files: string[] };
 
-// Replays the planned todo in memory: objects are written, no ref moves, and the worktree is untouched.
-const simulateRebase = (line: Commit[], branches: string[], moves: Commit[], wip: string): Simulation => {
-  const moved = new Set(moves.map((commit) => commit.sha));
-  const lowest = branches[Math.min(...moves.map((commit) => branches.indexOf(commit.note)))];
-  const start = line.findIndex((commit) => commit.branches.includes(lowest));
-  const sequence: Commit[] = [];
-  const placeMovesAfter = (commit: Commit) => {
-    for (const branch of commit.branches) sequence.push(...moves.filter((move) => move.note === branch));
-  };
-  placeMovesAfter(line[start]);
-  for (const commit of line.slice(start + 1)) {
-    if (moved.has(commit.sha)) continue;
-    sequence.push(commit);
-    placeMovesAfter(commit);
-  }
-
+// Replays the planned picks in memory: objects are written, no ref moves, and the worktree is untouched.
+const simulateRebase = (sequence: Commit[], start: string, wip: string): Simulation => {
   console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
   console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
-  let state = line[start].sha;
+  let state = start;
   for (const [index, commit] of sequence.entries()) {
     let merged: string;
     try {
@@ -186,7 +232,9 @@ const pickLine = (commit: Commit) => `pick ${commit.sha.slice(0, 10)} ${commit.s
 
 const exportPlan = () => {
   const wip = currentBranch();
-  const { branches, pending } = readStack(wip);
+  const { branches: current, pending } = readStack(wip);
+  // An order applied but not yet rebased is exported as planned, like the notes are.
+  const branches = desiredOrder(current);
   const sections = new Map<string, Commit[]>([...branches, wip].map((branch) => [branch, []]));
   const untagged: Commit[] = [];
   const strayNotes: Commit[] = [];
@@ -206,11 +254,12 @@ const exportPlan = () => {
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
     ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
-    `# the untagged marker stay on ${wip}. Move pick lines only, then run: stack-plan apply`,
+    `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
+    '# new branch, then run: stack-plan apply',
     '',
   ];
   for (const branch of branches) {
-    out.push(...sections.get(branch)!.map(pickLine), `update-ref refs/heads/${branch}`);
+    out.push(...sections.get(branch)!.map(pickLine), `update-ref refs/heads/${branch}\n`);
   }
   out.push(...sections.get(wip)!.map(pickLine), UNTAGGED_MARKER, ...untagged.map(pickLine), '');
 
@@ -269,6 +318,7 @@ const applyPlan = () => {
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
+  const created = updateRefs.filter((branch) => !branches.includes(branch));
   const recorded = requireHeader(EXPORTED_AT_PREFIX, 'export again');
   const current = tipOf(wip);
   // Commits added on top since export are fine; a rewritten wip means the file's SHAs are gone.
@@ -281,8 +331,19 @@ const applyPlan = () => {
     for (const sha of git('rev-list', '--first-parent', `${recorded}..${current}`).split('\n')) {
       if (sha) addedSinceExport.add(sha);
     }
-    if (updateRefs.join('\n') !== branches.join('\n')) {
-      errors.push('the update-ref lines no longer match the stack; export again');
+    for (const branch of branches) {
+      if (!updateRefs.includes(branch)) errors.push(`update-ref ${branch} is missing; every stack branch keeps its line`);
+    }
+    for (const branch of new Set(updateRefs)) {
+      if (updateRefs.indexOf(branch) !== updateRefs.lastIndexOf(branch)) errors.push(`update-ref ${branch} is listed twice`);
+    }
+    for (const branch of created) {
+      if (!gitSucceeds('check-ref-format', '--branch', branch)) errors.push(`${branch} is not a valid branch name`);
+      else if (branchExists(branch)) errors.push(`${branch} already exists outside the stack`);
+    }
+    const lowest = updateRefs[0];
+    if (created.includes(lowest) && ![...targets.values()].includes(lowest)) {
+      errors.push(`${lowest} is new and empty at the bottom of the stack, where git cannot tell it from ${base}`);
     }
     for (const commit of pending) {
       if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
@@ -301,7 +362,7 @@ const applyPlan = () => {
   const toTag = pending.filter((commit) => listed.has(commit.sha) && (targets.get(commit.sha) ?? '') !== commit.note);
   const tagged = toTag.filter((commit) => targets.get(commit.sha));
   const untagged = toTag.filter((commit) => !targets.get(commit.sha));
-  printByBranch([...branches, wip], (commit) => targets.get(commit.sha) ?? '', tagged, (branch) =>
+  printByBranch([...updateRefs, wip], (commit) => targets.get(commit.sha) ?? '', tagged, (branch) =>
     cyan(branch === wip ? `${branch} (stays)` : branch),
   );
   if (untagged.length) {
@@ -315,6 +376,16 @@ const applyPlan = () => {
   if (toTag.length) good(`${toTag.length} notes ${dryRun ? 'would change' : 'changed'}`);
   else good('notes already match the plan');
 
+  printOrderChanges(branches, updateRefs);
+  if (updateRefs.join(' ') !== readConfig(ORDER_KEY) || created.join(' ') !== readConfig(NEW_KEY)) {
+    if (!dryRun) {
+      git('config', ORDER_KEY, updateRefs.join(' '));
+      if (created.length) git('config', NEW_KEY, created.join(' '));
+      else if (readConfig(NEW_KEY)) git('config', '--unset', NEW_KEY);
+    }
+    good(`stack order ${dryRun ? 'would be saved' : 'saved'} in git config ${ORDER_KEY}`);
+  }
+
   const unplaced = pending.filter((commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha));
   if (unplaced.length) {
     attention('left untagged, committed after export:');
@@ -324,8 +395,10 @@ const applyPlan = () => {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
     console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
   }
-  return targets;
+  return { targets, order: updateRefs };
 };
+
+type Planned = ReturnType<typeof applyPlan>;
 
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
 const verifyRebase = () => {
@@ -382,6 +455,12 @@ const verifyRebase = () => {
   } else good(`tree matches the pre-rebase tip ${short}`);
   if (stat || droppedOrAdded.length) return;
 
+  const waitingToCreate = words(readConfig(NEW_KEY));
+  if (waitingToCreate.length && waitingToCreate.every(branchExists)) {
+    if (!dryRun) git('config', '--unset', NEW_KEY);
+    good(`new branches ${dryRun ? 'would be marked' : 'marked'} created: ${waitingToCreate.join(', ')}`);
+  }
+
   // A note on a commit no longer waiting on wip has done its job; the pre-rebase commits keep their copies.
   const { line, pending } = readStack(wip);
   const waiting = new Set(pending.map((commit) => commit.sha));
@@ -427,32 +506,49 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-// The branch below the lowest receiving one: a branch whose tip is the base gets no update-ref line.
-const rebaseBaseFor = (branches: string[], lowest: number) => {
-  const target = tipOf(branches[lowest]);
-  let below = lowest - 1;
-  while (below >= 0 && tipOf(branches[below]) === target) below--;
-  return below >= 0 ? branches[below] : base;
-};
-
-const rebaseStack = (planned?: Map<string, string | undefined>) => {
+const rebaseStack = (planned?: Planned) => {
   const wip = currentBranch();
-  const { line, branches, pending } = readStack(wip);
-  // A dry-run apply writes no notes, so its planned targets stand in for them.
-  for (const commit of pending) if (planned?.has(commit.sha)) commit.note = planned.get(commit.sha) ?? '';
-  const moves = pending.filter((commit) => commit.note !== wip && branches.includes(commit.note));
+  const { branches, pending, own } = readStack(wip);
+  // A dry-run apply writes no notes or config, so its plan stands in for them.
+  for (const commit of pending) if (planned?.targets.has(commit.sha)) commit.note = planned.targets.get(commit.sha) ?? '';
+  const order = planned?.order ?? desiredOrder(branches);
+  const moves = pending.filter((commit) => commit.note !== wip && order.includes(commit.note));
+  const receives = (branch: string) => moves.some((commit) => commit.note === branch);
+  let first = 0;
+  while (first < order.length && order[first] === branches[first] && !receives(order[first])) first++;
   heading(dryRun ? 'Plan (dry run)' : 'Plan');
-  if (!moves.length) {
-    good(`no tagged commits waiting on ${wip}; nothing to move`);
+  if (first === order.length) {
+    good(`no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`);
     return;
   }
-  const rebaseBase = rebaseBaseFor(branches, Math.min(...moves.map((commit) => branches.indexOf(commit.note))));
-  printByBranch(branches, (commit) => commit.note, moves);
+  // Everything below the first changed branch stays as it is.
+  const rebaseBase = first === 0 ? base : order[first - 1];
+  printByBranch(order, (commit) => commit.note, moves);
+  printOrderChanges(branches, order);
   console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
+
+  const moved = new Set(moves.map((commit) => commit.sha));
+  const relocated = new Set(movedBranches(branches, order));
+  const todo: string[] = [];
+  const sequence: Commit[] = [];
+  const pick = (commit: Commit, marker = '') => {
+    todo.push(`pick ${commit.sha} ${marker}${commit.subject}`);
+    sequence.push(commit);
+  };
+  for (const [index, branch] of order.entries()) {
+    if (index < first) continue;
+    const below = order[index - 1] ?? base;
+    if (!branches.includes(branch)) todo.push(`# ${NEW_BRANCH_MARKER} ${branch}, above ${below}`);
+    else if (relocated.has(branch)) todo.push(`# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`);
+    for (const commit of own.get(branch) ?? []) pick(commit);
+    for (const commit of moves.filter((move) => move.note === branch)) pick(commit, `${MOVED_MARKER} `);
+    todo.push(`update-ref refs/heads/${branch}`, '');
+  }
+  for (const commit of pending.filter((commit) => !moved.has(commit.sha))) pick(commit);
 
   heading('Preview');
   const started = Date.now();
-  const simulation = simulateRebase(line, branches, moves, wip);
+  const simulation = simulateRebase(sequence, tipOf(rebaseBase), wip);
   const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
   if (simulation.ok) {
     good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
@@ -465,7 +561,7 @@ const rebaseStack = (planned?: Map<string, string | undefined>) => {
   }
   if (dryRun) return;
   if (!simulation.ok && !rest.includes('--anyway')) {
-    console.log('\nNothing rewritten. Place the commit elsewhere (export, move, apply), or resolve it by hand:');
+    console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
     console.log('  stack-plan rebase --anyway');
     process.exit(1);
   }
@@ -474,6 +570,8 @@ const rebaseStack = (planned?: Map<string, string | undefined>) => {
   const preRebase = tipOf(wip);
   writeHeader(PRE_REBASE_PREFIX, preRebase);
   logPreRebase(preRebase);
+  const todoPath = join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-todo');
+  writeFileSync(todoPath, todo.join('\n'));
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
   const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
   const args = ['rebase', '-i', '--update-refs', rebaseBase];
@@ -485,7 +583,7 @@ const rebaseStack = (planned?: Map<string, string | undefined>) => {
       ...process.env,
       GIT_SEQUENCE_EDITOR: editor,
       STACK_PLAN_EDITOR: reviewEditor,
-      STACK_PLAN_MOVES: JSON.stringify(Object.fromEntries(moves.map((commit) => [commit.sha, commit.note]))),
+      STACK_PLAN_TODO: todoPath,
     },
   });
   if (result.status !== 0) {
@@ -495,45 +593,26 @@ const rebaseStack = (planned?: Map<string, string | undefined>) => {
   verifyRebase();
 };
 
-// Runs as git's sequence editor: moves each tagged pick above its branch's update-ref, then opens the user's editor.
+const picksIn = (todo: string) =>
+  todo.split('\n').flatMap((line) => /^(?:pick|p)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
+
+// Runs as git's sequence editor: swaps git's todo for the planned one when both hold the same picks, then opens the user's editor.
 const editTodo = (todoPath: string) => {
-  const moves: Record<string, string> = JSON.parse(process.env.STACK_PLAN_MOVES ?? '{}');
-  const shas = Object.keys(moves);
-  const lifted = new Map<string, string[]>();
-  const kept: string[] = [];
-  const found = new Set<string>();
-  for (const line of readFileSync(todoPath, 'utf8').split('\n')) {
-    const abbrev = /^(?:pick|p)\s+([0-9a-f]+)/.exec(line)?.[1];
-    const sha = abbrev ? shas.find((candidate) => candidate.startsWith(abbrev)) : undefined;
-    if (!sha) {
-      kept.push(line);
-      continue;
-    }
-    found.add(sha);
-    // Git reads only the command and hash of a pick, so the rest of the line is free for a marker.
-    const marked = line.replace(/^(\S+\s+\S+)\s*/, `$1 ${MOVED_MARKER} `);
-    lifted.set(moves[sha], [...(lifted.get(moves[sha]) ?? []), marked]);
-  }
-
-  const out: string[] = [];
-  for (const line of kept) {
-    const branch = /^update-ref refs\/heads\/(\S+)$/.exec(line)?.[1];
-    if (branch && lifted.has(branch)) {
-      out.push(...lifted.get(branch)!);
-      lifted.delete(branch);
-    }
-    out.push(line);
-  }
-
-  const problems = [
-    ...shas.filter((sha) => !found.has(sha)).map((sha) => `${sha.slice(0, 10)} is not in the todo`),
-    ...[...lifted.keys()].map((branch) => `no update-ref line for ${branch}`),
-  ];
+  // Git reads only the command and hash of a pick, so the rest of a planned line is free for a marker.
+  const planned = readFileSync(process.env.STACK_PLAN_TODO ?? '', 'utf8');
+  const plannedShas = picksIn(planned);
+  const original = readFileSync(todoPath, 'utf8');
+  const gitShas = picksIn(original);
+  const problems = gitShas
+    .filter((abbrev) => !plannedShas.some((sha) => sha.startsWith(abbrev)))
+    .map((abbrev) => `${abbrev} is in git's todo but not in the plan`);
+  if (gitShas.length !== plannedShas.length) problems.push(`git's todo has ${gitShas.length} picks, the plan ${plannedShas.length}`);
   if (problems.length) {
     console.error(redErr(`✗ stack-plan: ${problems.join('; ')}. Rebase not started.`));
     process.exit(1);
   }
-  writeFileSync(todoPath, out.join('\n'));
+  const help = original.split('\n').filter((line) => line.startsWith('#'));
+  writeFileSync(todoPath, [planned, ...help].join('\n'));
 
   const review = process.env.STACK_PLAN_EDITOR;
   if (review) {
