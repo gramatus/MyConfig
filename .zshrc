@@ -153,7 +153,38 @@ _zshrc_log_once "env" "Set WORKSPACE_FOLDER=$WORKSPACE_FOLDER, added ~/scripts t
 alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
 alias cdnc="cd /workspaces/.codespaces/.persistedshare/dotfiles/.config/nvim" # Go to nvim config folder
 alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to dotfiles config folder
-_zshrc_log_once "my_alias" "My custom aliases: cdw, cdnc, cddot"
+alias sp=stack-plan # Stack branches from the commits waiting on the current branch
+_zshrc_log_once "my_alias" "My custom aliases: cdw, cdnc, cddot, sp"
+
+# Tab completion for stack-plan; sp completes the same way because zsh expands the alias first.
+_stack_plan_refs() {
+    local -a refs=(${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null)"})
+    compadd -a refs
+}
+_stack_plan() {
+    local -a commands=(
+        'export:write the plan file'
+        'go:apply, then rebase'
+        'preview:apply and rebase as a dry run'
+        'apply:write notes from the plan'
+        'rebase:rebase the stack'
+        'verify:compare the stack with the pre-rebase tip'
+    )
+    if (( CURRENT == 2 )); then
+        _describe 'command' commands
+        return
+    fi
+    local -a flags=('(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs')
+    case $words[2] in
+        go|apply|a|rebase|r) flags+=('(-f --anyway)'{-f,--anyway}'[rebase despite a predicted conflict]') ;|
+        apply|a|rebase|r|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;|
+        apply|a) flags+=('--rebase[rebase after applying]') ;;
+    esac
+    shift words
+    (( CURRENT-- ))
+    _arguments $flags
+}
+compdef _stack_plan stack-plan
 _zshrc_log_once "omz_alias" "OMZ git aliases: see ~/.oh-my-zsh/plugins/git/README.md or run 'omz plugin info git'"
 
 # Check that display variable is set (not sure if this is smart and/or right)

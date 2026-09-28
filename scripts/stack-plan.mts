@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway] [--rebase (apply only)]
+// Usage: stack-plan export|go|preview|apply|rebase|verify [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -52,7 +52,49 @@ const git = (...args: string[]) => {
   }
 };
 
-const [command, ...rest] = process.argv.slice(2);
+const USAGE = [
+  'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway]',
+  '  export (e)   write the plan file',
+  '  go           apply, then rebase',
+  '  preview      apply and rebase as a dry run',
+  '  apply (a)    write notes from the plan; --rebase also rebases',
+  '  rebase (r)   rebase the stack; -f runs it despite a predicted conflict',
+  '  verify (v)   compare the stack with the pre-rebase tip',
+].join('\n');
+
+const EXPANSIONS: Record<string, string[]> = {
+  e: ['export'],
+  a: ['apply'],
+  r: ['rebase'],
+  v: ['verify'],
+  go: ['apply', '--rebase'],
+  preview: ['apply', '--rebase', '--dry-run'],
+};
+const FLAG_ALIASES: Record<string, string> = { '-b': '--base', '-n': '--dry-run', '-f': '--anyway' };
+const ALLOWED_FLAGS: Record<string, string[]> = {
+  export: ['--base'],
+  apply: ['--base', '--dry-run', '--rebase', '--anyway'],
+  rebase: ['--base', '--dry-run', '--anyway'],
+  verify: ['--base', '--dry-run'],
+};
+
+const [given = '', ...args] = process.argv.slice(2);
+const [command, ...implied] = EXPANSIONS[given] ?? [given];
+const rest = [...implied, ...args.map((arg) => FLAG_ALIASES[arg] ?? arg)];
+
+const usageError = (message?: string): never => {
+  if (message) console.error(redErr(`✗ ${message}`));
+  console.error(USAGE);
+  process.exit(2);
+};
+if (command !== '_todo') {
+  const allowed = ALLOWED_FLAGS[command] ?? usageError(given ? `unknown command "${given}"` : undefined);
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--base') i++;
+    else if (!allowed.includes(rest[i])) usageError(`${rest[i]} does not apply to ${given}`);
+  }
+}
+
 const optionValue = (name: string) => {
   const index = rest.indexOf(name);
   return index >= 0 ? rest[index + 1] : undefined;
@@ -562,7 +604,7 @@ const rebaseStack = (planned?: Planned) => {
   if (dryRun) return;
   if (!simulation.ok && !rest.includes('--anyway')) {
     console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
-    console.log('  stack-plan rebase --anyway');
+    console.log('  stack-plan rebase -f');
     process.exit(1);
   }
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
@@ -629,11 +671,7 @@ try {
   }
   else if (command === 'rebase') rebaseStack();
   else if (command === 'verify') verifyRebase();
-  else if (command === '_todo') editTodo(rest[0]);
-  else {
-    console.error('Usage: stack-plan export|apply|rebase|verify [--base <ref>] [--dry-run] [--anyway] [--rebase (apply only)]');
-    process.exit(2);
-  }
+  else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));
   process.exit(1);

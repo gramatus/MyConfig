@@ -4,12 +4,18 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 
 ## Cheatsheet
 
-| Command             | What it does                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| `stack-plan export` | Replaces stackplan.txt. Commits with a note are put at the right place.                    |
-| `stack-plan apply`  | Adds notes to the commits about the target branch. Add `--dry-run` to see what it will do. |
-| `stack-plan rebase` | Moves each tagged commit into its branch, then runs `verify`.                              |
-| `stack-plan verify` | Checks that the last rebase kept everything "as before", except the reordering.            |
+`sp` is an alias for `stack-plan`, and zsh tab-completes its commands, the flags each one takes, and the refs after `-b`.
+
+| Command         | What it does                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `sp export`     | Replaces stackplan.txt. Commits with a note are put at the right place.                   |
+| `sp preview`    | Shows what `go` would do, from the file as edited, without writing anything.              |
+| `sp go`         | Applies the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
+| `sp apply`      | Adds notes to the commits about the target branch. Add `-n` to see what it will do.       |
+| `sp rebase`     | Moves each tagged commit into its branch, then runs `verify`.                             |
+| `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
+
+`e`, `a`, `r` and `v` are short for `export`, `apply`, `rebase` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored.
 
 ## The problem it solves
 
@@ -26,11 +32,11 @@ Notes rather than a `Target:` trailer in the commit message, because a note sits
 - `rebase.missingCommitsCheck error` — a todo that leaves a commit out stops the rebase instead of dropping the commit.
 - `rerere.enabled true` and `rerere.autoupdate false` — a conflict resolved once is replayed into the file on the next attempt, but left unstaged, so the rebase still stops and the replay gets a look before `git add`. A wrong replay is the risk, and step 4 says how to undo one. `stack-plan verify` below catches one that slipped through, for a rebase that only moves commits.
 
-`install.sh` also links `scripts/` to `~/scripts`, which `.zshrc` puts on `PATH`, so `stack-plan` runs by name from any repository.
+`install.sh` also links `scripts/` to `~/scripts`, which `.zshrc` puts on `PATH`, so `stack-plan` runs by name from any repository. `.zshrc` also defines the `sp` alias and the completion.
 
 ## The loop
 
-Every step runs from inside the repository, with the wip branch checked out. `--base <ref>` changes the ref the stack sits on, and defaults to `origin/main`.
+Every step runs from inside the repository, with the wip branch checked out. `--base <ref>` (`-b`) changes the ref the stack sits on, and defaults to `origin/main`.
 
 Each git command the script runs is echoed to stderr as `$ git …` before it runs, so the output doubles as a record of what it did. `2>/dev/null` hides that trace and keeps only the result. In a terminal the trace is dimmed and the results are coloured: branches cyan, SHAs yellow, and outcomes marked green `✓`, yellow `!` or red `✗`. Setting `NO_COLOR`, or piping the output, turns colour off.
 
@@ -91,7 +97,7 @@ Commits made on top of the wip branch after the export are left untagged and lis
 
 `apply` checks the whole file before writing anything, and on any problem it writes nothing and names the offending line. It refuses a stack branch whose `update-ref` line is gone or doubled, a new name that is already a branch outside the stack, and a new empty branch at the very bottom, which git could not tell from the base. Nearly every other refusal comes from the wip branch having been rewritten since export, and exporting again is the remedy.
 
-`apply --rebase` goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `--dry-run` and `--anyway` like the two commands do separately. A dry run writes no notes, so `apply --rebase --dry-run` previews the rebase with the file's placements in their stead: that is the way to preview an edit before any note is written.
+`stack-plan go` is `apply --rebase`: it goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `-f` like `rebase` does. `stack-plan preview` is `apply --rebase --dry-run`. A dry run writes no notes, so the preview uses the file's placements in their stead: that is the way to preview an edit before any note is written.
 
 ### 4. Rebase
 
@@ -102,7 +108,7 @@ stack-plan rebase --dry-run
 stack-plan rebase
 ```
 
-The dry run lists each move and the base it would use, then previews the rebase. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. A real `rebase` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan rebase --anyway` goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
+The dry run lists each move and the base it would use, then previews the rebase. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. A real `rebase` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan rebase -f` (`--anyway`) goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
 
 `rebase` reads the notes and the saved order, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor. It builds the whole todo itself, branch by branch in the saved order: each branch's own commits, then the picks moving into it, then its `update-ref` line. It swaps that in for git's todo only when both hold the same picks, and the preview replays the same todo. Then it opens the todo in the editor git would have used, with moved picks marked `[moved]` after their hash, and a `# [new branch]` or `# [moved branch]` comment above each branch that changes. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
 
