@@ -185,7 +185,7 @@ echo "############### Configuring git for stacked-branch rebases ###############
 git config --global rebase.updateRefs true
 git config --global rebase.missingCommitsCheck error
 git config --global rerere.enabled true
-git config --global rerere.autoupdate true
+git config --global rerere.autoupdate false
 # Carries scripts/stack-plan's target notes onto rewritten commits.
 git config --global notes.rewriteRef refs/notes/target
 

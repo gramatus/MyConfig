@@ -24,7 +24,7 @@ Notes rather than a `Target:` trailer in the commit message, because a note sits
 - `notes.rewriteRef refs/notes/target` — git copies a note onto the rewritten commit on rebase and amend only for refs named here. Without it, every rebase leaves the notes behind on the old SHAs, and the plan is lost the first time something below the commit moves.
 - `rebase.updateRefs true` — the rebase todo gets an `update-ref` line per stacked branch, and the plan file borrows that shape.
 - `rebase.missingCommitsCheck error` — a todo that leaves a commit out stops the rebase instead of dropping the commit.
-- `rerere.enabled true` and `rerere.autoupdate true` — a conflict resolved once is replayed and staged on the next attempt. Replaying a wrong resolution without looking is the risk, and `stack-plan verify` below is what catches it for a rebase that only moves commits.
+- `rerere.enabled true` and `rerere.autoupdate false` — a conflict resolved once is replayed into the file on the next attempt, but left unstaged, so the rebase still stops and the replay gets a look before `git add`. A wrong replay is the risk, and step 4 says how to undo one. `stack-plan verify` below catches one that slipped through, for a rebase that only moves commits.
 
 `install.sh` also links `scripts/` to `~/scripts`, which `.zshrc` puts on `PATH`, so `stack-plan` runs by name from any repository.
 
@@ -109,6 +109,23 @@ The dry run lists each move and the base it would use, then previews the rebase.
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. It is `--base` (`origin/main`) when that is the lowest branch of the stack. Moving the bottom branch therefore rebases the whole stack.
 
 If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. When a pick conflicts, the rebase stops as usual: resolve it, `git rebase --continue`, then run `stack-plan verify` yourself.
+
+#### When rerere replays the wrong resolution
+
+rerere matches on the conflict text, not on what the commit is for. A conflict once resolved by dropping one side is resolved the same way next time, even when this rebase exists to bring that side back. A fixup that ends up empty is the usual sign.
+
+When rerere has a resolution, git prints `Resolved '<file>' using previous resolution.` and writes it into the file. That is why there are no conflict markers, while `git status` still lists the file as `both modified`. Check it with `git diff` before `git add`.
+
+To throw the recorded resolution away and resolve again, while the rebase is still stopped:
+
+```shell
+git rerere forget <file>
+git checkout -m <file>
+```
+
+`forget` deletes the entry for this conflict, and `checkout -m` puts the markers back. Resolve, `git add`, `git rebase --continue`, and rerere records the new resolution in its place.
+
+`forget` only works while the conflict is open. Once the rebase has moved on, the bad entry stays in `.git/rr-cache/` and replays on the next identical conflict. The lost change is still in the old commit, reachable from the SHA in `stackplan-rebases.log`.
 
 ### 5. Verify
 
