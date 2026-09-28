@@ -165,7 +165,7 @@ _stack_plan() {
     local -a commands=(
         'export:write the plan file'
         'go:apply, then rebase'
-        'preview:apply and rebase as a dry run'
+        'preview:apply, then preview the rebase'
         'apply:write notes from the plan'
         'rebase:rebase the stack'
         'verify:compare the stack with the pre-rebase tip'
@@ -177,7 +177,7 @@ _stack_plan() {
     local -a flags=('(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs')
     case $words[2] in
         go|apply|a|rebase|r) flags+=('(-f --anyway)'{-f,--anyway}'[rebase despite a predicted conflict]') ;|
-        apply|a|rebase|r|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;|
+        preview|apply|a|rebase|r|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;|
         apply|a) flags+=('--rebase[rebase after applying]') ;;
     esac
     shift words

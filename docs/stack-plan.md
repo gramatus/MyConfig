@@ -9,7 +9,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | Command         | What it does                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------- |
 | `sp export`     | Replaces stackplan.txt. Commits with a note are put at the right place.                   |
-| `sp preview`    | Shows what `go` would do, from the file as edited, without writing anything.              |
+| `sp preview`    | Applies the file as notes, then previews the rebase. Add `-n` to write no notes either.   |
 | `sp go`         | Applies the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
 | `sp apply`      | Adds notes to the commits about the target branch. Add `-n` to see what it will do.       |
 | `sp rebase`     | Moves each tagged commit into its branch, then runs `verify`.                             |
@@ -97,7 +97,7 @@ Commits made on top of the wip branch after the export are left untagged and lis
 
 `apply` checks the whole file before writing anything, and on any problem it writes nothing and names the offending line. It refuses a stack branch whose `update-ref` line is gone or doubled, a new name that is already a branch outside the stack, and a new empty branch at the very bottom, which git could not tell from the base. Nearly every other refusal comes from the wip branch having been rewritten since export, and exporting again is the remedy.
 
-`stack-plan go` is `apply --rebase`: it goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `-f` like `rebase` does. `stack-plan preview` is `apply --rebase --dry-run`. A dry run writes no notes, so the preview uses the file's placements in their stead: that is the way to preview an edit before any note is written.
+`stack-plan go` is `apply --rebase`: it goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `-f` like `rebase` does. `stack-plan preview` applies the file for real, then runs the rebase as a dry run, so `go` afterwards rebases exactly what it showed. `preview -n` is `apply --rebase --dry-run`: it writes no notes, so the preview uses the file's placements in their stead. That is the way to preview an edit before any note is written.
 
 ### 4. Rebase
 

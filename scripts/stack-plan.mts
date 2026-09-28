@@ -56,7 +56,7 @@ const USAGE = [
   'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway]',
   '  export (e)   write the plan file',
   '  go           apply, then rebase',
-  '  preview      apply and rebase as a dry run',
+  '  preview      apply, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    write notes from the plan; --rebase also rebases',
   '  rebase (r)   rebase the stack; -f runs it despite a predicted conflict',
   '  verify (v)   compare the stack with the pre-rebase tip',
@@ -68,12 +68,12 @@ const EXPANSIONS: Record<string, string[]> = {
   r: ['rebase'],
   v: ['verify'],
   go: ['apply', '--rebase'],
-  preview: ['apply', '--rebase', '--dry-run'],
 };
 const FLAG_ALIASES: Record<string, string> = { '-b': '--base', '-n': '--dry-run', '-f': '--anyway' };
 const ALLOWED_FLAGS: Record<string, string[]> = {
   export: ['--base'],
   apply: ['--base', '--dry-run', '--rebase', '--anyway'],
+  preview: ['--base', '--dry-run'],
   rebase: ['--base', '--dry-run', '--anyway'],
   verify: ['--base', '--dry-run'],
 };
@@ -548,7 +548,7 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-const rebaseStack = (planned?: Planned) => {
+const rebaseStack = (planned?: Planned, preview = dryRun) => {
   const wip = currentBranch();
   const { branches, pending, own } = readStack(wip);
   // A dry-run apply writes no notes or config, so its plan stands in for them.
@@ -558,7 +558,7 @@ const rebaseStack = (planned?: Planned) => {
   const receives = (branch: string) => moves.some((commit) => commit.note === branch);
   let first = 0;
   while (first < order.length && order[first] === branches[first] && !receives(order[first])) first++;
-  heading(dryRun ? 'Plan (dry run)' : 'Plan');
+  heading(preview ? 'Plan (dry run)' : 'Plan');
   if (first === order.length) {
     good(`no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`);
     return;
@@ -601,7 +601,7 @@ const rebaseStack = (planned?: Planned) => {
     for (const file of simulation.files) console.log(`    ${file}`);
     console.log('rerere may already hold a resolution for it; the preview cannot tell.');
   }
-  if (dryRun) return;
+  if (preview) return;
   if (!simulation.ok && !rest.includes('--anyway')) {
     console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
     console.log('  stack-plan rebase -f');
@@ -665,9 +665,10 @@ const editTodo = (todoPath: string) => {
 
 try {
   if (command === 'export') exportPlan();
-  else if (command === 'apply') {
+  else if (command === 'apply' || command === 'preview') {
     const planned = applyPlan();
-    if (rest.includes('--rebase')) rebaseStack(dryRun ? planned : undefined);
+    if (command === 'preview') rebaseStack(dryRun ? planned : undefined, true);
+    else if (rest.includes('--rebase')) rebaseStack(dryRun ? planned : undefined);
   }
   else if (command === 'rebase') rebaseStack();
   else if (command === 'verify') verifyRebase();
