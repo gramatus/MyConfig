@@ -193,10 +193,12 @@ git config --global rerere.autoupdate false
 # Carries scripts/stack-plan's target notes onto rewritten commits.
 git config --global notes.rewriteRef refs/notes/target
 
-echo "############### TODO: Download public signing key ###############"
-# TODO: figure out auth in this scenario
-# mkdir -p ~/.ssh
-# gh api /users/torgst/ssh_signing_keys | jq '.[] | select(.title=="Commit signing") | .key' -r > ~/.ssh/id_ed25519.pub
+echo "############### Setup commit signing if the private key is saved to the ssh agent ###############"
+if ssh-add -L 2>/dev/null | grep -q "GitHub Signing"; then
+  git config --global gpg.format ssh
+  git config --global user.signingkey "key::$(ssh-add -L | grep -m1 'GitHub Signing' | cut -d' ' -f1,2)"
+  git config --global commit.gpgsign true
+fi
 
 if which code > /dev/null 2>&1; then
   echo "############### Ensuring vs code extensions are installed (or at least try to ensure it) ###############"
