@@ -176,6 +176,10 @@ fi
 # GitHub CLI is installed in the deferred background block near the end of this
 # script (see "Deferring heavy installs to background").
 
+echo "############### Configuring git user.name and user.email ###############"
+git config --global user.name  >/dev/null || git config --global user.name  "Torgeir S. hos Sykehuspartner"
+git config --global user.email >/dev/null || git config --global user.email "93591857+gramatus@users.noreply.github.com"
+
 echo "############### Configuring git difftool to use VS Code ###############"
 git config --global diff.tool vscode
 git config --global difftool.vscode.cmd 'code --wait --diff $LOCAL $REMOTE'
