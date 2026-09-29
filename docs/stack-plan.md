@@ -9,13 +9,14 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | Command         | What it does                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------- |
 | `sp export`     | Replaces stackplan.txt. Commits with a note are put at the right place.                   |
-| `sp preview`    | Applies the file as notes, then previews the rebase. Add `-n` to write no notes either.   |
-| `sp go`         | Applies the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
-| `sp apply`      | Adds notes to the commits about the target branch. Add `-n` to see what it will do.       |
-| `sp rebase`     | Moves each tagged commit into its branch, then runs `verify`.                             |
+| `sp save`       | Saves the file as notes on the commits. Add `-n` to see what it will do.                  |
+| `sp preview`    | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either.     |
+| `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
 
-`e`, `a`, `r` and `v` are short for `export`, `apply`, `rebase` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored.
+The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
+
+`e`, `s`, `a` and `v` are short for `export`, `save`, `apply` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored.
 
 ## The problem it solves
 
@@ -48,9 +49,9 @@ stack-plan export
 
 This writes `.agent-context/active-work-context/stackplan.txt`, beside `branchlist.md`. An existing file is copied to `stackplan.txt.bak` first. Success prints the path and how many commits are waiting and untagged.
 
-The header carries two SHAs with separate jobs. `exported-at:` is the wip tip at export, and `apply` uses it to tell commits added since from a rewritten branch. `pre-rebase:` is the tip before the last `stack-plan rebase`, and only `verify` reads it. Export copies `pre-rebase:` over from the old file, so exporting between a rebase and its `verify` leaves the comparison intact.
+The header carries two SHAs with separate jobs. `exported-at:` is the wip tip at export, and `save` uses it to tell commits added since from a rewritten branch. `pre-rebase:` is the tip before the last rebase `stack-plan apply` ran, and only `verify` reads it. Export copies `pre-rebase:` over from the old file, so exporting between a rebase and its `verify` leaves the comparison intact.
 
-Export again after any rebase of the wip branch, because the file's SHAs are then gone and `apply` refuses it. Commits that merely landed on top since the export leave the file usable, as step 3 describes. A re-export keeps only placements already applied as notes, and the edited file survives as `stackplan.txt.bak`.
+Export again after any rebase of the wip branch, because the file's SHAs are then gone and `save` refuses it. Commits that merely landed on top since the export leave the file usable, as step 3 describes. A re-export keeps only placements already saved as notes, and the edited file survives as `stackplan.txt.bak`.
 
 ### 2. Place each commit
 
@@ -80,37 +81,37 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 - The order of the `update-ref` lines is the stack order. Moving one moves that branch, and its own commits go with it as a block.
 - An `update-ref` line naming a branch that does not exist adds that branch to the stack, with the picks above it or empty. The rebase creates it.
 
-Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order applied but not yet rebased.
+Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order saved but not yet rebased.
 
-### 3. Apply
+### 3. Save
 
 ```shell
-stack-plan apply --dry-run
-stack-plan apply
+stack-plan save --dry-run
+stack-plan save
 ```
+
+`preview` and `apply` both run this step first, so running it on its own is only for checking the notes before anything else.
 
 The dry run lists the notes it would write, grouped under their branch, and the ones it would remove under `untag`. Without `--dry-run` it writes them to `refs/notes/target`. Success ends with `✓` and the number of notes changed, or `notes already match the plan`.
 
-Commits made on top of the wip branch after the export are left untagged and listed as `left untagged, committed after export`. `apply` then moves the file's `exported-at:` line to the tip it checked, which is the line it compares against next time. Place such a commit in a later round, or add its `pick` line to the file before applying.
+Commits made on top of the wip branch after the export are left untagged and listed as `left untagged, committed after export`. `save` then moves the file's `exported-at:` line to the tip it checked, which is the line it compares against next time. Place such a commit in a later round, or add its `pick` line to the file before saving.
 
-`apply` also saves the order of the `update-ref` lines in the repository's git config, as `stackplan.order`, and lists each branch that is new or moves. A branch still to be created is kept in `stackplan.new` until a `verify` finds it exists. The order stays saved after that, because branches sharing a commit, as an empty one does with the branch under it, have no order in git itself.
+`save` also stores the order of the `update-ref` lines in the repository's git config, as `stackplan.order`, and lists each branch that is new or moves. A branch still to be created is kept in `stackplan.new` until a `verify` finds it exists. The order stays saved after that, because branches sharing a commit, as an empty one does with the branch under it, have no order in git itself.
 
-`apply` checks the whole file before writing anything, and on any problem it writes nothing and names the offending line. It refuses a stack branch whose `update-ref` line is gone or doubled, a new name that is already a branch outside the stack, and a new empty branch at the very bottom, which git could not tell from the base. Nearly every other refusal comes from the wip branch having been rewritten since export, and exporting again is the remedy.
+`save` checks the whole file before writing anything, and on any problem it writes nothing and names the offending line. It refuses a stack branch whose `update-ref` line is gone or doubled, a new name that is already a branch outside the stack, and a new empty branch at the very bottom, which git could not tell from the base. Nearly every other refusal comes from the wip branch having been rewritten since export, and exporting again is the remedy.
 
-`stack-plan go` is `apply --rebase`: it goes straight on to step 4 once the notes are written, and rebases nothing when `apply` refuses the file. It takes `-f` like `rebase` does. `stack-plan preview` applies the file for real, then runs the rebase as a dry run, so `go` afterwards rebases exactly what it showed. `preview -n` is `apply --rebase --dry-run`: it writes no notes, so the preview uses the file's placements in their stead. That is the way to preview an edit before any note is written.
+### 4. Preview and apply
 
-### 4. Rebase
-
-The agents must be idle first: they all share one worktree and one HEAD, so a commit made mid-rebase lands on whatever commit the rebase has reached and is carried along from there.
+The agents must be idle before `apply`: they all share one worktree and one HEAD, so a commit made mid-rebase lands on whatever commit the rebase has reached and is carried along from there.
 
 ```shell
-stack-plan rebase --dry-run
-stack-plan rebase
+stack-plan preview
+stack-plan apply
 ```
 
-The dry run lists each move and the base it would use, then previews the rebase. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. A real `rebase` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan rebase -f` (`--anyway`) goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
+Both save the file as notes first, and stop there when `save` refuses it. `preview` then lists each move and the base it would use, and previews the rebase. It saves for real, so `apply` afterwards rebases exactly what it showed. `preview -n` writes no notes, so the preview uses the file's placements in their stead. That is the way to preview an edit before any note is written. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. `apply` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan apply -f` (`--anyway`) goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
 
-`rebase` reads the notes and the saved order, not `stackplan.txt`, so what `apply` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor. It builds the whole todo itself, branch by branch in the saved order: each branch's own commits, then the picks moving into it, then its `update-ref` line. It swaps that in for git's todo only when both hold the same picks, and the preview replays the same todo. Then it opens the todo in the editor git would have used, with moved picks marked `[moved]` after their hash, and a `# [new branch]` or `# [moved branch]` comment above each branch that changes. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `rebase` runs `verify`.
+The rebase reads the notes and the saved order, not `stackplan.txt`, so what `save` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor. It builds the whole todo itself, branch by branch in the saved order: each branch's own commits, then the picks moving into it, then its `update-ref` line. It swaps that in for git's todo only when both hold the same picks, and the preview replays the same todo. Then it opens the todo in the editor git would have used, with moved picks marked `[moved]` after their hash, and a `# [new branch]` or `# [moved branch]` comment above each branch that changes. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `apply` runs `verify`.
 
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. It is `--base` (`origin/main`) when that is the lowest branch of the stack. Moving the bottom branch therefore rebases the whole stack.
 
@@ -165,7 +166,7 @@ When the tree matches and nothing was dropped or added, `verify` finally removes
 ## Where things live
 
 - The plan: `.agent-context/active-work-context/stackplan.txt` in the repository it was exported from, plus `stackplan.txt.bak`. It is gitignored scratch.
-- The rebase log: `stackplan-rebases.log` beside the plan, one `[yymmdd hhmm] <sha>` line per `stack-plan rebase`, newest first. Each SHA is the wip tip from before that rebase, the one to hand `git restore --source=` to go back.
+- The rebase log: `stackplan-rebases.log` beside the plan, one `[yymmdd hhmm] <sha>` line per rebase `stack-plan apply` ran, newest first. Each SHA is the wip tip from before that rebase, the one to hand `git restore --source=` to go back.
 - The notes: `refs/notes/target`, shared across worktrees. Notes stay local, because the default push refspec leaves `refs/notes/*` out.
 - The stack order: `stackplan.order` and, while a branch waits to be created, `stackplan.new`, in the repository's git config.
 - The script: [`scripts/stack-plan.mts`](../scripts/stack-plan.mts), with `scripts/stack-plan` linking to it.

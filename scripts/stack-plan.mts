@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|go|preview|apply|rebase|verify [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|verify [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -55,26 +55,24 @@ const git = (...args: string[]) => {
 const USAGE = [
   'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway]',
   '  export (e)   write the plan file',
-  '  go           apply, then rebase',
-  '  preview      apply, then preview the rebase; -n also leaves the notes unwritten',
-  '  apply (a)    write notes from the plan; --rebase also rebases',
-  '  rebase (r)   rebase the stack; -f runs it despite a predicted conflict',
+  '  save (s)     write notes from the plan',
+  '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
+  '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
   '  verify (v)   compare the stack with the pre-rebase tip',
 ].join('\n');
 
 const EXPANSIONS: Record<string, string[]> = {
   e: ['export'],
+  s: ['save'],
   a: ['apply'],
-  r: ['rebase'],
   v: ['verify'],
-  go: ['apply', '--rebase'],
 };
 const FLAG_ALIASES: Record<string, string> = { '-b': '--base', '-n': '--dry-run', '-f': '--anyway' };
 const ALLOWED_FLAGS: Record<string, string[]> = {
   export: ['--base'],
-  apply: ['--base', '--dry-run', '--rebase', '--anyway'],
+  save: ['--base', '--dry-run'],
   preview: ['--base', '--dry-run'],
-  rebase: ['--base', '--dry-run', '--anyway'],
+  apply: ['--base', '--anyway'],
   verify: ['--base', '--dry-run'],
 };
 
@@ -130,7 +128,7 @@ const readConfig = (key: string) => {
   }
 };
 
-// The order apply saved, while it still covers the stack; a missing branch counts only while it waits to be created.
+// The order save stored, while it still covers the stack; a missing branch counts only while it waits to be created.
 const desiredOrder = (current: string[]) => {
   const waiting = words(readConfig(NEW_KEY));
   const stored = words(readConfig(ORDER_KEY)).filter((branch) => current.includes(branch) || waiting.includes(branch));
@@ -275,7 +273,7 @@ const pickLine = (commit: Commit) => `pick ${commit.sha.slice(0, 10)} ${commit.s
 const exportPlan = () => {
   const wip = currentBranch();
   const { branches: current, pending } = readStack(wip);
-  // An order applied but not yet rebased is exported as planned, like the notes are.
+  // An order saved but not yet rebased is exported as planned, like the notes are.
   const branches = desiredOrder(current);
   const sections = new Map<string, Commit[]>([...branches, wip].map((branch) => [branch, []]));
   const untagged: Commit[] = [];
@@ -297,7 +295,7 @@ const exportPlan = () => {
     ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
-    '# new branch, then run: stack-plan apply',
+    '# new branch, then run: stack-plan preview, then stack-plan apply',
     '',
   ];
   for (const branch of branches) {
@@ -318,7 +316,7 @@ const exportPlan = () => {
   for (const commit of strayNotes) attention(`note "${commit.note}" names no stack branch:\n${commitLine(commit)}`);
 };
 
-const applyPlan = () => {
+const savePlan = () => {
   const wip = currentBranch();
   const { branches, pending } = readStack(wip);
   const errors: string[] = [];
@@ -394,7 +392,7 @@ const applyPlan = () => {
     }
   }
 
-  heading(dryRun ? 'Apply (dry run)' : 'Apply');
+  heading(dryRun ? 'Save (dry run)' : 'Save');
   if (errors.length) {
     bad('no notes written');
     for (const error of errors) console.log(`  ${error}`);
@@ -440,12 +438,12 @@ const applyPlan = () => {
   return { targets, order: updateRefs };
 };
 
-type Planned = ReturnType<typeof applyPlan>;
+type Planned = ReturnType<typeof savePlan>;
 
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
 const verifyRebase = () => {
   const wip = currentBranch();
-  const recorded = requireHeader(PRE_REBASE_PREFIX, 'stack-plan rebase records one when it starts');
+  const recorded = requireHeader(PRE_REBASE_PREFIX, 'stack-plan apply records one when it rebases');
   const short = yellow(recorded.slice(0, 10));
   heading('Verify');
 
@@ -548,10 +546,10 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-const rebaseStack = (planned?: Planned, preview = dryRun) => {
+const applyStack = (planned?: Planned, preview = dryRun) => {
   const wip = currentBranch();
   const { branches, pending, own } = readStack(wip);
-  // A dry-run apply writes no notes or config, so its plan stands in for them.
+  // A dry-run save writes no notes or config, so its plan stands in for them.
   for (const commit of pending) if (planned?.targets.has(commit.sha)) commit.note = planned.targets.get(commit.sha) ?? '';
   const order = planned?.order ?? desiredOrder(branches);
   const moves = pending.filter((commit) => commit.note !== wip && order.includes(commit.note));
@@ -604,7 +602,7 @@ const rebaseStack = (planned?: Planned, preview = dryRun) => {
   if (preview) return;
   if (!simulation.ok && !rest.includes('--anyway')) {
     console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
-    console.log('  stack-plan rebase -f');
+    console.log('  stack-plan apply -f');
     process.exit(1);
   }
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
@@ -665,12 +663,11 @@ const editTodo = (todoPath: string) => {
 
 try {
   if (command === 'export') exportPlan();
-  else if (command === 'apply' || command === 'preview') {
-    const planned = applyPlan();
-    if (command === 'preview') rebaseStack(dryRun ? planned : undefined, true);
-    else if (rest.includes('--rebase')) rebaseStack(dryRun ? planned : undefined);
+  else if (command === 'save' || command === 'preview' || command === 'apply') {
+    const planned = savePlan();
+    if (command === 'preview') applyStack(dryRun ? planned : undefined, true);
+    else if (command === 'apply') applyStack();
   }
-  else if (command === 'rebase') rebaseStack();
   else if (command === 'verify') verifyRebase();
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
