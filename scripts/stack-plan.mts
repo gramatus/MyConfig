@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -63,6 +63,7 @@ const USAGE = [
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
   '  prepare      record the pre-rebase tip before a rebase run by hand',
   '  verify (v)   compare the stack with the pre-rebase tip',
+  '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -80,6 +81,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   apply: ['--base', '--anyway'],
   prepare: [],
   verify: ['--base', '--dry-run'],
+  cut: ['--base'],
   mode: ['full', 'short'],
 };
 
@@ -92,13 +94,16 @@ const usageError = (message?: string): never => {
   console.error(USAGE);
   process.exit(2);
 };
+let cutAt: string | undefined;
 if (command !== '_todo') {
   const allowed = ALLOWED_FLAGS[command] ?? usageError(given ? `unknown command "${given}"` : undefined);
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
+    else if (command === 'cut' && !cutAt && !rest[i].startsWith('-')) cutAt = rest[i];
     else if (!allowed.includes(rest[i])) usageError(`${rest[i]} does not apply to ${given}`);
   }
   if (command === 'mode' && rest.length > 1) usageError('mode takes one of full or short');
+  if (command === 'cut' && !cutAt) usageError('cut needs the branch to cut at');
 }
 
 const optionValue = (name: string) => {
@@ -273,8 +278,25 @@ const printOrderChanges = (current: string[], order: string[]) => {
 const gitQuiet = (...args: string[]) =>
   execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
 
+const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
+
+type Merge = { ok: true; tree: string } | { ok: false; files: string[] };
+
+// A three-way merge in memory: the tree it would produce, or the files that would conflict.
+const mergeTree = (mergeBase: string, ours: string, theirs: string): Merge => {
+  try {
+    const merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${mergeBase}`, ours, theirs);
+    return { ok: true, tree: merged.split('\n')[0] };
+  } catch (error) {
+    const failure = error as { status?: number; stdout?: string };
+    if (failure.status !== 1) throw error;
+    const listed = (failure.stdout ?? '').split('\n').slice(1);
+    return { ok: false, files: [...new Set(listed.slice(0, Math.max(0, listed.indexOf(''))))] };
+  }
+};
+
 type Simulation =
-  | { ok: true; picks: number; sameTree: boolean }
+  | { ok: true; picks: number; sameTree: boolean; tip: string }
   | { ok: false; picks: number; at: number; commit: Commit; files: string[] };
 
 // Replays the planned picks in memory: objects are written, no ref moves, and the worktree is untouched.
@@ -285,22 +307,94 @@ const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulat
   let state = start;
   let parent = start;
   for (const [index, { commit, fold }] of sequence.entries()) {
-    let merged: string;
-    try {
-      merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${commit.sha}^`, state, commit.sha);
-    } catch (error) {
-      const failure = error as { status?: number; stdout?: string };
-      if (failure.status !== 1) throw error;
-      const listed = (failure.stdout ?? '').split('\n').slice(1);
-      const files = [...new Set(listed.slice(0, Math.max(0, listed.indexOf(''))))];
-      return { ok: false, picks: sequence.length, at: index, commit, files };
-    }
-    const tree = merged.split('\n')[0];
+    const merged = mergeTree(`${commit.sha}^`, state, commit.sha);
+    if (!merged.ok) return { ok: false, picks: sequence.length, at: index, commit, files: merged.files };
     if (!fold) parent = state;
-    state = gitQuiet('commit-tree', tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
+    state = gitQuiet('commit-tree', merged.tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
   }
-  const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
-  return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip) };
+  return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip), tip: state };
+};
+
+// Whitespace and line numbers do not count, so the same change on a moved base gets the same id.
+const patchId = (from: string, to: string, path?: string) => {
+  const diff = gitQuiet('diff', from, to, ...(path ? ['--', path] : []));
+  if (!diff) return '';
+  return execFileSync('git', ['patch-id', '--stable'], { input: diff, encoding: 'utf8', maxBuffer: 1 << 28 }).split(' ')[0];
+};
+
+const fileList = (output: string) => output.split('\n').filter(Boolean);
+
+// Read-only: whether cutting the stack at a branch and rebasing the rest onto the base would lose any work.
+const cutStack = (at: string) => {
+  const wip = currentBranch();
+  const { line, branches } = readStack(wip);
+  if (!branches.includes(at)) throw new Error(`${at} is not a stack branch below ${wip}; the stack is: ${branches.join(' ')}`);
+  heading(`Cut at ${at}, onto ${base}`);
+  let lost = 0;
+  let unclear = 0;
+
+  // Per branch, since a squash merge leaves only a branch's end state in the base.
+  subheading(`Below the cut: already in ${base}?`);
+  const below = branches.slice(0, branches.indexOf(at) + 1);
+  const fork = git('merge-base', base, wip).trim();
+  for (const [index, branch] of below.entries()) {
+    const merged = mergeTree(index === 0 ? fork : tipOf(below[index - 1]), base, branch);
+    if (!merged.ok) {
+      unclear++;
+      attention(`${cyan(branch)}  can't tell: ${base} changed these again since, so compare by hand`);
+      for (const file of merged.files) console.log(`    ${file}`);
+    } else if (merged.tree === treeOf(base)) good(`${cyan(branch)}  contained in ${base}`);
+    else {
+      lost++;
+      bad(`${cyan(branch)}  would be lost: ${base} lacks its changes to`);
+      for (const file of fileList(gitQuiet('diff', '--name-only', base, merged.tree))) console.log(`    ${file}`);
+    }
+  }
+
+  subheading(`Above the cut: rebased onto ${base}`);
+  const above = line.slice(line.findIndex((commit) => commit.branches.includes(at)) + 1);
+  if (!above.length) good('no commits above the cut');
+  else {
+    const simulation = simulateRebase(above.map((commit) => ({ commit, fold: false })), tipOf(base), wip);
+    if (!simulation.ok) {
+      unclear++;
+      bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict:`);
+      console.log(commitLine(simulation.commit));
+      for (const file of simulation.files) console.log(`    ${file}`);
+    } else {
+      good(`all ${simulation.picks} picks apply cleanly in memory`);
+      const onBase = tipOf(base);
+      if (patchId(at, wip) === patchId(onBase, simulation.tip)) good(`the net change of ${at}..${wip} is the same on ${base}`);
+      else {
+        const files = new Set([...fileList(gitQuiet('diff', '--name-only', at, wip)), ...fileList(gitQuiet('diff', '--name-only', onBase, simulation.tip))]);
+        const differing = [...files].filter((file) => patchId(at, wip, file) !== patchId(onBase, simulation.tip, file));
+        // A file that ends the same as on wip lost nothing: the base already had that part of the change.
+        const blob = (ref: string, file: string) => (gitSucceeds('cat-file', '-e', `${ref}:${file}`) ? tipOf(`${ref}:${file}`) : '');
+        const landed = differing.filter((file) => blob(simulation.tip, file) === blob(wip, file));
+        const missing = differing.filter((file) => !landed.includes(file));
+        if (landed.length) {
+          attention(`part of ${at}..${wip} is already in ${base}, so these files end as on ${wip}:`);
+          for (const file of landed) console.log(`    ${file}`);
+        }
+        if (missing.length) {
+          lost++;
+          bad(`the net change of ${at}..${wip} differs on ${base}, and these files end differently:`);
+          for (const file of missing) console.log(`    ${file}`);
+        } else good(`the rest of the net change of ${at}..${wip} is the same on ${base}`);
+      }
+    }
+  }
+
+  subheading('Conclusion');
+  if (lost) bad(`cutting at ${at} would lose work; see the files above`);
+  else if (unclear) attention(`no loss found, but some of it needs a look by hand; see above`);
+  else {
+    good(`cutting at ${at} and rebasing onto ${base} loses no work`);
+    console.log(`To do it (prepare keeps the current tip in stackplan-rebases.log):`);
+    console.log(`  stack-plan prepare`);
+    console.log(`  git rebase -i --update-refs --onto ${base} ${at}`);
+  }
+  if (lost || unclear) process.exit(1);
 };
 
 // Prints commits under their branch, in stack order.
@@ -855,6 +949,7 @@ try {
   else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
+  else if (command === 'cut') cutStack(cutAt!);
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

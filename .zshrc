@@ -169,6 +169,7 @@ _stack_plan() {
         'apply:save, then rebase the stack'
         'prepare:record the pre-rebase tip before a rebase run by hand'
         'verify:compare the stack with the pre-rebase tip'
+        'cut:check that cutting the stack at a branch loses no work'
         'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
@@ -176,6 +177,12 @@ _stack_plan() {
         return
     fi
     [[ $words[2] == prepare ]] && return
+    if [[ $words[2] == cut ]]; then
+        shift words
+        (( CURRENT-- ))
+        _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' ':branch:_stack_plan_refs'
+        return
+    fi
     if [[ $words[2] == mode ]]; then
         (( CURRENT == 3 )) && compadd full short
         return

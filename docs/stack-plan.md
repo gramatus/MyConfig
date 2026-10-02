@@ -14,6 +14,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
 | `sp prepare`    | Records the pre-rebase tip, so `verify` works after a rebase you run by hand.             |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
+| `sp cut <b>`    | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. |
 | `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -176,6 +177,25 @@ The summary line starts with `✓` when no change differs, `!` when some did and
 Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 
 When the tree matches and nothing was dropped or added, `verify` finally removes the notes from every commit that has landed in its branch, in one `git notes remove`. Commits still waiting on the wip branch keep theirs. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
+
+### 6. Cut the stack once its bottom has landed
+
+```shell
+git fetch
+stack-plan cut <branch>
+```
+
+Once the bottom branches have been squash-merged into the base, the stack should lose them and sit on the base instead. `cut` checks, without changing anything, whether dropping every branch up to and including `<branch>`, and rebasing the rest onto `--base`, would lose any work. Fetch first, because it compares against the base as it is locally.
+
+Below the cut it checks each branch on its own, because a squash merge leaves only a branch's end state in the base. It merges the branch's changes into the base in memory, and reads the result:
+
+- `✓ contained` — the merge changes nothing, so the base already has everything the branch did.
+- `✗ would be lost` — the merge changes the listed files, so the base lacks part of the branch.
+- `! can't tell` — the merge conflicts. Usually the base changed those lines again after merging them, so compare by hand.
+
+Above the cut it replays the remaining commits onto the base, as `preview` does, and reports the first conflict if there is one. When everything applies, it compares the net change of `<branch>..wip` before and after, with `git patch-id`, which ignores line numbers. A file that ends exactly as on wip counts as already in the base rather than lost.
+
+When nothing is lost and nothing needs a look, it prints the commands that do the cut: `stack-plan prepare`, then `git rebase -i --update-refs --onto <base> <branch>`. `verify` afterwards compares against a tip that sat on the old base, so it reports a differing tree. It does not yet know about a cut.
 
 ## Where things live
 
