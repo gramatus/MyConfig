@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|verify [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|verify|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -10,11 +10,13 @@ const NOTES_REF = 'refs/notes/target';
 const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of its branch ----';
 const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
+const MODE_PREFIX = '# mode: ';
 const MOVED_MARKER = '>>> [moved]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
 const ORDER_KEY = 'stackplan.order';
 const NEW_KEY = 'stackplan.new';
+const MODE_KEY = 'stackplan.mode';
 
 // Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
 const colourOn = (stream: NodeJS.WriteStream) => !process.env.NO_COLOR && stream.isTTY === true;
@@ -59,6 +61,7 @@ const USAGE = [
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
   '  verify (v)   compare the stack with the pre-rebase tip',
+  '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
 const EXPANSIONS: Record<string, string[]> = {
@@ -74,6 +77,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   preview: ['--base', '--dry-run'],
   apply: ['--base', '--anyway'],
   verify: ['--base', '--dry-run'],
+  mode: ['full', 'short'],
 };
 
 const [given = '', ...args] = process.argv.slice(2);
@@ -88,9 +92,10 @@ const usageError = (message?: string): never => {
 if (command !== '_todo') {
   const allowed = ALLOWED_FLAGS[command] ?? usageError(given ? `unknown command "${given}"` : undefined);
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--base') i++;
+    if (rest[i] === '--base' && allowed.includes('--base')) i++;
     else if (!allowed.includes(rest[i])) usageError(`${rest[i]} does not apply to ${given}`);
   }
+  if (command === 'mode' && rest.length > 1) usageError('mode takes one of full or short');
 }
 
 const optionValue = (name: string) => {
@@ -101,6 +106,7 @@ const base = optionValue('--base') ?? 'origin/main';
 const dryRun = rest.includes('--dry-run');
 
 type Commit = { sha: string; subject: string; branches: string[]; note: string };
+type Step = { pick: Commit } | { updateRef: string };
 
 let root: string | undefined;
 const repoRoot = () => (root ??= git('rev-parse', '--show-toplevel').trim());
@@ -127,6 +133,8 @@ const readConfig = (key: string) => {
     return '';
   }
 };
+
+const fullMode = () => readConfig(MODE_KEY) === 'full';
 
 // The order save stored, while it still covers the stack; a missing branch counts only while it waits to be created.
 const desiredOrder = (current: string[]) => {
@@ -272,7 +280,8 @@ const pickLine = (commit: Commit) => `pick ${commit.sha.slice(0, 10)} ${commit.s
 
 const exportPlan = () => {
   const wip = currentBranch();
-  const { branches: current, pending } = readStack(wip);
+  const full = fullMode();
+  const { line, branches: current, pending, own } = readStack(wip);
   // An order saved but not yet rebased is exported as planned, like the notes are.
   const branches = desiredOrder(current);
   const sections = new Map<string, Commit[]>([...branches, wip].map((branch) => [branch, []]));
@@ -293,13 +302,16 @@ const exportPlan = () => {
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
     ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
+    ...(full ? [`${MODE_PREFIX}full`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
     '# new branch, then run: stack-plan preview, then stack-plan apply',
+    ...(full ? [`# Full mode: every commit since ${base} is listed, and the rebase follows this order.`] : []),
     '',
   ];
   for (const branch of branches) {
-    out.push(...sections.get(branch)!.map(pickLine), `update-ref refs/heads/${branch}\n`);
+    const inBranch = full ? (own.get(branch) ?? []) : [];
+    out.push(...[...inBranch, ...sections.get(branch)!].map(pickLine), `update-ref refs/heads/${branch}\n`);
   }
   out.push(...sections.get(wip)!.map(pickLine), UNTAGGED_MARKER, ...untagged.map(pickLine), '');
 
@@ -308,9 +320,10 @@ const exportPlan = () => {
   if (existsSync(path)) copyFileSync(path, `${path}.bak`);
   writeFileSync(path, out.join('\n'));
 
-  heading('Export');
+  heading(full ? 'Export (full)' : 'Export');
   console.log(`${bold('wrote')}  ${path}`);
-  console.log(`${pending.length} waiting · ${pending.length - untagged.length} placed · ${branches.length} stack branches`);
+  const inBranches = full ? ` · ${line.length - pending.length} in branches` : '';
+  console.log(`${pending.length} waiting · ${pending.length - untagged.length} placed${inBranches} · ${branches.length} stack branches`);
   if (untagged.length) attention(`${untagged.length} untagged, below the marker`);
   else good('every waiting commit is placed');
   for (const commit of strayNotes) attention(`note "${commit.note}" names no stack branch:\n${commitLine(commit)}`);
@@ -318,11 +331,14 @@ const exportPlan = () => {
 
 const savePlan = () => {
   const wip = currentBranch();
-  const { branches, pending } = readStack(wip);
+  const { line: history, branches, pending } = readStack(wip);
+  const full = readHeader(MODE_PREFIX) === 'full';
+  const listable = full ? history : pending;
   const errors: string[] = [];
   const targets = new Map<string, string | undefined>();
   const listed = new Set<string>();
   const updateRefs: string[] = [];
+  const steps: Step[] = [];
   let held: string[] = [];
   let pastMarker = false;
 
@@ -343,14 +359,17 @@ const savePlan = () => {
         if (pastMarker) errors.push(`${where}: update-ref below the untagged marker`);
         const branch = arg.replace(/^refs\/heads\//, '');
         updateRefs.push(branch);
+        steps.push({ updateRef: branch });
         for (const sha of held) targets.set(sha, branch);
         held = [];
       } else if (verb === 'pick' || verb === 'p') {
-        const commit = pending.find((candidate) => candidate.sha.startsWith(arg));
-        if (!commit) errors.push(`${where}: ${arg} is not waiting on ${wip}; export again`);
+        const commit = listable.find((candidate) => candidate.sha.startsWith(arg));
+        const scope = full ? `in ${base}..${wip}` : `waiting on ${wip}`;
+        if (!commit) errors.push(`${where}: ${arg} is not ${scope}; export again`);
         else if (listed.has(commit.sha)) errors.push(`${where}: ${arg} is listed twice`);
         else {
           listed.add(commit.sha);
+          steps.push({ pick: commit });
           if (pastMarker) targets.set(commit.sha, undefined);
           else held.push(commit.sha);
         }
@@ -358,6 +377,9 @@ const savePlan = () => {
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
+  if (full !== fullMode()) {
+    errors.push(`the plan was exported in ${full ? 'full' : 'short'} mode, and the mode is now ${full ? 'short' : 'full'}; export again`);
+  }
   const created = updateRefs.filter((branch) => !branches.includes(branch));
   const recorded = requireHeader(EXPORTED_AT_PREFIX, 'export again');
   const current = tipOf(wip);
@@ -385,7 +407,7 @@ const savePlan = () => {
     if (created.includes(lowest) && ![...targets.values()].includes(lowest)) {
       errors.push(`${lowest} is new and empty at the bottom of the stack, where git cannot tell it from ${base}`);
     }
-    for (const commit of pending) {
+    for (const commit of listable) {
       if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
         errors.push(`${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`);
       }
@@ -435,7 +457,8 @@ const savePlan = () => {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
     console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
   }
-  return { targets, order: updateRefs };
+  steps.push(...unplaced.map((pick) => ({ pick })));
+  return { targets, order: updateRefs, steps: full ? steps : undefined };
 };
 
 type Planned = ReturnType<typeof savePlan>;
@@ -546,8 +569,26 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-const applyStack = (planned?: Planned, preview = dryRun) => {
-  const wip = currentBranch();
+type Rebase = { todo: string[]; sequence: Commit[]; rebaseBase: string };
+
+const newTodo = () => {
+  const todo: string[] = [];
+  const sequence: Commit[] = [];
+  const pick = (commit: Commit, marker = '') => {
+    todo.push(`pick ${commit.sha} ${marker}${commit.subject}`);
+    sequence.push(commit);
+  };
+  return { todo, sequence, pick };
+};
+
+const branchMarker = (branch: string, branches: string[], order: string[]) => {
+  const below = order[order.indexOf(branch) - 1] ?? base;
+  if (!branches.includes(branch)) return `# ${NEW_BRANCH_MARKER} ${branch}, above ${below}`;
+  if (movedBranches(branches, order).includes(branch)) return `# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`;
+};
+
+// Short mode: each branch keeps its own commits as a block, and waiting commits join the branch their note names.
+const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   const { branches, pending, own } = readStack(wip);
   // A dry-run save writes no notes or config, so its plan stands in for them.
   for (const commit of pending) if (planned?.targets.has(commit.sha)) commit.note = planned.targets.get(commit.sha) ?? '';
@@ -556,7 +597,6 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   const receives = (branch: string) => moves.some((commit) => commit.note === branch);
   let first = 0;
   while (first < order.length && order[first] === branches[first] && !receives(order[first])) first++;
-  heading(preview ? 'Plan (dry run)' : 'Plan');
   if (first === order.length) {
     good(`no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`);
     return;
@@ -568,23 +608,62 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
 
   const moved = new Set(moves.map((commit) => commit.sha));
-  const relocated = new Set(movedBranches(branches, order));
-  const todo: string[] = [];
-  const sequence: Commit[] = [];
-  const pick = (commit: Commit, marker = '') => {
-    todo.push(`pick ${commit.sha} ${marker}${commit.subject}`);
-    sequence.push(commit);
-  };
-  for (const [index, branch] of order.entries()) {
-    if (index < first) continue;
-    const below = order[index - 1] ?? base;
-    if (!branches.includes(branch)) todo.push(`# ${NEW_BRANCH_MARKER} ${branch}, above ${below}`);
-    else if (relocated.has(branch)) todo.push(`# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`);
+  const { todo, sequence, pick } = newTodo();
+  for (const branch of order.slice(first)) {
+    const marker = branchMarker(branch, branches, order);
+    if (marker) todo.push(marker);
     for (const commit of own.get(branch) ?? []) pick(commit);
     for (const commit of moves.filter((move) => move.note === branch)) pick(commit, `${MOVED_MARKER} `);
     todo.push(`update-ref refs/heads/${branch}`, '');
   }
   for (const commit of pending.filter((commit) => !moved.has(commit.sha))) pick(commit);
+  return { todo, sequence, rebaseBase };
+};
+
+// Full mode: the plan's own steps are the todo, from the last commit where they still match history.
+const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | undefined => {
+  const { line, branches, own } = readStack(wip);
+  const current: Step[] = line.flatMap((commit) => [{ pick: commit }, ...commit.branches.map((updateRef) => ({ updateRef }))]);
+  const same = (a: Step, b?: Step) =>
+    b !== undefined && ('pick' in a ? 'pick' in b && a.pick.sha === b.pick.sha : 'updateRef' in b && a.updateRef === b.updateRef);
+  let kept = 0;
+  while (kept < steps.length && same(steps[kept], current[kept])) kept++;
+  if (kept === steps.length && kept === current.length) {
+    good('the plan matches the stack as it is; nothing to move');
+    return;
+  }
+  const lastKept = steps.slice(0, kept).findLast((step): step is { pick: Commit } => 'pick' in step)?.pick;
+  const rebaseBase = lastKept?.sha ?? base;
+
+  const branchOf = new Map([...own].flatMap(([branch, commits]) => commits.map((commit) => [commit.sha, branch] as const)));
+  const was = (commit: Commit) => branchOf.get(commit.sha) ?? wip;
+  const goes = (commit: Commit) => planned.targets.get(commit.sha) ?? wip;
+  const order = planned.order;
+  printByBranch([...order, wip], goes, line.filter((commit) => was(commit) !== goes(commit)));
+  printOrderChanges(branches, order);
+  console.log(`${bold('base')}  ${lastKept ? commitLine(lastKept).trim() : cyan(base)}`);
+
+  const { todo, sequence, pick } = newTodo();
+  let sectionStart = 0;
+  for (const step of steps.slice(kept)) {
+    if ('pick' in step) {
+      pick(step.pick, was(step.pick) === goes(step.pick) ? '' : `${MOVED_MARKER} `);
+      continue;
+    }
+    const marker = branchMarker(step.updateRef, branches, order);
+    if (marker) todo.splice(sectionStart, 0, marker);
+    todo.push(`update-ref refs/heads/${step.updateRef}`, '');
+    sectionStart = todo.length;
+  }
+  return { todo, sequence, rebaseBase };
+};
+
+const applyStack = (planned?: Planned, preview = dryRun) => {
+  const wip = currentBranch();
+  heading(preview ? 'Plan (dry run)' : 'Plan');
+  const rebase = planned?.steps ? fullRebase(wip, planned.steps, planned) : shortRebase(wip, planned);
+  if (!rebase) return;
+  const { todo, sequence, rebaseBase } = rebase;
 
   heading('Preview');
   const started = Date.now();
@@ -661,14 +740,26 @@ const editTodo = (todoPath: string) => {
   }
 };
 
+const setMode = () => {
+  const [wanted] = rest;
+  if (wanted === 'full') git('config', MODE_KEY, 'full');
+  else if (wanted === 'short' && readConfig(MODE_KEY)) git('config', '--unset', MODE_KEY);
+  heading('Mode');
+  const full = fullMode();
+  console.log(`${bold(full ? 'full' : 'short')}  export lists ${full ? 'every commit since the base' : 'only the commits waiting to move'}`);
+  if (wanted) console.log('Run stack-plan export to write the plan in this mode.');
+};
+
 try {
   if (command === 'export') exportPlan();
   else if (command === 'save' || command === 'preview' || command === 'apply') {
     const planned = savePlan();
-    if (command === 'preview') applyStack(dryRun ? planned : undefined, true);
-    else if (command === 'apply') applyStack();
+    // Full mode always passes the plan, because notes cannot hold the order within a branch.
+    if (command === 'preview') applyStack(dryRun || planned.steps ? planned : undefined, true);
+    else if (command === 'apply') applyStack(planned.steps ? planned : undefined);
   }
   else if (command === 'verify') verifyRebase();
+  else if (command === 'mode') setMode();
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

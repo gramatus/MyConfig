@@ -13,6 +13,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp preview`    | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either.     |
 | `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
+| `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
 
@@ -83,6 +84,14 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 
 Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order saved but not yet rebased.
 
+#### Full mode
+
+`stack-plan mode full` makes every later export list each commit since the base, not only the ones waiting on the wip branch. The file then reads like a complete rebase todo: reorder picks within a branch, move a commit from one branch to another, or out of the stack onto the wip branch. `stack-plan mode short` switches back, and `stack-plan mode` alone shows which one is active. The mode lives in git config as `stackplan.mode`.
+
+The export marks the file with a `# mode: full` line, and `save` refuses a file exported in the other mode, so export again after switching. Every commit has to stay in the file exactly once, and only `pick` and `update-ref` lines are accepted.
+
+Notes record which branch a commit goes to, but not its order within the branch. So in full mode `preview` and `apply` take the todo from the file itself, rather than from the notes. `save` still writes notes for the waiting commits and stores the order, so switching back to short mode loses no placement. A re-export before `apply` does lose any reordering within a branch, except in `stackplan.txt.bak`.
+
 ### 3. Save
 
 ```shell
@@ -111,7 +120,7 @@ stack-plan apply
 
 Both save the file as notes first, and stop there when `save` refuses it. `preview` then lists each move and the base it would use, and previews the rebase. It saves for real, so `apply` afterwards rebases exactly what it showed. `preview -n` writes no notes, so the preview uses the file's placements in their stead. That is the way to preview an edit before any note is written. The preview replays the planned todo in memory, one pick at a time: `git merge-tree --merge-base=<pick>^` applies each pick onto the simulated state so far, and `git commit-tree` records the result. It writes objects but moves no ref and leaves the worktree alone. It either reports that every pick applies cleanly, or names the first pick that would conflict and its files. `apply` runs the same preview first and rewrites nothing when it predicts a conflict. `stack-plan apply -f` (`--anyway`) goes ahead regardless, for a conflict you would rather resolve by hand. The preview cannot see resolutions `rerere` has recorded, so a predicted conflict may still resolve itself.
 
-The rebase reads the notes and the saved order, not `stackplan.txt`, so what `save` wrote is what moves. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor. It builds the whole todo itself, branch by branch in the saved order: each branch's own commits, then the picks moving into it, then its `update-ref` line. It swaps that in for git's todo only when both hold the same picks, and the preview replays the same todo. Then it opens the todo in the editor git would have used, with moved picks marked `[moved]` after their hash, and a `# [new branch]` or `# [moved branch]` comment above each branch that changes. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `apply` runs `verify`.
+The rebase reads the notes and the saved order, not `stackplan.txt`, so what `save` wrote is what moves. Full mode is the exception, and its todo is the file's own sequence of lines. It rebases from the last commit where that sequence still matches the history. It records the wip tip in the file's `pre-rebase:` line and at the top of `stackplan-rebases.log`, then runs `git rebase -i --update-refs <base>` with itself as git's sequence editor. It builds the whole todo itself, branch by branch in the saved order: each branch's own commits, then the picks moving into it, then its `update-ref` line. It swaps that in for git's todo only when both hold the same picks, and the preview replays the same todo. Then it opens the todo in the editor git would have used, with moved picks marked `[moved]` after their hash, and a `# [new branch]` or `# [moved branch]` comment above each branch that changes. Git ignores everything after the hash on a `pick` line, so the marker never reaches a commit message. Save and close to start the rebase. Empty the todo, or exit the editor with an error (`:cq` in Vim), to call it off. When the rebase finishes, `apply` runs `verify`.
 
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. It is `--base` (`origin/main`) when that is the lowest branch of the stack. Moving the bottom branch therefore rebases the whole stack.
 

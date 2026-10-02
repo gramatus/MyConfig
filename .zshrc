@@ -168,9 +168,14 @@ _stack_plan() {
         'preview:save, then preview the rebase'
         'apply:save, then rebase the stack'
         'verify:compare the stack with the pre-rebase tip'
+        'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
         _describe 'command' commands
+        return
+    fi
+    if [[ $words[2] == mode ]]; then
+        (( CURRENT == 3 )) && compadd full short
         return
     fi
     local -a flags=('(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs')
