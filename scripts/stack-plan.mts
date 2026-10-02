@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|verify|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -61,6 +61,7 @@ const USAGE = [
   '  save (s)     write notes from the plan',
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
+  '  prepare      record the pre-rebase tip before a rebase run by hand',
   '  verify (v)   compare the stack with the pre-rebase tip',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
@@ -77,6 +78,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   save: ['--base', '--dry-run'],
   preview: ['--base', '--dry-run'],
   apply: ['--base', '--anyway'],
+  prepare: [],
   verify: ['--base', '--dry-run'],
   mode: ['full', 'short'],
 };
@@ -191,6 +193,28 @@ const writeHeader = (prefix: string, sha: string) => {
 const dropHeader = (prefix: string) => {
   const lines = readFileSync(planPath(), 'utf8').split('\n');
   writeFileSync(planPath(), lines.filter((line) => !line.startsWith(prefix)).join('\n'));
+};
+
+// Sets the tip verify compares against, and replaces the folds of any earlier rebase with this one's.
+const recordPreRebase = (sha: string, folded: string[]) => {
+  writeHeader(PRE_REBASE_PREFIX, sha);
+  if (folded.length) writeHeader(FOLDED_PREFIX, folded.join(' '));
+  else dropHeader(FOLDED_PREFIX);
+  logPreRebase(sha);
+};
+
+// For a rebase run by hand, so verify has a tip to compare against afterwards.
+const prepareRebase = () => {
+  const wip = currentBranch();
+  if (!existsSync(planPath())) {
+    mkdirSync(dirname(planPath()), { recursive: true });
+    writeFileSync(planPath(), `# stack-plan for ${wip}, pre-rebase tip recorded by stack-plan prepare\n`);
+  }
+  const sha = tipOf(wip);
+  recordPreRebase(sha, []);
+  heading('Prepare');
+  good(`recorded ${yellow(sha.slice(0, 10))} as the pre-rebase tip of ${cyan(wip)}`);
+  console.log('Rebase by hand, then run: stack-plan verify');
 };
 
 // Newest first, one line per rebase, so the SHA to go back to is at the top.
@@ -753,16 +777,12 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   }
   if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
 
-  const preRebase = tipOf(wip);
-  writeHeader(PRE_REBASE_PREFIX, preRebase);
   // Each fold as <folded>><target>; range-diff may report either one as dropped, so verify accepts both.
   const folded: string[] = [];
   sequence.forEach(({ commit, fold }, index) => {
     if (fold) folded.push(`${commit.sha}>${sequence.findLast((replay, at) => at < index && !replay.fold)!.commit.sha}`);
   });
-  if (folded.length) writeHeader(FOLDED_PREFIX, folded.join(' '));
-  else dropHeader(FOLDED_PREFIX);
-  logPreRebase(preRebase);
+  recordPreRebase(tipOf(wip), folded);
   const todoPath = join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-todo');
   writeFileSync(todoPath, todo.join('\n'));
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
@@ -834,6 +854,7 @@ try {
   }
   else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
+  else if (command === 'prepare') prepareRebase();
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

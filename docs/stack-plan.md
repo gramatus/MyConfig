@@ -12,6 +12,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp save`       | Saves the file as notes on the commits. Add `-n` to see what it will do.                  |
 | `sp preview`    | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either.     |
 | `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
+| `sp prepare`    | Records the pre-rebase tip, so `verify` works after a rebase you run by hand.             |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
 | `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
@@ -150,6 +151,8 @@ git checkout -m <file>
 ```shell
 stack-plan verify
 ```
+
+For a rebase you run by hand, run `stack-plan prepare` first. It records the wip tip in the `pre-rebase:` line and in `stackplan-rebases.log`, as `apply` does, creating `stackplan.txt` if there is none. It also clears any `folded:` line, so folds from an earlier `apply` are not taken for this rebase's.
 
 A rebase that only moves commits leaves the wip branch's final tree exactly as it was, and `verify` checks that in two ways. Any range-diff entries worth reading come first, under `Range diff changes`. The verdicts come last, under `Conclusion`, so the end of the output is the answer.
 

@@ -167,6 +167,7 @@ _stack_plan() {
         'save:write notes from the plan'
         'preview:save, then preview the rebase'
         'apply:save, then rebase the stack'
+        'prepare:record the pre-rebase tip before a rebase run by hand'
         'verify:compare the stack with the pre-rebase tip'
         'mode:show or set what export lists'
     )
@@ -174,6 +175,7 @@ _stack_plan() {
         _describe 'command' commands
         return
     fi
+    [[ $words[2] == prepare ]] && return
     if [[ $words[2] == mode ]]; then
         (( CURRENT == 3 )) && compadd full short
         return
