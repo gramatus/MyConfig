@@ -14,7 +14,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
 | `sp prepare`    | Records the pre-rebase tip, so `verify` works after a rebase you run by hand.             |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
-| `sp cut <b>`    | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. |
+| `sp cut <b>`    | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
 | `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -195,7 +195,9 @@ Below the cut it checks each branch on its own, because a squash merge leaves on
 
 Above the cut it replays the remaining commits onto the base, as `preview` does, and reports the first conflict if there is one. When everything applies, it compares the net change of `<branch>..wip` before and after, with `git patch-id`, which ignores line numbers. A file that ends exactly as on wip counts as already in the base rather than lost.
 
-When nothing is lost and nothing needs a look, it prints the commands that do the cut: `stack-plan prepare`, then `git rebase -i --update-refs --onto <base> <branch>`. `verify` afterwards compares against a tip that sat on the old base, so it reports a differing tree. It does not yet know about a cut.
+`stack-plan cut <branch> --apply` runs the same check, then does the cut: `git rebase -i --update-refs --empty=drop --onto <base> <branch>`, with the todo opened in your editor as for `apply`. It refuses when the check finds lost work, something it cannot tell, or a conflict, and `-f` (`--anyway`) cuts regardless. `--empty=drop` drops a commit the base already holds, which would otherwise stop the rebase.
+
+Before rebasing, it records the pre-rebase tip as `apply` does, plus a `# cut:` line holding the old cut tip, the new base and the cut branches. `verify` reads that line, so after a cut it compares the commits above the old cut with those on the new base. In place of the tree check, which cannot match once the base has moved, it compares the net change as `cut` does. A commit the rebase dropped because the base already holds its change counts as `already in the base`, not dropped. Once that passes, `verify` removes the cut branches from `stackplan.order` and prints the `git branch -D` that deletes them. It never deletes them itself. `prepare` and `apply` clear the `# cut:` line, so it only ever describes the latest rebase.
 
 ## Where things live
 

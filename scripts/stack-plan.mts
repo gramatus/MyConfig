@@ -12,6 +12,7 @@ const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MODE_PREFIX = '# mode: ';
 const FOLDED_PREFIX = '# folded: ';
+const CUT_PREFIX = '# cut: ';
 const MOVED_MARKER = '>>> [moved]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
@@ -56,14 +57,15 @@ const git = (...args: string[]) => {
 };
 
 const USAGE = [
-  'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway]',
+  'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway] [--apply]',
   '  export (e)   write the plan file',
   '  save (s)     write notes from the plan',
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
   '  prepare      record the pre-rebase tip before a rebase run by hand',
   '  verify (v)   compare the stack with the pre-rebase tip',
-  '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work',
+  '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work;',
+  '               --apply then does it, and -f does it despite a finding',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -81,7 +83,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   apply: ['--base', '--anyway'],
   prepare: [],
   verify: ['--base', '--dry-run'],
-  cut: ['--base'],
+  cut: ['--base', '--apply', '--anyway'],
   mode: ['full', 'short'],
 };
 
@@ -200,21 +202,25 @@ const dropHeader = (prefix: string) => {
   writeFileSync(planPath(), lines.filter((line) => !line.startsWith(prefix)).join('\n'));
 };
 
-// Sets the tip verify compares against, and replaces the folds of any earlier rebase with this one's.
+// Sets the tip verify compares against, and replaces the folds and cut of any earlier rebase with this one's.
 const recordPreRebase = (sha: string, folded: string[]) => {
   writeHeader(PRE_REBASE_PREFIX, sha);
   if (folded.length) writeHeader(FOLDED_PREFIX, folded.join(' '));
   else dropHeader(FOLDED_PREFIX);
+  dropHeader(CUT_PREFIX);
   logPreRebase(sha);
+};
+
+const ensurePlanFile = (wip: string) => {
+  if (existsSync(planPath())) return;
+  mkdirSync(dirname(planPath()), { recursive: true });
+  writeFileSync(planPath(), `# stack-plan for ${wip}, holding the pre-rebase tip for verify\n`);
 };
 
 // For a rebase run by hand, so verify has a tip to compare against afterwards.
 const prepareRebase = () => {
   const wip = currentBranch();
-  if (!existsSync(planPath())) {
-    mkdirSync(dirname(planPath()), { recursive: true });
-    writeFileSync(planPath(), `# stack-plan for ${wip}, pre-rebase tip recorded by stack-plan prepare\n`);
-  }
+  ensurePlanFile(wip);
   const sha = tipOf(wip);
   recordPreRebase(sha, []);
   heading('Prepare');
@@ -324,8 +330,33 @@ const patchId = (from: string, to: string, path?: string) => {
 
 const fileList = (output: string) => output.split('\n').filter(Boolean);
 
-// Read-only: whether cutting the stack at a branch and rebasing the rest onto the base would lose any work.
-const cutStack = (at: string) => {
+// Whether from..to and onFrom..onTo make the same change; false when some file ends differently.
+const sameNetChange = (label: string, from: string, to: string, onFrom: string, onTo: string, onName: string) => {
+  if (patchId(from, to) === patchId(onFrom, onTo)) {
+    good(`the net change of ${label} is the same on ${onName}`);
+    return true;
+  }
+  const files = new Set([...fileList(gitQuiet('diff', '--name-only', from, to)), ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo))]);
+  const differing = [...files].filter((file) => patchId(from, to, file) !== patchId(onFrom, onTo, file));
+  // A file that ends the same lost nothing: the new base already had that part of the change.
+  const blob = (ref: string, file: string) => (gitSucceeds('cat-file', '-e', `${ref}:${file}`) ? tipOf(`${ref}:${file}`) : '');
+  const landed = differing.filter((file) => blob(onTo, file) === blob(to, file));
+  const missing = differing.filter((file) => !landed.includes(file));
+  if (landed.length) {
+    attention(`part of ${label} is already in ${onName}, so these files end the same:`);
+    for (const file of landed) console.log(`    ${file}`);
+  }
+  if (!missing.length) {
+    good(`the rest of the net change of ${label} is the same on ${onName}`);
+    return true;
+  }
+  bad(`the net change of ${label} differs on ${onName}, and these files end differently:`);
+  for (const file of missing) console.log(`    ${file}`);
+  return false;
+};
+
+// Checks whether cutting the stack at a branch and rebasing the rest onto the base would lose work; --apply then does it.
+const cutStack = (at: string, apply: boolean) => {
   const wip = currentBranch();
   const { line, branches } = readStack(wip);
   if (!branches.includes(at)) throw new Error(`${at} is not a stack branch below ${wip}; the stack is: ${branches.join(' ')}`);
@@ -363,38 +394,38 @@ const cutStack = (at: string) => {
       for (const file of simulation.files) console.log(`    ${file}`);
     } else {
       good(`all ${simulation.picks} picks apply cleanly in memory`);
-      const onBase = tipOf(base);
-      if (patchId(at, wip) === patchId(onBase, simulation.tip)) good(`the net change of ${at}..${wip} is the same on ${base}`);
-      else {
-        const files = new Set([...fileList(gitQuiet('diff', '--name-only', at, wip)), ...fileList(gitQuiet('diff', '--name-only', onBase, simulation.tip))]);
-        const differing = [...files].filter((file) => patchId(at, wip, file) !== patchId(onBase, simulation.tip, file));
-        // A file that ends the same as on wip lost nothing: the base already had that part of the change.
-        const blob = (ref: string, file: string) => (gitSucceeds('cat-file', '-e', `${ref}:${file}`) ? tipOf(`${ref}:${file}`) : '');
-        const landed = differing.filter((file) => blob(simulation.tip, file) === blob(wip, file));
-        const missing = differing.filter((file) => !landed.includes(file));
-        if (landed.length) {
-          attention(`part of ${at}..${wip} is already in ${base}, so these files end as on ${wip}:`);
-          for (const file of landed) console.log(`    ${file}`);
-        }
-        if (missing.length) {
-          lost++;
-          bad(`the net change of ${at}..${wip} differs on ${base}, and these files end differently:`);
-          for (const file of missing) console.log(`    ${file}`);
-        } else good(`the rest of the net change of ${at}..${wip} is the same on ${base}`);
-      }
+      if (!sameNetChange(`${at}..${wip}`, at, wip, tipOf(base), simulation.tip, base)) lost++;
     }
   }
 
   subheading('Conclusion');
   if (lost) bad(`cutting at ${at} would lose work; see the files above`);
   else if (unclear) attention(`no loss found, but some of it needs a look by hand; see above`);
-  else {
-    good(`cutting at ${at} and rebasing onto ${base} loses no work`);
-    console.log(`To do it (prepare keeps the current tip in stackplan-rebases.log):`);
-    console.log(`  stack-plan prepare`);
-    console.log(`  git rebase -i --update-refs --onto ${base} ${at}`);
+  else good(`cutting at ${at} and rebasing onto ${base} loses no work`);
+  if (!apply) {
+    if (!lost && !unclear) console.log(`To do it: stack-plan cut ${at} --apply`);
+    if (lost || unclear) process.exit(1);
+    return;
   }
-  if (lost || unclear) process.exit(1);
+  if ((lost || unclear) && !rest.includes('--anyway')) {
+    console.log(`\nNothing rewritten. To cut anyway: stack-plan cut ${at} --apply -f`);
+    process.exit(1);
+  }
+
+  const cutTip = tipOf(at);
+  ensurePlanFile(wip);
+  recordPreRebase(tipOf(wip), []);
+  writeHeader(CUT_PREFIX, [cutTip, tipOf(base), ...below].join(' '));
+  // A commit the base already holds becomes empty, and the check above already counted it as landed.
+  const args = ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', base, cutTip];
+  heading('Rebase');
+  traceGit(args);
+  const result = spawnSync('git', args, { stdio: 'inherit' });
+  if (result.status !== 0) {
+    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
+    process.exit(result.status ?? 1);
+  }
+  verifyRebase();
 };
 
 // Prints commits under their branch, in stack order.
@@ -621,11 +652,16 @@ const verifyRebase = () => {
   const short = yellow(recorded.slice(0, 10));
   heading('Verify');
 
+  // After a cut, the old range starts at the cut tip and the new one at the base the rest moved onto.
+  const [cutTip, newBase, ...cutBranches] = words(readHeader(CUT_PREFIX) ?? '');
+  const oldFrom = cutTip ?? base;
+  const newFrom = newBase ?? base;
+
   // Both run before anything prints, so the details come first and the verdict ends the output.
-  const rangeArgs = ['range-diff', colourOn(process.stdout) ? '--color=always' : '--no-color', `${base}..${recorded}`, `${base}..${wip}`];
+  const rangeArgs = ['range-diff', colourOn(process.stdout) ? '--color=always' : '--no-color', `${oldFrom}..${recorded}`, `${newFrom}..${wip}`];
   const statArgs = ['diff', '--stat', recorded, wip];
   const entries = splitRangeDiff(gitQuiet(...rangeArgs));
-  const stat = gitQuiet(...statArgs).trimEnd();
+  const stat = cutTip ? '' : gitQuiet(...statArgs).trimEnd();
   // range-diff pairs a fold's commits unpredictably, so every entry from a planned fold is set apart instead.
   const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) => pair.split('>'));
   const foldShas = foldGroups.flat();
@@ -634,6 +670,13 @@ const verifyRebase = () => {
     const fromOld = entry.oldSha && foldShas.some((sha) => sha.startsWith(entry.oldSha!));
     const asNew = entry.kind === '>' && foldSubjects.has(entry.subject);
     if (entry.kind !== '=' && (fromOld || asNew)) entry.kind = 'folded';
+  }
+  // After a cut, a commit is dropped when the new base already holds its change, which loses nothing.
+  if (cutTip) {
+    for (const entry of entries.filter((candidate) => candidate.kind === '<')) {
+      const merged = mergeTree(`${entry.oldSha}^`, newBase, entry.oldSha);
+      if (merged.ok && merged.tree === treeOf(newBase)) entry.kind = 'landed';
+    }
   }
 
   const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
@@ -646,7 +689,8 @@ const verifyRebase = () => {
   traceGit(rangeArgs);
   const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
   const foldedCount = count('folded') ? ` · ${count('folded')} from folds` : '';
-  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}`;
+  const landedCount = count('landed') ? ` · ${count('landed')} already in the base` : '';
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}`;
   if (count('<') || count('>')) bad(`${summary}; read the entries above`);
   else if (count('!')) attention(`${summary}; read the changed entries above`);
   else good(summary);
@@ -668,6 +712,11 @@ const verifyRebase = () => {
     console.log(`\nFrom a planned fixup or squash, so expected; the tree check below still covers them:`);
     for (const entry of foldedEntries) console.log(entry.lines[0]);
   }
+  const landedEntries = entries.filter((entry) => entry.kind === 'landed');
+  if (landedEntries.length) {
+    console.log(`\nDropped because the new base already holds the change, so nothing is lost:`);
+    for (const entry of landedEntries) console.log(entry.lines[0]);
+  }
   const droppedOrAdded = entries.filter((entry) => entry.kind === '<' || entry.kind === '>');
   if (droppedOrAdded.length) {
     console.log(`\nDropped (<) or added (>), full entries above:`);
@@ -675,14 +724,26 @@ const verifyRebase = () => {
   }
 
   console.log('');
-  traceGit(statArgs);
+  // A cut moves the rest onto a base that has changed, so the tree cannot match; the net change still must.
+  const treeOk = cutTip
+    ? sameNetChange(`${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`, cutTip, recorded, newBase, wip, newBase.slice(0, 10))
+    : !stat;
+  if (!cutTip) traceGit(statArgs);
   if (stat) {
     bad(`tree differs from the pre-rebase tip ${short}`);
     console.log(stat);
     console.log(`To put the pre-rebase tree back as uncommitted changes:`);
     console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
-  } else good(`tree matches the pre-rebase tip ${short}`);
-  if (stat || droppedOrAdded.length) return;
+  } else if (!cutTip) good(`tree matches the pre-rebase tip ${short}`);
+  if (!treeOk || droppedOrAdded.length) return;
+
+  const order = words(readConfig(ORDER_KEY));
+  if (cutBranches.some((branch) => order.includes(branch))) {
+    if (!dryRun) git('config', ORDER_KEY, order.filter((branch) => !cutBranches.includes(branch)).join(' '));
+    good(`cut branches ${dryRun ? 'would be removed' : 'removed'} from ${ORDER_KEY}: ${cutBranches.join(', ')}`);
+  }
+  const leftOver = cutBranches.filter(branchExists);
+  if (leftOver.length) console.log(`The cut branches are still there. To delete them:\n  git branch -D ${leftOver.join(' ')}`);
 
   const waitingToCreate = words(readConfig(NEW_KEY));
   if (waitingToCreate.length && waitingToCreate.every(branchExists)) {
@@ -699,7 +760,7 @@ const verifyRebase = () => {
   good(`${landed.length} notes ${dryRun ? 'would be removed' : 'removed'} from commits now in their branch`);
 };
 
-type Entry = { kind: '=' | '!' | '<' | '>' | 'context' | 'folded'; oldSha: string; subject: string; lines: string[] };
+type Entry = { kind: '=' | '!' | '<' | '>' | 'context' | 'folded' | 'landed'; oldSha: string; subject: string; lines: string[] };
 
 // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
 const RANGE_DIFF_HEADER = /^\s*(?:\d+|-):\s+(\S+)\s+([=!<>])\s+(?:\d+|-):\s+\S+\s*(.*)$/;
@@ -949,7 +1010,7 @@ try {
   else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
-  else if (command === 'cut') cutStack(cutAt!);
+  else if (command === 'cut') cutStack(cutAt!, rest.includes('--apply'));
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

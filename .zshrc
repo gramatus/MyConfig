@@ -180,7 +180,9 @@ _stack_plan() {
     if [[ $words[2] == cut ]]; then
         shift words
         (( CURRENT-- ))
-        _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' ':branch:_stack_plan_refs'
+        _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
+            '--apply[do the cut once the check passes]' '(-f --anyway)'{-f,--anyway}'[cut despite a finding]' \
+            ':branch:_stack_plan_refs'
         return
     fi
     if [[ $words[2] == mode ]]; then
