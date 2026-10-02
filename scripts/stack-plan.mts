@@ -11,6 +11,7 @@ const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of
 const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MODE_PREFIX = '# mode: ';
+const FOLDED_PREFIX = '# folded: ';
 const MOVED_MARKER = '>>> [moved]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
@@ -106,7 +107,11 @@ const base = optionValue('--base') ?? 'origin/main';
 const dryRun = rest.includes('--dry-run');
 
 type Commit = { sha: string; subject: string; branches: string[]; note: string };
-type Step = { pick: Commit } | { updateRef: string };
+type Verb = 'pick' | 'fixup' | 'squash';
+type Step = { pick: Commit; verb: Verb } | { updateRef: string };
+type Replay = { commit: Commit; fold: boolean };
+const VERBS: Record<string, Verb> = { pick: 'pick', p: 'pick', fixup: 'fixup', f: 'fixup', squash: 'squash', s: 'squash' };
+const folds = (step?: Step) => step !== undefined && 'pick' in step && step.verb !== 'pick';
 
 let root: string | undefined;
 const repoRoot = () => (root ??= git('rev-parse', '--show-toplevel').trim());
@@ -183,6 +188,11 @@ const writeHeader = (prefix: string, sha: string) => {
   writeFileSync(planPath(), lines.join('\n'));
 };
 
+const dropHeader = (prefix: string) => {
+  const lines = readFileSync(planPath(), 'utf8').split('\n');
+  writeFileSync(planPath(), lines.filter((line) => !line.startsWith(prefix)).join('\n'));
+};
+
 // Newest first, one line per rebase, so the SHA to go back to is at the top.
 const logPreRebase = (sha: string) => {
   const path = join(dirname(planPath()), 'stackplan-rebases.log');
@@ -244,11 +254,13 @@ type Simulation =
   | { ok: false; picks: number; at: number; commit: Commit; files: string[] };
 
 // Replays the planned picks in memory: objects are written, no ref moves, and the worktree is untouched.
-const simulateRebase = (sequence: Commit[], start: string, wip: string): Simulation => {
+const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulation => {
   console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
   console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
+  console.error(dimErr(`  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`));
   let state = start;
-  for (const [index, commit] of sequence.entries()) {
+  let parent = start;
+  for (const [index, { commit, fold }] of sequence.entries()) {
     let merged: string;
     try {
       merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${commit.sha}^`, state, commit.sha);
@@ -260,7 +272,8 @@ const simulateRebase = (sequence: Commit[], start: string, wip: string): Simulat
       return { ok: false, picks: sequence.length, at: index, commit, files };
     }
     const tree = merged.split('\n')[0];
-    state = gitQuiet('commit-tree', tree, '-p', state, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
+    if (!fold) parent = state;
+    state = gitQuiet('commit-tree', tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
   }
   const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
   return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip) };
@@ -298,16 +311,23 @@ const exportPlan = () => {
 
   // The pre-rebase tip belongs to the last rebase, not to this export, so it carries over.
   const lastPreRebase = existsSync(planPath()) ? readHeader(PRE_REBASE_PREFIX) : undefined;
+  const lastFolded = existsSync(planPath()) ? readHeader(FOLDED_PREFIX) : undefined;
   const out = [
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
     ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
+    ...(lastFolded ? [`${FOLDED_PREFIX}${lastFolded}`] : []),
     ...(full ? [`${MODE_PREFIX}full`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
     '# new branch, then run: stack-plan preview, then stack-plan apply',
     `# ${MOVED_MARKER} and the branch markers show what was saved at export; save ignores them.`,
-    ...(full ? [`# Full mode: every commit since ${base} is listed, and the rebase follows this order.`] : []),
+    ...(full
+      ? [
+          `# Full mode: every commit since ${base} is listed, and the rebase follows this order.`,
+          '# fixup or squash in place of pick folds that commit into the pick above it.',
+        ]
+      : []),
     '',
   ];
   // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
@@ -343,6 +363,7 @@ const savePlan = () => {
   const listed = new Set<string>();
   const updateRefs: string[] = [];
   const steps: Step[] = [];
+  const folded = new Set<string>();
   let held: string[] = [];
   let pastMarker = false;
 
@@ -366,21 +387,29 @@ const savePlan = () => {
         steps.push({ updateRef: branch });
         for (const sha of held) targets.set(sha, branch);
         held = [];
-      } else if (verb === 'pick' || verb === 'p') {
+      } else if (Object.hasOwn(VERBS, verb)) {
+        const kind = VERBS[verb];
         const commit = listable.find((candidate) => candidate.sha.startsWith(arg));
         const scope = full ? `in ${base}..${wip}` : `waiting on ${wip}`;
-        if (!commit) errors.push(`${where}: ${arg} is not ${scope}; export again`);
+        if (kind !== 'pick' && !full) errors.push(`${where}: ${kind} needs full mode (stack-plan mode full)`);
+        // Folding across an update-ref would leave the branch on the commit before the fold.
+        else if (kind !== 'pick' && !(steps.at(-1) && 'pick' in steps.at(-1)!)) {
+          errors.push(`${where}: ${kind} must follow a pick in the same branch`);
+        } else if (!commit) errors.push(`${where}: ${arg} is not ${scope}; export again`);
         else if (listed.has(commit.sha)) errors.push(`${where}: ${arg} is listed twice`);
         else {
           listed.add(commit.sha);
-          steps.push({ pick: commit });
+          steps.push({ pick: commit, verb: kind });
+          if (kind !== 'pick') folded.add(commit.sha);
           if (pastMarker) targets.set(commit.sha, undefined);
           else held.push(commit.sha);
         }
-      } else errors.push(`${where}: expected pick or update-ref, got "${verb}"`);
+      } else errors.push(`${where}: expected pick, fixup, squash or update-ref, got "${verb}"`);
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
+  // A folded commit stops existing, so its note goes rather than piling onto the commit it folds into.
+  for (const sha of folded) targets.set(sha, undefined);
   if (full !== fullMode()) {
     errors.push(`the plan was exported in ${full ? 'full' : 'short'} mode, and the mode is now ${full ? 'short' : 'full'}; export again`);
   }
@@ -461,7 +490,7 @@ const savePlan = () => {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
     console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
   }
-  steps.push(...unplaced.map((pick) => ({ pick })));
+  steps.push(...unplaced.map((pick) => ({ pick, verb: 'pick' as const })));
   return { targets, order: updateRefs, steps: full ? steps : undefined };
 };
 
@@ -479,6 +508,15 @@ const verifyRebase = () => {
   const statArgs = ['diff', '--stat', recorded, wip];
   const entries = splitRangeDiff(gitQuiet(...rangeArgs));
   const stat = gitQuiet(...statArgs).trimEnd();
+  // range-diff pairs a fold's commits unpredictably, so every entry from a planned fold is set apart instead.
+  const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) => pair.split('>'));
+  const foldShas = foldGroups.flat();
+  const foldSubjects = new Set(foldGroups.map(([, target]) => gitQuiet('log', '-1', '--format=%s', target).trim()));
+  for (const entry of entries) {
+    const fromOld = entry.oldSha && foldShas.some((sha) => sha.startsWith(entry.oldSha!));
+    const asNew = entry.kind === '>' && foldSubjects.has(entry.subject);
+    if (entry.kind !== '=' && (fromOld || asNew)) entry.kind = 'folded';
+  }
 
   const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
   if (worthReading.length) {
@@ -489,7 +527,8 @@ const verifyRebase = () => {
   subheading('Conclusion');
   traceGit(rangeArgs);
   const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
-  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added`;
+  const foldedCount = count('folded') ? ` · ${count('folded')} from folds` : '';
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}`;
   if (count('<') || count('>')) bad(`${summary}; read the entries above`);
   else if (count('!')) attention(`${summary}; read the changed entries above`);
   else good(summary);
@@ -505,6 +544,11 @@ const verifyRebase = () => {
         `\ncommits: the end result is the same, but each commit on its own may now read differently or not build:`,
     );
     for (const entry of changed) console.log(entry.lines[0]);
+  }
+  const foldedEntries = entries.filter((entry) => entry.kind === 'folded');
+  if (foldedEntries.length) {
+    console.log(`\nFrom a planned fixup or squash, so expected; the tree check below still covers them:`);
+    for (const entry of foldedEntries) console.log(entry.lines[0]);
   }
   const droppedOrAdded = entries.filter((entry) => entry.kind === '<' || entry.kind === '>');
   if (droppedOrAdded.length) {
@@ -537,17 +581,17 @@ const verifyRebase = () => {
   good(`${landed.length} notes ${dryRun ? 'would be removed' : 'removed'} from commits now in their branch`);
 };
 
-type Entry = { kind: '=' | '!' | '<' | '>' | 'context'; lines: string[] };
+type Entry = { kind: '=' | '!' | '<' | '>' | 'context' | 'folded'; oldSha: string; subject: string; lines: string[] };
 
 // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
-const RANGE_DIFF_HEADER = /^\s*(?:\d+|-):\s+\S+\s+([=!<>])\s+(?:\d+|-):\s+\S+/;
+const RANGE_DIFF_HEADER = /^\s*(?:\d+|-):\s+(\S+)\s+([=!<>])\s+(?:\d+|-):\s+\S+\s*(.*)$/;
 
 // Splits range-diff output per commit, and marks a ! entry "context" when only its context lines differ.
 const splitRangeDiff = (output: string) => {
   const entries: Entry[] = [];
   for (const line of output.split('\n')) {
-    const marker = RANGE_DIFF_HEADER.exec(stripColour(line))?.[1];
-    if (marker) entries.push({ kind: marker as Entry['kind'], lines: [line] });
+    const [, oldSha, marker, subject] = RANGE_DIFF_HEADER.exec(stripColour(line)) ?? [];
+    if (marker) entries.push({ kind: marker as Entry['kind'], oldSha, subject, lines: [line] });
     else entries.at(-1)?.lines.push(line);
   }
   for (const entry of entries) {
@@ -573,14 +617,14 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-type Rebase = { todo: string[]; sequence: Commit[]; rebaseBase: string };
+type Rebase = { todo: string[]; sequence: Replay[]; rebaseBase: string };
 
 const newTodo = () => {
   const todo: string[] = [];
-  const sequence: Commit[] = [];
-  const pick = (commit: Commit, marker = '') => {
-    todo.push(`pick ${commit.sha} ${marker}${commit.subject}`);
-    sequence.push(commit);
+  const sequence: Replay[] = [];
+  const pick = (commit: Commit, marker = '', verb: Verb = 'pick') => {
+    todo.push(`${verb} ${commit.sha} ${marker}${commit.subject}`);
+    sequence.push({ commit, fold: verb !== 'pick' });
   };
   return { todo, sequence, pick };
 };
@@ -627,31 +671,50 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
 // Full mode: the plan's own steps are the todo, from the last commit where they still match history.
 const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | undefined => {
   const { line, branches, own } = readStack(wip);
-  const current: Step[] = line.flatMap((commit) => [{ pick: commit }, ...commit.branches.map((updateRef) => ({ updateRef }))]);
+  const current: Step[] = line.flatMap((commit) => [
+    { pick: commit, verb: 'pick' as const },
+    ...commit.branches.map((updateRef) => ({ updateRef })),
+  ]);
   const same = (a: Step, b?: Step) =>
-    b !== undefined && ('pick' in a ? 'pick' in b && a.pick.sha === b.pick.sha : 'updateRef' in b && a.updateRef === b.updateRef);
+    b !== undefined &&
+    ('pick' in a ? 'pick' in b && a.verb === 'pick' && a.pick.sha === b.pick.sha : 'updateRef' in b && a.updateRef === b.updateRef);
   let kept = 0;
   while (kept < steps.length && same(steps[kept], current[kept])) kept++;
+  // A fold needs the commit it folds into inside the todo, so the rebase starts below that commit.
+  while (kept > 0 && folds(steps[kept])) kept--;
   if (kept === steps.length && kept === current.length) {
     good('the plan matches the stack as it is; nothing to move');
     return;
   }
-  const lastKept = steps.slice(0, kept).findLast((step): step is { pick: Commit } => 'pick' in step)?.pick;
-  const rebaseBase = lastKept?.sha ?? base;
+  const lastKept = steps.slice(0, kept).findLast((step) => 'pick' in step);
+  const lastCommit = lastKept && 'pick' in lastKept ? lastKept.pick : undefined;
+  const rebaseBase = lastCommit?.sha ?? base;
 
   const branchOf = new Map([...own].flatMap(([branch, commits]) => commits.map((commit) => [commit.sha, branch] as const)));
   const was = (commit: Commit) => branchOf.get(commit.sha) ?? wip;
   const goes = (commit: Commit) => planned.targets.get(commit.sha) ?? wip;
+  const foldedInto = new Map<string, Commit>();
+  let into: Commit | undefined;
+  for (const step of steps) {
+    if (!('pick' in step)) continue;
+    if (step.verb === 'pick') into = step.pick;
+    else foldedInto.set(step.pick.sha, into!);
+  }
   const order = planned.order;
-  printByBranch([...order, wip], goes, line.filter((commit) => was(commit) !== goes(commit)));
+  const moved = line.filter((commit) => !foldedInto.has(commit.sha) && was(commit) !== goes(commit));
+  printByBranch([...order, wip], goes, moved);
+  for (const [sha, target] of foldedInto) {
+    console.log(`${yellow('fold')}${commitLine(line.find((commit) => commit.sha === sha)!)}\n  into${commitLine(target)}`);
+  }
   printOrderChanges(branches, order);
-  console.log(`${bold('base')}  ${lastKept ? commitLine(lastKept).trim() : cyan(base)}`);
+  console.log(`${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : cyan(base)}`);
 
   const { todo, sequence, pick } = newTodo();
   let sectionStart = 0;
   for (const step of steps.slice(kept)) {
     if ('pick' in step) {
-      pick(step.pick, was(step.pick) === goes(step.pick) ? '' : `${MOVED_MARKER} `);
+      const movesBranch = step.verb === 'pick' && was(step.pick) !== goes(step.pick);
+      pick(step.pick, movesBranch ? `${MOVED_MARKER} ` : '', step.verb);
       continue;
     }
     const marker = branchMarker(step.updateRef, branches, order);
@@ -692,6 +755,13 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
 
   const preRebase = tipOf(wip);
   writeHeader(PRE_REBASE_PREFIX, preRebase);
+  // Each fold as <folded>><target>; range-diff may report either one as dropped, so verify accepts both.
+  const folded: string[] = [];
+  sequence.forEach(({ commit, fold }, index) => {
+    if (fold) folded.push(`${commit.sha}>${sequence.findLast((replay, at) => at < index && !replay.fold)!.commit.sha}`);
+  });
+  if (folded.length) writeHeader(FOLDED_PREFIX, folded.join(' '));
+  else dropHeader(FOLDED_PREFIX);
   logPreRebase(preRebase);
   const todoPath = join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-todo');
   writeFileSync(todoPath, todo.join('\n'));
@@ -717,7 +787,7 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
 };
 
 const picksIn = (todo: string) =>
-  todo.split('\n').flatMap((line) => /^(?:pick|p)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
+  todo.split('\n').flatMap((line) => /^(?:pick|p|fixup|f|squash|s)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
 
 // Runs as git's sequence editor: swaps git's todo for the planned one when both hold the same picks, then opens the user's editor.
 const editTodo = (todoPath: string) => {

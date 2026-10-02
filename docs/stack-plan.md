@@ -88,7 +88,9 @@ Commits tagged in an earlier round are exported already sitting in their section
 
 `stack-plan mode full` makes every later export list each commit since the base, not only the ones waiting on the wip branch. The file then reads like a complete rebase todo: reorder picks within a branch, move a commit from one branch to another, or out of the stack onto the wip branch. `stack-plan mode short` switches back, and `stack-plan mode` alone shows which one is active. The mode lives in git config as `stackplan.mode`.
 
-The export marks the file with a `# mode: full` line, and `save` refuses a file exported in the other mode, so export again after switching. Every commit has to stay in the file exactly once, and only `pick` and `update-ref` lines are accepted.
+The export marks the file with a `# mode: full` line, and `save` refuses a file exported in the other mode, so export again after switching. Every commit has to stay in the file exactly once.
+
+Full mode also takes `fixup` (`f`) and `squash` (`s`) in place of `pick`, as in a rebase todo. Either one folds the commit into the pick above it, so it has to follow a pick in the same branch rather than an `update-ref` line. A squash stops the rebase for the combined message. `save` removes the note from a folded commit, because that commit stops existing. `apply` records each fold in the file's `# folded:` line. `verify` then lists the range-diff entries those folds account for under "from folds", rather than as dropped or added, and the tree check still covers them.
 
 Notes record which branch a commit goes to, but not its order within the branch. So in full mode `preview` and `apply` take the todo from the file itself, rather than from the notes. `save` still writes notes for the waiting commits and stores the order, so switching back to short mode loses no placement. A re-export before `apply` does lose any reordering within a branch, except in `stackplan.txt.bak`.
 
