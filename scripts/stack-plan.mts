@@ -276,7 +276,7 @@ const printByBranch = (order: string[], branchOf: (commit: Commit) => string, co
   }
 };
 
-const pickLine = (commit: Commit) => `pick ${commit.sha.slice(0, 10)} ${commit.subject}`;
+const pickLine = (commit: Commit, marker = '') => `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
 
 const exportPlan = () => {
   const wip = currentBranch();
@@ -306,14 +306,18 @@ const exportPlan = () => {
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
     '# new branch, then run: stack-plan preview, then stack-plan apply',
+    `# ${MOVED_MARKER} and the branch markers show what was saved at export; save ignores them.`,
     ...(full ? [`# Full mode: every commit since ${base} is listed, and the rebase follows this order.`] : []),
     '',
   ];
+  // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
   for (const branch of branches) {
+    const marker = branchMarker(branch, current, branches);
     const inBranch = full ? (own.get(branch) ?? []) : [];
-    out.push(...[...inBranch, ...sections.get(branch)!].map(pickLine), `update-ref refs/heads/${branch}\n`);
+    const moving = sections.get(branch)!.map((commit) => pickLine(commit, `${MOVED_MARKER} `));
+    out.push(...(marker ? [marker] : []), ...inBranch.map((commit) => pickLine(commit)), ...moving, `update-ref refs/heads/${branch}\n`);
   }
-  out.push(...sections.get(wip)!.map(pickLine), UNTAGGED_MARKER, ...untagged.map(pickLine), '');
+  out.push(...sections.get(wip)!.map((commit) => pickLine(commit)), UNTAGGED_MARKER, ...untagged.map((commit) => pickLine(commit)), '');
 
   const path = planPath();
   mkdirSync(dirname(path), { recursive: true });
