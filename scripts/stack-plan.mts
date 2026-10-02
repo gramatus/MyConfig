@@ -286,9 +286,9 @@ const gitQuiet = (...args: string[]) =>
 
 const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
 
-type Merge = { ok: true; tree: string } | { ok: false; files: string[] };
+type Merge = { ok: true; tree: string } | { ok: false; files: string[]; tree: string; messages: string[] };
 
-// A three-way merge in memory: the tree it would produce, or the files that would conflict.
+// A three-way merge in memory: the tree it would produce, or the conflicted files, the tree with markers, and git's messages.
 const mergeTree = (mergeBase: string, ours: string, theirs: string): Merge => {
   try {
     const merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${mergeBase}`, ours, theirs);
@@ -296,14 +296,14 @@ const mergeTree = (mergeBase: string, ours: string, theirs: string): Merge => {
   } catch (error) {
     const failure = error as { status?: number; stdout?: string };
     if (failure.status !== 1) throw error;
-    const listed = (failure.stdout ?? '').split('\n').slice(1);
-    return { ok: false, files: [...new Set(listed.slice(0, Math.max(0, listed.indexOf(''))))] };
+    const [tree, ...listed] = (failure.stdout ?? '').split('\n');
+    const end = Math.max(0, listed.indexOf(''));
+    return { ok: false, files: [...new Set(listed.slice(0, end))], tree, messages: listed.slice(end + 1) };
   }
 };
 
-type Simulation =
-  | { ok: true; picks: number; sameTree: boolean; tip: string }
-  | { ok: false; picks: number; at: number; commit: Commit; files: string[] };
+type Conflict = { picks: number; at: number; commit: Commit; files: string[]; tree: string; messages: string[]; before: Commit[] };
+type Simulation = ({ ok: true; picks: number; sameTree: boolean; tip: string }) | ({ ok: false } & Conflict);
 
 // Replays the planned picks in memory: objects are written, no ref moves, and the worktree is untouched.
 const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulation => {
@@ -314,11 +314,68 @@ const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulat
   let parent = start;
   for (const [index, { commit, fold }] of sequence.entries()) {
     const merged = mergeTree(`${commit.sha}^`, state, commit.sha);
-    if (!merged.ok) return { ok: false, picks: sequence.length, at: index, commit, files: merged.files };
+    if (!merged.ok) {
+      const before = sequence.slice(0, index).map((replay) => replay.commit);
+      const { files, tree, messages } = merged;
+      return { ok: false, picks: sequence.length, at: index, commit, files, tree, messages, before };
+    }
     if (!fold) parent = state;
     state = gitQuiet('commit-tree', merged.tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
   }
   return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip), tip: state };
+};
+
+const MARKER_OPEN = /^<{7}(?: |$)/;
+const MARKER_SPLIT = /^(?:={7}|\|{7})(?: |$)/;
+const MARKER_CLOSE = /^>{7}(?: |$)/;
+
+// Counts the marked regions the merge left in a file, and the lines inside them across both sides.
+const conflictSize = (tree: string, file: string) => {
+  let regions = 0;
+  let lines = 0;
+  let inside = false;
+  const text = gitSucceeds('cat-file', '-e', `${tree}:${file}`) ? gitQuiet('cat-file', '-p', `${tree}:${file}`) : '';
+  for (const line of text.split('\n')) {
+    if (MARKER_OPEN.test(line)) {
+      regions++;
+      inside = true;
+    } else if (MARKER_CLOSE.test(line)) inside = false;
+    else if (inside && !MARKER_SPLIT.test(line)) lines++;
+  }
+  return { regions, lines };
+};
+
+const changesAny = (sha: string, files: string[]) =>
+  fileList(gitQuiet('diff-tree', '-r', '--root', '--no-commit-id', '--name-only', sha)).some((file) => files.includes(file));
+
+const subjectOf = (sha: string) => ({ sha, subject: gitQuiet('show', '-s', '--format=%s', sha).trim() });
+
+// Sizes each conflicted file, and names the commits on those files that the pick now sits above, or no longer does.
+const explainConflict = (conflict: Conflict, start: string) => {
+  const { commit, files, tree, messages, before } = conflict;
+  for (const file of files) {
+    const message = messages.find((line) => line.startsWith('CONFLICT') && line.includes(file)) ?? '';
+    const kind = /^CONFLICT \(([^)]+)\)/.exec(message)?.[1] ?? 'conflict';
+    const { regions, lines } = conflictSize(tree, file);
+    const size = regions ? `${regions} region${regions === 1 ? '' : 's'}, ${lines} lines` : 'no text markers';
+    console.log(`    ${file}  ${size}  (${kind})`);
+  }
+  const wasBelow = new Set(fileList(gitQuiet('rev-list', `${start}..${commit.sha}^`)));
+  const isBelow = new Set(before.map((below) => below.sha));
+  // From the base side: commits the pick now sits on that it did not before, as after a cut or a moved branch.
+  const fromBase = fileList(gitQuiet('log', '--format=%H', '--max-count=6', `${commit.sha}..${start}`, '--', ...files));
+  const nowBelow = [...before.filter((below) => !wasBelow.has(below.sha) && changesAny(below.sha, files)), ...fromBase.map(subjectOf)];
+  const noLongerBelow = [...wasBelow].filter((sha) => !isBelow.has(sha) && changesAny(sha, files)).map(subjectOf);
+  if (nowBelow.length) {
+    console.log('  now below it, and changing the same files:');
+    for (const culprit of nowBelow.slice(0, 6)) console.log(`  ${commitLine(culprit)}`);
+    if (fromBase.length > 5 || nowBelow.length > 6) console.log('    and more');
+  }
+  if (noLongerBelow.length) {
+    console.log('  no longer below it, and changing the same files:');
+    for (const culprit of noLongerBelow) console.log(`  ${commitLine(culprit)}`);
+  }
+  if (!nowBelow.length && !noLongerBelow.length) console.log('  no commit that moved relative to it changes those files');
 };
 
 // Whitespace and line numbers do not count, so the same change on a moved base gets the same id.
@@ -391,7 +448,7 @@ const cutStack = (at: string, apply: boolean) => {
       unclear++;
       bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict:`);
       console.log(commitLine(simulation.commit));
-      for (const file of simulation.files) console.log(`    ${file}`);
+      explainConflict(simulation, tipOf(base));
     } else {
       good(`all ${simulation.picks} picks apply cleanly in memory`);
       if (!sameNetChange(`${at}..${wip}`, at, wip, tipOf(base), simulation.tip, base)) lost++;
@@ -921,7 +978,7 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   } else {
     bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict (${took}):`);
     console.log(commitLine(simulation.commit));
-    for (const file of simulation.files) console.log(`    ${file}`);
+    explainConflict(simulation, tipOf(rebaseBase));
     console.log('rerere may already hold a resolution for it; the preview cannot tell.');
   }
   if (preview) return;
