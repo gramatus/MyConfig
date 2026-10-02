@@ -1,1 +1,244 @@
-../.agent-harness/.claude/settings.json
+{
+  "OWNED": "Owned by the agent harness, commit settings.local.json for repo local changes.",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "Grep",
+      "Glob",
+      "LS",
+      "mcp__ide__getDiagnostics",
+      "WebSearch",
+      "WebFetch",
+      "Skill(commit)",
+      "Skill(pr-review:*)",
+      "Skill(pr-summary:*)",
+      "Skill(pr-summary-simple:*)",
+      "Skill(code)",
+      "Skill(docs)",
+      "Agent",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git grep:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git reflog:*)",
+      "Bash(git worktree add:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(node:*)",
+      "Bash(rg:*)",
+      "Bash(perl:*)",
+      "Bash(awk:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(git status:*)",
+      "Bash(git blame:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git cat-file:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git worktree prune:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git for-each-ref:*)",
+      "Bash(git remote get-url:*)",
+      "Bash(git remote show:*)",
+      "Bash(git tag --list:*)",
+      "Bash(gh repo view:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(npm start:*)",
+      "Bash(npm list:*)",
+      "Bash(npm ls:*)",
+      "Bash(npm outdated:*)",
+      "Bash(npm view:*)",
+      "Bash(npm info:*)",
+      "Bash(npm --version:*)",
+      "Bash(npm -v:*)",
+      "Bash(yarn run:*)",
+      "Bash(yarn list:*)",
+      "Bash(yarn info:*)",
+      "Bash(yarn why:*)",
+      "Bash(yarn --version:*)",
+      "Bash(yarn -v:*)",
+      "Bash(sed:*)",
+      "Bash(actionlint:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(touch:*)",
+      "Bash(tsc:*)",
+      "Bash(jest:*)",
+      "Bash(vitest:*)",
+      "Bash(turbo:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet test:*)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform version:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(jq:*)",
+      "Bash(diff:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(which:*)",
+      "Bash(command -v:*)",
+      "Bash(pwd:*)",
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(date:*)",
+      "Bash(ls:*)",
+      "Bash(readlink:*)",
+      "Bash(test:*)",
+      "Bash(shellcheck:*)",
+      "Bash(bash -n:*)",
+      "Bash(python3 --version:*)",
+      "Bash(pwsh --version:*)",
+      "Bash(bash --version:*)"
+    ],
+    "deny": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git stash:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git clean:*)",
+      "Bash(git difftool:*)",
+      "Bash(npx:*)",
+      "Bash(terraform init:*)",
+      "Bash(terraform apply:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(terraform import:*)",
+      "Bash(terraform state:*)",
+      "Bash(for:*)",
+      "Bash(sudo:*)",
+      "Bash(chmod:*)",
+      "Bash(chown:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(nc:*)",
+      "Bash(ncat:*)",
+      "Bash(netcat:*)",
+      "Bash(xargs:*)",
+      "Bash(eval:*)"
+    ],
+    "ask": [
+      "Bash(node .claude/skills/ado-work-items/scripts/read.mts:*)",
+      "Bash(mv:*)",
+      "Bash(wget:*)",
+      "Bash(git mergetool:*)",
+      "Bash(yarn workspaces:*)",
+      "Bash(yarn workspace:*)",
+      "Bash(eslint:*)",
+      "Bash(prettier:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "Bash(curl:*)",
+      "Bash(git -C:*)",
+      "Bash(env:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|execution_subagent|Agent|AskUserQuestion|Edit|Write|MultiEdit|create_file|replace_string_in_file|multi_replace_string_in_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" guard.sh"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "TodoWrite|Agent|AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/fallback/skip-in-cursor.sh\" run.mjs"
+          }
+        ]
+      }
+    ]
+  },
+  "autoUpdatesChannel": "stable"
+}

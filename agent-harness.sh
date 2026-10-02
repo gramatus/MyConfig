@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # agent-harness bootstrap — refreshed from the harness at managed/agent-harness.sh; edit it there, not here.
 # Clones the shared agent harness if it is missing, then wires this repository to it.
-# Re-run it whenever you want the latest harness — this is the only thing that pulls.
-# Arguments reach the linker: `bash agent-harness.sh --check` reports drift, writing nothing.
+# Re-run it whenever you want the latest harness — a plain run pulls, `--check` does not.
+# Arguments reach the linker: `--check` reports drift, but a missing checkout is cloned first.
 set -eu
 
 # The linker rewrites these two lines for the repository it writes this file into. The

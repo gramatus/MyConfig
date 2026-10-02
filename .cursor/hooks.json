@@ -1,28 +1,65 @@
 {
-  // ─── managed by the agent harness — do not edit below ───
-  // ─── start of agent-harness managed scalar entries ───
-  // Edits here are replaced on the next run — change managed/cursor-hooks.jsonc in the harness instead.
+  // >>> START: agent-harness managed block >>>
+  // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
   "version": 1,
-  // ─── end of agent-harness managed scalar entries ───
+  // <<< END: agent-harness managed block <<<
   "hooks": {
-    // ─── managed by the agent harness — do not edit below ───
-    // Edits here are replaced on the next run — change managed/cursor-hooks.jsonc in the harness
-    // instead. Entries below the repo-specific marker are yours and are preserved.
-
-    // run.mjs is the merged entry: it runs the guard AND telemetry dispatchers.
-    // hooks.mjs runs the guard alone and is PermissionRequest's entry elsewhere.
-    // failClosed is read here and nowhere else — a top-level copy is inert, measured.
-    "preToolUse": [{ "command": "node \".claude/hooks/dist/run.mjs\"", "failClosed": true }],
-    // The only event where an `ask` is enforced, and it outranks the user's own
-    // allowlist. NO failClosed here, deliberately: the bundle answers this event only to
-    // deny or ask, so no output is its ordinary "proceed" and the key would turn every
-    // shell call into a refusal. The crash the key covers is caught on preToolUse, which
-    // runs the same bundle first and does carry it.
-    "beforeShellExecution": [{ "command": "node \".claude/hooks/dist/run.mjs\"" }],
-    "sessionStart": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }],
-    "beforeSubmitPrompt": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }],
-    "stop": [{ "command": "node \".claude/hooks/dist/log.mjs\"" }]
-    // ─── end of agent-harness managed entries ───
+    "preToolUse": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "bash \".claude/fallback/guard.sh\"",
+        "failClosed": true
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "beforeShellExecution": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "bash \".claude/fallback/guard.sh\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "sessionStart": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "node \".claude/hooks/dist/run.mjs\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "beforeSubmitPrompt": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "node \".claude/hooks/dist/run.mjs\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "stop": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "node \".claude/hooks/dist/run.mjs\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "subagentStop": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "node \".claude/hooks/dist/run.mjs\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ],
+    "sessionEnd": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
+      {
+        "command": "node \".claude/hooks/dist/run.mjs\""
+      }
+      // <<< END: agent-harness managed block <<<
+    ]
   }
-
 }

@@ -1,3 +1,4 @@
+<!-- >>> agent-harness managed >>> -->
 <!-- agent-harness guard file — refreshed by scripts/link-harness.mjs; edit it there, not here. -->
 
 # Agent instructions
@@ -5,9 +6,9 @@
 The shared instruction set for this repository lives in a nested checkout at
 `.agent-harness/`, which is gitignored and recreated by the devcontainer.
 
-**If the import at the bottom of this file did not resolve — if the shared instruction set
-is not already in your context — then almost none of this repository's conventions are
-loaded.** Say so and stop. Do not infer the conventions and do not proceed on what you can
+**If the shared instruction set is not already in your context — the always-applied rule
+`.claude/rules/core.md`, and the import at the bottom of this file — then almost none of
+this repository's conventions are loaded.** Say so and stop. Do not infer the conventions and do not proceed on what you can
 see: what is missing is most of it.
 
 **Whether `.agent-harness/CLAUDE.md` is readable is not the test, and checking it that way tells
@@ -29,3 +30,4 @@ missing, that command is the whole fix. The devcontainer's `postStartCommand` no
 does both on every container start.
 
 @.agent-harness/CLAUDE.md
+<!-- <<< agent-harness managed <<< -->

@@ -14,7 +14,6 @@ agent-common
 .github/prompts
 .github/instructions/alz-ai.instructions.md
 .github/instructions/terraform-evaluation.instructions.md
-.claude/settings.json
 .claude/agents
 .claude/commands
 .claude/hooks
@@ -22,18 +21,6 @@ agent-common
 .claude/skills
 .cursor/skills
 .cursor/rules
-
-# Managed JSONC — real files whose byte layout belongs to the harness's splicer,
-# which edits one key's span and leaves the rest alone. That is how a consumer's
-# comments survive a refresh, and a reformat is what breaks it.
-.vscode/settings.json
-.cursor/permissions.json
-.cursor/hooks.json
-
-# Guard files — real files, but their wording is owned and refreshed by the
-# harness, so a consumer-side reformat would only start a rewrite war.
-CLAUDE.md
-AGENTS.md
 
 # Agent-generated output.
 .agent-context

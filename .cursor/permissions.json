@@ -1,5 +1,24 @@
 {
   "terminalAllowlist": [
+    // >>> START: agent-harness managed block >>>
+    // Rewritten on every run from .claude/hooks/src/policy.ts in the harness. Outside the markers is yours.
+    "git diff",
+    "git log",
+    "git show",
+    "git grep",
+    "git branch",
+    "git fetch",
+    "git reflog",
+    "git worktree add",
+    "git worktree remove",
+    "node",
+    "rg",
+    "perl",
+    "awk",
+    "find",
+    "mkdir",
+    "sort",
+    "uniq",
     "git status",
     "git blame",
     "git ls-tree",
@@ -7,15 +26,13 @@
     "git check-ignore",
     "git rev-parse",
     "git merge-base",
+    "git worktree list",
+    "git worktree prune",
     "git ls-files",
     "git for-each-ref",
     "git remote get-url",
     "git remote show",
     "git tag --list",
-    "git worktree add",
-    "git worktree list",
-    "git worktree remove",
-    "git worktree prune",
     "gh repo view",
     "npm run",
     "npm test",
@@ -33,6 +50,11 @@
     "yarn why",
     "yarn --version",
     "yarn -v",
+    "sed",
+    "actionlint",
+    "docker",
+    "docker-compose",
+    "touch",
     "tsc",
     "jest",
     "vitest",
@@ -45,13 +67,10 @@
     "terraform version",
     "grep",
     "cat",
-    "mkdir",
-    "touch",
     "jq",
     "diff",
     "wc",
     "head",
-    "uniq",
     "tail",
     "which",
     "command -v",
@@ -67,16 +86,19 @@
     "python3 --version",
     "pwsh --version",
     "bash --version"
+    // <<< END: agent-harness managed block <<<
   ],
   "autoRun": {
     "block_instructions": [
+      // >>> START: agent-harness managed block >>>
+      // Rewritten on every run from .claude/hooks/src/policy.ts in the harness. Outside the markers is yours.
       "Never run a git command that writes the index, the working tree, refs or a remote: add, commit, stash, merge, rebase, checkout, pull, push, reset, clean, restore, switch, revert, cherry-pick, am, apply, rm, mv. To restore a file, read it with git show <ref>:<path> and write it back.",
       "Never run git config to write a value — only the explicit read forms --get, --get-all, --get-regexp and --list. An output flag such as --type or --default does not make a write into a read.",
       "Never run git fetch with a refspec (src:dst, +src:dst), which writes a local ref, and never with --upload-pack.",
       "Never pass --output=<file> to git diff, log or show; redirect with > instead, so the destination is checked.",
       "Never run git with -C, --git-dir or --work-tree pointing outside the workspace. A nested checkout inside it is a legitimate target and reads there are fine.",
       "Never run sudo, chmod, chown, ssh, scp, nc, ncat, or netcat.",
-      "Never run xargs or eval, and never wrap a command in a shell loop to bypass a per-command check.",
+      "Never run xargs or eval, and never wrap a command in a shell loop (for, while) to bypass a per-command check.",
       "Never pass code to an interpreter on the command line: node -e, node -p, npx, perl -e, python -c, or an awk program that reaches another process. For awk that means system(), a `| \"command\"` pipe, and `\"command\" | getline`. Run a file in the repository instead.",
       "Never run find with -exec, and never run docker with --privileged or a bind mount outside the workspace.",
       "Never prefix a command with env to reach a tool that is not itself on the allowlist.",
@@ -88,7 +110,7 @@
       "Never write to paths outside the workspace, including /tmp. Scratch files belong in .agent-context/.tmp/.",
       "Never run perl with an inline program, including the glued spelling: perl -e'...', perl -pe'...'.",
       "Ask before rm, cp, mv, curl, or wget. A curl carrying credentials — whether as -u, -H, or inside the URL as https://user:token@host/ — is for the user to run."
+      // <<< END: agent-harness managed block <<<
     ]
   }
-
 }
