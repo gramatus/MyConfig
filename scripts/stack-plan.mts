@@ -289,9 +289,9 @@ const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
 type Merge = { ok: true; tree: string } | { ok: false; files: string[]; tree: string; messages: string[] };
 
 // A three-way merge in memory: the tree it would produce, or the conflicted files, the tree with markers, and git's messages.
-const mergeTree = (mergeBase: string, ours: string, theirs: string): Merge => {
+const mergeTree = (mergeBase: string, ours: string, theirs: string, options: string[] = []): Merge => {
   try {
-    const merged = gitQuiet('merge-tree', '--write-tree', '--name-only', `--merge-base=${mergeBase}`, ours, theirs);
+    const merged = gitQuiet('merge-tree', '--write-tree', '--name-only', ...options, `--merge-base=${mergeBase}`, ours, theirs);
     return { ok: true, tree: merged.split('\n')[0] };
   } catch (error) {
     const failure = error as { status?: number; stdout?: string };
@@ -302,27 +302,59 @@ const mergeTree = (mergeBase: string, ours: string, theirs: string): Merge => {
   }
 };
 
-type Conflict = { picks: number; at: number; commit: Commit; files: string[]; tree: string; messages: string[]; before: Commit[] };
-type Simulation = ({ ok: true; picks: number; sameTree: boolean; tip: string }) | ({ ok: false } & Conflict);
+type Conflict = {
+  at: number;
+  commit: Commit;
+  files: string[];
+  tree: string;
+  messages: string[];
+  before: Commit[];
+  // An earlier conflict in the same files had its resolution assumed, so this one may only follow from that guess.
+  assumed: boolean;
+  takenWhole: string[];
+};
+type Simulation = { picks: number; conflicts: Conflict[]; sameTree: boolean; tip: string };
 
-// Replays the planned picks in memory: objects are written, no ref moves, and the worktree is untouched.
+// Writes a tree from another, with each file replaced by its version in a commit, or removed where the commit has none.
+const replaceFiles = (tree: string, commit: string, files: string[]) => {
+  const env = { ...process.env, GIT_INDEX_FILE: join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-preview-index') };
+  const run = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  run('read-tree', tree);
+  for (const file of files) {
+    const [mode, , blob] = gitQuiet('ls-tree', commit, '--', file).split(/\s+/);
+    if (blob) run('update-index', '--add', '--cacheinfo', `${mode},${blob},${file}`);
+    else run('update-index', '--force-remove', '--', file);
+  }
+  return run('write-tree').trim();
+};
+
+// Replays the planned picks in memory, resolving each conflict to the pick's side so later ones are found too.
 const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulation => {
   console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
   console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
   console.error(dimErr(`  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`));
+  console.error(dimErr(`  (on a conflict: merge-tree -X theirs, then the pick's own version of any file still conflicted)`));
+  const conflicts: Conflict[] = [];
   let state = start;
   let parent = start;
   for (const [index, { commit, fold }] of sequence.entries()) {
-    const merged = mergeTree(`${commit.sha}^`, state, commit.sha);
+    let merged = mergeTree(`${commit.sha}^`, state, commit.sha);
     if (!merged.ok) {
       const before = sequence.slice(0, index).map((replay) => replay.commit);
       const { files, tree, messages } = merged;
-      return { ok: false, picks: sequence.length, at: index, commit, files, tree, messages, before };
+      const assumed = conflicts.some((earlier) => earlier.files.some((file) => files.includes(file)));
+      const conflict: Conflict = { at: index, commit, files, tree, messages, before, assumed, takenWhole: [] };
+      conflicts.push(conflict);
+      merged = mergeTree(`${commit.sha}^`, state, commit.sha, ['-X', 'theirs']);
+      if (!merged.ok) {
+        conflict.takenWhole = merged.files;
+        merged = { ok: true, tree: replaceFiles(merged.tree, commit.sha, merged.files) };
+      }
     }
     if (!fold) parent = state;
     state = gitQuiet('commit-tree', merged.tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
   }
-  return { ok: true, picks: sequence.length, sameTree: treeOf(state) === treeOf(wip), tip: state };
+  return { picks: sequence.length, conflicts, sameTree: treeOf(state) === treeOf(wip), tip: state };
 };
 
 const MARKER_OPEN = /^<{7}(?: |$)/;
@@ -376,6 +408,18 @@ const explainConflict = (conflict: Conflict, start: string) => {
     for (const culprit of noLongerBelow) console.log(`  ${commitLine(culprit)}`);
   }
   if (!nowBelow.length && !noLongerBelow.length) console.log('  no commit that moved relative to it changes those files');
+};
+
+const reportConflicts = (simulation: Simulation, start: string, took = '') => {
+  const { conflicts, picks } = simulation;
+  bad(`${conflicts.length} of ${picks} picks would conflict${took}`);
+  for (const conflict of conflicts) {
+    const assumed = conflict.assumed ? ', after an assumed resolution of an earlier conflict in the same files' : '';
+    console.log(`\npick ${conflict.at + 1} of ${picks}${assumed}:`);
+    console.log(commitLine(conflict.commit));
+    explainConflict(conflict, start);
+    if (conflict.takenWhole.length) console.log(`  assumed for what follows: the pick's own version of ${conflict.takenWhole.join(', ')}`);
+  }
 };
 
 // Whitespace and line numbers do not count, so the same change on a moved base gets the same id.
@@ -444,11 +488,9 @@ const cutStack = (at: string, apply: boolean) => {
   if (!above.length) good('no commits above the cut');
   else {
     const simulation = simulateRebase(above.map((commit) => ({ commit, fold: false })), tipOf(base), wip);
-    if (!simulation.ok) {
+    if (simulation.conflicts.length) {
       unclear++;
-      bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict:`);
-      console.log(commitLine(simulation.commit));
-      explainConflict(simulation, tipOf(base));
+      reportConflicts(simulation, tipOf(base));
     } else {
       good(`all ${simulation.picks} picks apply cleanly in memory`);
       if (!sameNetChange(`${at}..${wip}`, at, wip, tipOf(base), simulation.tip, base)) lost++;
@@ -972,17 +1014,16 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   const started = Date.now();
   const simulation = simulateRebase(sequence, tipOf(rebaseBase), wip);
   const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  if (simulation.ok) {
+  const conflicted = simulation.conflicts.length > 0;
+  if (!conflicted) {
     good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
     if (!simulation.sameTree) attention('the simulated result ends on a different tree than wip; verify will show where');
   } else {
-    bad(`pick ${simulation.at + 1} of ${simulation.picks} would conflict (${took}):`);
-    console.log(commitLine(simulation.commit));
-    explainConflict(simulation, tipOf(rebaseBase));
-    console.log('rerere may already hold a resolution for it; the preview cannot tell.');
+    reportConflicts(simulation, tipOf(rebaseBase), ` (${took})`);
+    console.log('\nrerere may already hold resolutions for these; the preview cannot tell.');
   }
   if (preview) return;
-  if (!simulation.ok && !rest.includes('--anyway')) {
+  if (conflicted && !rest.includes('--anyway')) {
     console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
     console.log('  stack-plan apply -f');
     process.exit(1);
