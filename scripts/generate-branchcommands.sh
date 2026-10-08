@@ -90,16 +90,10 @@ if (( ${#lines[@]} < 2 )); then
   echo "Need at least 2 branches, found ${#lines[@]}" >&2
   exit 1
 fi
-
-# Extract just the branch name (first word) from a line
-branch_name() { echo "${1%% *}"; }
-
 {
   # Compare links
   for ((i = 1; i < ${#lines[@]}; i++)); do
-    yyy="$(branch_name "${lines[i-1]}")"
-    xxx="$(branch_name "${lines[i]}")"
-    echo "${COMPARE_BASE}/${yyy}...${xxx}?expand=1"
+    echo "${COMPARE_BASE}/${lines[i-1]}...${lines[i]}?expand=1"
   done
 
   echo ""
@@ -108,9 +102,7 @@ branch_name() { echo "${1%% *}"; }
 
   # PR review commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
-    yyy="$(branch_name "${lines[i-1]}")"
-    xxx="$(branch_name "${lines[i]}")"
-    echo "/pr-review ${xxx} ${yyy}"
+    echo "/pr-review ${lines[i]} ${lines[i-1]}"
     echo ""
   done
 
@@ -119,9 +111,7 @@ branch_name() { echo "${1%% *}"; }
 
   # PR summary commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
-    yyy="$(branch_name "${lines[i-1]}")"
-    xxx="$(branch_name "${lines[i]}")"
-    echo "/pr-summary-simple ${xxx} ${yyy}"
+    echo "/pr-summary-simple ${lines[i]} ${lines[i-1]}"
     echo ""
   done
 
@@ -142,17 +132,13 @@ branch_name() { echo "${1%% *}"; }
     echo "git fetch origin +${lines[i]}:${lines[i]}"
   done
 
-# git fetch origin +<branch>:<branch>
-
-
   echo ""
   echo "---"
   echo ""
 
   # Push to origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
-    xxx="$(branch_name "${lines[i]}")"
-    echo "git push -u origin ${xxx} --force"
+    echo "git push -u origin ${lines[i]} --force"
   done
 
   echo ""
@@ -161,8 +147,7 @@ branch_name() { echo "${1%% *}"; }
 
   # Read from origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
-    xxx="$(branch_name "${lines[i]}")"
-    echo "git branch ${xxx} origin/${xxx}"
+    echo "git branch ${lines[i]} origin/${lines[i]}"
   done
 } > "$OUTPUT"
 
