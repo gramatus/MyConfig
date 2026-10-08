@@ -27,7 +27,7 @@ const commitLine = (commit: { sha: string; subject: string }) => `  ${yellow(com
 const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
 const git = (...args: string[]) => {
-  console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+  if (!UNTRACED_COMMANDS.includes(command)) console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
   try {
     return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
@@ -56,6 +56,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   'sync-check': ['--base'],
 };
 const TAKES_POSITIONAL = ['branch-of'];
+const UNTRACED_COMMANDS = ['sync-check'];
 
 const [given = '', ...args] = process.argv.slice(2);
 const command = EXPANSIONS[given] ?? given;
