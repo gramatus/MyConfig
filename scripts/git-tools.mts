@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Small git helpers for working in a stack of branches.
-// Usage: git-tools branch-of|stack|tips [-b <ref>]; run without arguments for details.
+// Usage: git-tools branch-of|stack|tips|sync-check [-b <ref>]; run without arguments for details.
 
 import { execFileSync } from 'node:child_process';
 
@@ -18,7 +18,10 @@ const dimErr = style('2', process.stderr);
 const redErr = style('31', process.stderr);
 
 const heading = (title: string) => console.log(`\n${bold(`── ${title} ${'─'.repeat(Math.max(3, 46 - title.length))}`)}`);
+const red = style('31');
 const good = (text: string) => console.log(`${green('✓')} ${text}`);
+const attention = (text: string) => console.log(`${yellow('!')} ${text}`);
+const bad = (text: string) => console.log(`${red('✗')} ${text}`);
 const commitLine = (commit: { sha: string; subject: string }) => `  ${yellow(commit.sha.slice(0, 10))}  ${commit.subject}`;
 
 const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
@@ -39,12 +42,19 @@ const USAGE = [
   '                            contains <subject>, ignoring case; the words need no quotes',
   '  stack (s)                 list the branches in <base>..HEAD along the first parent, bottom to top',
   '  tips (t)                  show the commit at each branch tip or other ref in <base>..HEAD, newest first',
+  '  sync-check (sc)           compare each stack branch with its upstream, or origin/<branch>,',
+  '                            as of the last fetch',
   '  -b, --base <ref>          where the search starts, default origin/main',
 ].join('\n');
 
-const EXPANSIONS: Record<string, string> = { bo: 'branch-of', s: 'stack', t: 'tips' };
+const EXPANSIONS: Record<string, string> = { bo: 'branch-of', s: 'stack', t: 'tips', sc: 'sync-check' };
 const FLAG_ALIASES: Record<string, string> = { '-b': '--base' };
-const ALLOWED_FLAGS: Record<string, string[]> = { 'branch-of': ['--base'], stack: ['--base'], tips: ['--base'] };
+const ALLOWED_FLAGS: Record<string, string[]> = {
+  'branch-of': ['--base'],
+  stack: ['--base'],
+  tips: ['--base'],
+  'sync-check': ['--base'],
+};
 const TAKES_POSITIONAL = ['branch-of'];
 
 const [given = '', ...args] = process.argv.slice(2);
@@ -100,23 +110,58 @@ const branchOf = (query: string) => {
   good(`${matches.length} matching commit${matches.length === 1 ? '' : 's'}`);
 };
 
-const listStack = () => {
-  const output = git(
-    'log',
-    '--first-parent',
-    '--simplify-by-decoration',
-    '--decorate-refs=refs/heads/',
-    '--reverse',
-    '--format=%D',
-    `${base}..HEAD`,
-  );
-  const levels = output
+// Bottom to top, one entry per commit that has branches on it.
+const stackLevels = () =>
+  git('log', '--first-parent', '--simplify-by-decoration', '--decorate-refs=refs/heads/', '--reverse', '--format=%D', `${base}..HEAD`)
     .split('\n')
     .filter(Boolean)
-    .map((refs) => refs.replace(/^HEAD -> /, ''));
+    .map((refs) => refs.replace(/^HEAD -> /, '').split(', '));
+
+const listStack = () => {
+  const levels = stackLevels();
   heading(`Stack on ${base}, bottom to top`);
-  for (const [index, branches] of levels.entries()) console.log(`  ${String(index + 1).padStart(2)}  ${cyan(branches)}`);
+  for (const [index, branches] of levels.entries()) {
+    console.log(`  ${String(index + 1).padStart(2)}  ${cyan(branches.join(', '))}`);
+  }
   good(`${levels.length} level${levels.length === 1 ? '' : 's'}`);
+};
+
+const refExists = (ref: string) => {
+  try {
+    git('rev-parse', '--verify', '--quiet', ref);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const checkSync = () => {
+  const branches = stackLevels().flat();
+  const upstreams = records(git('for-each-ref', '--format=%(refname:short)%x1f%(upstream:short)', 'refs/heads/'));
+  const upstreamOf = new Map(upstreams.map(([branch, upstream]) => [branch, upstream]));
+  heading(`Stack on ${base} against origin, bottom to top`);
+  let outOfSync = 0;
+  for (const branch of branches) {
+    const remote = upstreamOf.get(branch) || `origin/${branch}`;
+    const name = `${cyan(branch)}  ${remote}`;
+    if (!refExists(remote)) {
+      outOfSync++;
+      attention(`${name}  not on the remote`);
+      continue;
+    }
+    const [ahead, behind] = git('rev-list', '--left-right', '--count', `${branch}...${remote}`).trim().split(/\s+/).map(Number);
+    if (!ahead && !behind) good(`${name}  in sync`);
+    else if (ahead && behind) bad(`${name}  diverged: ${ahead} ahead, ${behind} behind; a rebased branch needs a force push`);
+    else if (ahead) attention(`${name}  ${ahead} ahead; push`);
+    else attention(`${name}  ${behind} behind; pull`);
+    if (ahead || behind) outOfSync++;
+  }
+  if (!outOfSync) {
+    good(`all ${branches.length} branches in sync with the remote`);
+    return;
+  }
+  bad(`${outOfSync} of ${branches.length} branches out of sync with the remote`);
+  process.exit(1);
 };
 
 const listTips = () => {
@@ -132,6 +177,7 @@ try {
     branchOf(positional.join(' '));
   } else if (command === 'stack') listStack();
   else if (command === 'tips') listTips();
+  else if (command === 'sync-check') checkSync();
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));
   process.exit(1);

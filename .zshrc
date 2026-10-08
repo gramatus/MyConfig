@@ -206,6 +206,7 @@ _git_tools() {
         'branch-of:find the branch holding a commit, by part of its subject'
         'stack:list the stack branches, bottom to top'
         'tips:show the commit at each branch tip, newest first'
+        'sync-check:compare each stack branch with origin'
     )
     if (( CURRENT == 2 )); then
         _describe 'command' commands
@@ -220,7 +221,7 @@ _git_tools() {
             # The matcher lets the typed text match anywhere in a subject, ignoring case.
             flags+=(":subject:{compadd -M 'm:{a-zA-Z}={A-Za-z} l:|=* r:|=*' -a subjects}")
             ;;
-        stack|s|tips|t) ;;
+        stack|s|tips|t|sync-check|sc) ;;
         *) return ;;
     esac
     shift words
