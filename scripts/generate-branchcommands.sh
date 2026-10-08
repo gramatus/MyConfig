@@ -110,7 +110,7 @@ branch_name() { echo "${1%% *}"; }
   for ((i = 1; i < ${#lines[@]}; i++)); do
     yyy="$(branch_name "${lines[i-1]}")"
     xxx="$(branch_name "${lines[i]}")"
-    echo -e "/pr-review\nreview the ${xxx} branch with the ${yyy} branch as the base."
+    echo "/pr-review ${xxx} ${yyy}"
     echo ""
   done
 
@@ -121,7 +121,7 @@ branch_name() { echo "${1%% *}"; }
   for ((i = 1; i < ${#lines[@]}; i++)); do
     yyy="$(branch_name "${lines[i-1]}")"
     xxx="$(branch_name "${lines[i]}")"
-    echo -e "/pr-summary-simple\ndo this for the ${xxx} branch with the ${yyy} branch as the base."
+    echo "/pr-summary-simple ${xxx} ${yyy}"
     echo ""
   done
 
