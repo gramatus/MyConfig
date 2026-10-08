@@ -142,11 +142,12 @@ const checkSync = () => {
   const upstreamOf = new Map(upstreams.map(([branch, upstream]) => [branch, upstream]));
   heading(`Stack on ${base} against origin, bottom to top`);
   let outOfSync = 0;
+  let notOnRemote = 0;
   for (const branch of branches) {
     const remote = upstreamOf.get(branch) || `origin/${branch}`;
     const name = `${cyan(branch)}  ${remote}`;
     if (!refExists(remote)) {
-      outOfSync++;
+      notOnRemote++;
       attention(`${name}  not on the remote`);
       continue;
     }
@@ -157,11 +158,15 @@ const checkSync = () => {
     else attention(`${name}  ${behind} behind; pull`);
     if (ahead || behind) outOfSync++;
   }
+  const onRemote = branches.length - notOnRemote;
+  console.log('');
+  if (notOnRemote) attention(`${notOnRemote} of ${branches.length} branches not on the remote`);
   if (!outOfSync) {
-    good(`all ${branches.length} branches in sync with the remote`);
+    if (onRemote === 1) good('the 1 branch on the remote is in sync');
+    else if (onRemote) good(`all ${onRemote} branches on the remote are in sync`);
     return;
   }
-  bad(`${outOfSync} of ${branches.length} branches out of sync with the remote`);
+  bad(`${outOfSync} of ${onRemote} branches on the remote out of sync`);
   process.exit(1);
 };
 
