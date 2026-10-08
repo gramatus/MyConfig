@@ -13,6 +13,7 @@ Do it on this branch (it contains all the changes from the reviewed branch). I.e
 ```shell
 git log --oneline --decorate --simplify-by-decoration main..HEAD
 git for-each-ref --merged HEAD --no-merged main --format='%(refname:short)' refs/heads/ --sort=-committerdate
+PAGER=cat git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse
 ```
 
 ## Find branch for a commit
