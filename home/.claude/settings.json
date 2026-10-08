@@ -1,4 +1,5 @@
 {
+  "extraKnownMarketplaces": {},
   "theme": "auto",
   "remoteControlAtStartup": false,
   "autoUpdatesChannel": "stable",
