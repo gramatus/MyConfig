@@ -58,12 +58,74 @@ if (( ${#lines[@]} < 2 )); then
   exit 1
 fi
 
+# Open PRs keyed by head branch; the marker goes before the first stack branch without one.
+declare -A pr_number pr_base
+pr_found=false
+if command -v gh >/dev/null && pr_rows="$(gh pr list --repo "$slug" --state open --limit 500 \
+    --json number,headRefName,baseRefName \
+    --jq '.[] | "\(.headRefName) \(.number) \(.baseRefName)"' 2>/dev/null)"; then
+  pr_found=true
+  while read -r head number base; do
+    [[ -z "$head" ]] && continue
+    pr_number[$head]="$number"
+    pr_base[$head]="$base"
+  done <<< "$pr_rows"
+else
+  echo "Warning: could not list PRs with gh; no PR marker in the output." >&2
+fi
+
+MARKER="--- PRs stop here ---"
+stop_at=${#lines[@]}
+if $pr_found; then
+  for ((i = 1; i < ${#lines[@]}; i++)); do
+    branch="${lines[i]}"
+    if [[ -z "${pr_number[$branch]:-}" ]]; then
+      (( stop_at == ${#lines[@]} )) && stop_at=$i
+      continue
+    fi
+    if (( stop_at < i )); then
+      echo "Warning: #${pr_number[$branch]} ($branch) sits above a branch with no PR." >&2
+    fi
+    if [[ "${pr_base[$branch]}" != "${lines[i-1]}" ]]; then
+      echo "Warning: #${pr_number[$branch]} ($branch) targets ${pr_base[$branch]}, not ${lines[i-1]}." >&2
+    fi
+  done
+fi
+
+# Pass "blank" as the second argument to follow the marker with an empty line.
+marker_before() {
+  if $pr_found && (( $1 == stop_at )); then
+    echo "$MARKER"
+    if [[ "${2:-}" == blank ]]; then echo ""; fi
+  fi
+}
+
 mkdir -p "$AWC_DIR"
 {
   echo "Notepad: [$NOTEPAD](file://$NOTEPAD)"
   echo ""
   echo '```text'
-  echo "$stack_log"
+  marker_printed=false
+  while IFS= read -r decoration; do
+    IFS=',' read -ra refs <<< "$decoration"
+    numbers=""
+    uncovered=false
+    for ref in "${refs[@]}"; do
+      ref="${ref# }"
+      if [[ -n "${pr_number[$ref]:-}" ]]; then numbers+=" #${pr_number[$ref]}"; fi
+      covered=false
+      for ((i = 1; i < stop_at; i++)); do
+        if [[ "${lines[i]}" == "$ref" ]]; then covered=true; fi
+      done
+      if ! $covered; then uncovered=true; fi
+    done
+    if $pr_found && $uncovered && ! $marker_printed; then
+      echo "$MARKER"
+      marker_printed=true
+    fi
+    echo "${decoration}${numbers:+ ${numbers}}"
+  done <<< "$stack_log"
+  if $pr_found && ! $marker_printed; then echo "$MARKER"; fi
   echo '```'
   echo ""
   echo "---"
@@ -71,8 +133,10 @@ mkdir -p "$AWC_DIR"
 
   # Compare links
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i"
     echo "${COMPARE_BASE}/${lines[i-1]}...${lines[i]}?expand=1"
   done
+  marker_before "${#lines[@]}"
 
   echo ""
   echo "---"
@@ -80,26 +144,32 @@ mkdir -p "$AWC_DIR"
 
   # PR review commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i" blank
     echo "/pr-review ${lines[i]} ${lines[i-1]}"
     echo ""
   done
+  marker_before "${#lines[@]}" blank
 
   echo "---"
   echo ""
 
   # PR summary commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i" blank
     echo "/pr-summary-simple ${lines[i]} ${lines[i-1]}"
     echo ""
   done
+  marker_before "${#lines[@]}" blank
 
   echo "---"
   echo ""
 
   # Reset each branch to what is currently on origin
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i"
     echo "git fetch origin +${lines[i]}:${lines[i]}"
   done
+  marker_before "${#lines[@]}"
 
   echo ""
   echo "---"
@@ -107,8 +177,10 @@ mkdir -p "$AWC_DIR"
 
   # Push to origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i"
     echo "git push -u origin ${lines[i]} --force"
   done
+  marker_before "${#lines[@]}"
 
   echo ""
   echo "---"
@@ -116,8 +188,10 @@ mkdir -p "$AWC_DIR"
 
   # Read from origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i"
     echo "git branch ${lines[i]} origin/${lines[i]}"
   done
+  marker_before "${#lines[@]}"
 } > "$OUTPUT"
 
 echo "Generated $OUTPUT with ${#lines[@]} branches ($(( ${#lines[@]} - 1 )) pairs)"
