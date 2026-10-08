@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reads branchlist.md up to the first empty line, then generates branchcommands.md
-# with compare links, pr-review, pr-summary, and git branch -f commands.
+# Reads the branch stack between main and the checked-out wip branch from git, then
+# generates branchcommands.md with compare links, pr-review, pr-summary and push commands.
 #
 # Repo-agnostic: operates on whichever git repo you are currently inside
 # (resolved via `git rev-parse --show-toplevel`), so a single copy on PATH
@@ -78,19 +78,40 @@ EOF
   exit 0
 fi
 
-# Read lines until the first empty line
-# Each entry stores "branch [commit]" — branch name is the first word
-lines=()
-while IFS= read -r line; do
-  [[ -z "$line" ]] && break
-  lines+=("$line")
-done < "$INPUT"
+stack_log="$(git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse)"
+
+# The checked-out branch is the wip branch, and is left out of the stack.
+current_branch="$(git symbolic-ref --short -q HEAD || true)"
+lines=(main)
+while IFS= read -r decoration; do
+  [[ -z "$decoration" ]] && continue
+  IFS=',' read -ra refs <<< "$decoration"
+  kept=()
+  for ref in "${refs[@]}"; do
+    ref="${ref# }"
+    [[ "$ref" == "$current_branch" ]] && continue
+    kept+=("$ref")
+  done
+  if (( ${#kept[@]} > 1 )); then
+    echo "Warning: branches on the same commit, kept in log order: ${kept[*]}" >&2
+  fi
+  lines+=("${kept[@]}")
+done <<< "$stack_log"
 
 if (( ${#lines[@]} < 2 )); then
-  echo "Need at least 2 branches, found ${#lines[@]}" >&2
+  echo "Need at least 1 branch between main and HEAD, found $(( ${#lines[@]} - 1 ))" >&2
   exit 1
 fi
+
+mkdir -p "$AWC_DIR"
 {
+  echo '```text'
+  echo "$stack_log"
+  echo '```'
+  echo ""
+  echo "---"
+  echo ""
+
   # Compare links
   for ((i = 1; i < ${#lines[@]}; i++)); do
     echo "${COMPARE_BASE}/${lines[i-1]}...${lines[i]}?expand=1"
