@@ -104,6 +104,8 @@ mkdir -p "$AWC_DIR"
 {
   echo "Notepad: [$NOTEPAD](file://$NOTEPAD)"
   echo ""
+  echo "## Stack"
+  echo ""
   echo '```text'
   marker_printed=false
   while IFS= read -r decoration; do
@@ -128,10 +130,9 @@ mkdir -p "$AWC_DIR"
   if $pr_found && ! $marker_printed; then echo "$MARKER"; fi
   echo '```'
   echo ""
-  echo "---"
+  echo "## Compare links"
   echo ""
 
-  # Compare links
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
     echo "${COMPARE_BASE}/${lines[i-1]}...${lines[i]}?expand=1"
@@ -139,10 +140,9 @@ mkdir -p "$AWC_DIR"
   marker_before "${#lines[@]}"
 
   echo ""
-  echo "---"
+  echo "## PR review"
   echo ""
 
-  # PR review commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
     echo "/pr-review ${lines[i]} ${lines[i-1]}"
@@ -150,10 +150,9 @@ mkdir -p "$AWC_DIR"
   done
   marker_before "${#lines[@]}" blank
 
-  echo "---"
+  echo "## PR summary"
   echo ""
 
-  # PR summary commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
     echo "/pr-summary-simple ${lines[i]} ${lines[i-1]}"
@@ -161,10 +160,9 @@ mkdir -p "$AWC_DIR"
   done
   marker_before "${#lines[@]}" blank
 
-  echo "---"
+  echo "## Reset to origin"
   echo ""
 
-  # Reset each branch to what is currently on origin
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
     echo "git fetch origin +${lines[i]}:${lines[i]}"
@@ -172,10 +170,9 @@ mkdir -p "$AWC_DIR"
   marker_before "${#lines[@]}"
 
   echo ""
-  echo "---"
+  echo "## Push to origin"
   echo ""
 
-  # Push to origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
     echo "git push -u origin ${lines[i]} --force"
@@ -183,10 +180,9 @@ mkdir -p "$AWC_DIR"
   marker_before "${#lines[@]}"
 
   echo ""
-  echo "---"
+  echo "## Create from origin"
   echo ""
 
-  # Read from origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
     echo "git branch ${lines[i]} origin/${lines[i]}"
