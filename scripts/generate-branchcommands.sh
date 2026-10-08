@@ -17,8 +17,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 
 AWC_DIR="$REPO_ROOT/.agent-context/active-work-context"
-INPUT="$AWC_DIR/branchlist.md"
 OUTPUT="$AWC_DIR/branchcommands.md"
+
+DOTFILES_ROOT="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+NOTEPAD="$DOTFILES_ROOT/docs/notepad.md"
 
 # Derive "owner/repo" from origin, normalizing both URL forms:
 #   https://github.com/OWNER/REPO(.git)  ->  OWNER/REPO
@@ -30,53 +32,6 @@ if [[ -z "$slug" || "$slug" == *://* || "$slug" == *github.com* ]]; then
   echo "Warning: could not derive a GitHub slug from origin ('$origin_url'); compare links may be wrong." >&2
 fi
 COMPARE_BASE="https://github.com/${slug}/compare"
-
-# Seed a basic branchlist.md if it doesn't exist yet, then stop so you can edit it.
-if [[ ! -f "$INPUT" ]]; then
-  mkdir -p "$AWC_DIR"
-  cat > "$INPUT" <<'EOF'
-main
-<your-branch>
-
-## Pre-Rebase commit
-
-0000000000000000000000000000000000000000
-
-## Review results
-
-Good findings. Please fix them all, considering these comments:
-...
-Do it on this branch (it contains all the changes from the reviewed branch). I.e., do not check out the reviewed branch.
-
-## Useful commands
-
-```shell
-git log --oneline --decorate --simplify-by-decoration main..HEAD
-git for-each-ref --merged HEAD --no-merged main --format='%(refname:short)' refs/heads/ --sort=-committerdate
-PAGER=cat git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse
-```
-
-## Full rebase recover
-
-```shell
-for b in $(git for-each-ref --format='%(refname:short)' refs/heads); do
-  n=$(git reflog show "$b" --format='%gs' \
-      | grep -n -m1 -E 'rewritten during rebase|^rebase \(finish\)' \
-      | cut -d: -f1)
-  [ -n "$n" ] || continue
-  #echo "$b: $(git rev-parse --short "$b") -> $(git rev-parse --short "$b@{$n}")"
-  echo git update-ref "refs/heads/$b" "$b@{$n}"     # drop the echo to apply
-done
-```
-
-## Get write repos
-
-gh repo list helse-sorost --json name,viewerPermission -L 1000 --jq '.[] | select(.viewerPermission == "WRITE" or .viewerPermission == "MAINTAIN" or .viewerPermission == "ADMIN") | .name'
-
-EOF
-  echo "Seeded a basic $INPUT — edit it (one branch per line, blank line to end) and re-run." >&2
-  exit 0
-fi
 
 stack_log="$(git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse)"
 
@@ -105,6 +60,8 @@ fi
 
 mkdir -p "$AWC_DIR"
 {
+  echo "Notepad: [$NOTEPAD](file://$NOTEPAD)"
+  echo ""
   echo '```text'
   echo "$stack_log"
   echo '```'
