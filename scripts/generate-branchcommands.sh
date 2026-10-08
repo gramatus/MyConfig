@@ -101,8 +101,14 @@ marker_before() {
 }
 
 mkdir -p "$AWC_DIR"
+NOTEPAD_LINK="$AWC_DIR/notepad.md"
+if [[ -e "$NOTEPAD_LINK" && ! -L "$NOTEPAD_LINK" ]]; then
+  echo "Warning: $NOTEPAD_LINK is a real file; not replacing it with a symlink." >&2
+else
+  ln -sfn "$NOTEPAD" "$NOTEPAD_LINK"
+fi
 {
-  echo "Notepad: [$NOTEPAD](file://$NOTEPAD)"
+  echo "Notepad: [notepad.md](notepad.md)"
   echo ""
   echo "## Stack"
   echo ""
