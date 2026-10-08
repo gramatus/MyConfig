@@ -137,6 +137,18 @@ branch_name() { echo "${1%% *}"; }
   echo "---"
   echo ""
 
+  # Reset each branch to what is currently on origin
+  for ((i = 1; i < ${#lines[@]}; i++)); do
+    echo "git fetch origin +${lines[i]}:${lines[i]}"
+  done
+
+# git fetch origin +<branch>:<branch>
+
+
+  echo ""
+  echo "---"
+  echo ""
+
   # Push to origin commands
   for ((i = 1; i < ${#lines[@]}; i++)); do
     xxx="$(branch_name "${lines[i]}")"
