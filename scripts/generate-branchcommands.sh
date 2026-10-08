@@ -109,6 +109,14 @@ else
 fi
 {
   echo "Notepad: [notepad.md](notepad.md)"
+  echo "Pre-Rebase commits: [stackplan-rebases.log](stackplan-rebases.log)"
+  echo ""
+  echo "## sp cheatsheet"
+  echo "\`\`\`shell"
+  echo "sp cut # check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work"
+  echo "sp mode short/full"
+  echo "sp prepare # record the pre-rebase tip before a rebase run by hand"
+  echo "\`\`\`"
   echo ""
   echo "## Stack"
   echo ""
