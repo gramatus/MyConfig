@@ -202,23 +202,30 @@ _stack_plan() {
 compdef _stack_plan stack-plan
 
 _git_tools() {
-    local -a commands=('branch-of:find the branch holding a commit, by part of its subject')
+    local -a commands=(
+        'branch-of:find the branch holding a commit, by part of its subject'
+        'stack:list the stack branches, bottom to top'
+        'tips:show the commit at each branch tip, newest first'
+    )
     if (( CURRENT == 2 )); then
         _describe 'command' commands
         return
     fi
     local base=origin/main
     (( ${words[(I)(-b|--base)]} )) && base=${words[${words[(I)(-b|--base)]} + 1]}
+    local -a flags=('(-b --base)'{-b,--base}'[where the search starts, default origin/main]:ref:_stack_plan_refs')
     case $words[2] in
         branch-of|bo)
             local -a subjects=(${(f)"$(git log --format=%s $base..HEAD 2>/dev/null)"})
-            shift words
-            (( CURRENT-- ))
             # The matcher lets the typed text match anywhere in a subject, ignoring case.
-            _arguments '(-b --base)'{-b,--base}'[where the search starts, default origin/main]:ref:_stack_plan_refs' \
-                ":subject:{compadd -M 'm:{a-zA-Z}={A-Za-z} l:|=* r:|=*' -a subjects}"
+            flags+=(":subject:{compadd -M 'm:{a-zA-Z}={A-Za-z} l:|=* r:|=*' -a subjects}")
             ;;
+        stack|s|tips|t) ;;
+        *) return ;;
     esac
+    shift words
+    (( CURRENT-- ))
+    _arguments $flags
 }
 compdef _git_tools git-tools
 _zshrc_log_once "omz_alias" "OMZ git aliases: see ~/.oh-my-zsh/plugins/git/README.md or run 'omz plugin info git'"
