@@ -194,6 +194,16 @@ fi
   marker_before "${#lines[@]}"
 
   echo ""
+  echo "## Create PR"
+  echo ""
+
+  for ((i = 1; i < ${#lines[@]}; i++)); do
+    marker_before "$i"
+    echo "pr-create ${lines[i]} ${lines[i-1]}"
+  done
+  marker_before "${#lines[@]}"
+
+  echo ""
   echo "## Create from origin"
   echo ""
 
