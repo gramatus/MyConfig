@@ -154,7 +154,8 @@ alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
 alias cdnc="cd /workspaces/.codespaces/.persistedshare/dotfiles/.config/nvim" # Go to nvim config folder
 alias cddot="cd /workspaces/.codespaces/.persistedshare/dotfiles" # Go to dotfiles config folder
 alias sp=stack-plan # Stack branches from the commits waiting on the current branch
-_zshrc_log_once "my_alias" "My custom aliases: cdw, cdnc, cddot, sp"
+alias gt=git-tools # Small git helpers for a stack of branches
+_zshrc_log_once "my_alias" "My custom aliases: cdw, cdnc, cddot, sp, gt"
 
 # Tab completion for stack-plan; sp completes the same way because zsh expands the alias first.
 _stack_plan_refs() {
@@ -199,6 +200,27 @@ _stack_plan() {
     _arguments $flags
 }
 compdef _stack_plan stack-plan
+
+_git_tools() {
+    local -a commands=('branch-of:find the branch holding a commit, by part of its subject')
+    if (( CURRENT == 2 )); then
+        _describe 'command' commands
+        return
+    fi
+    local base=origin/main
+    (( ${words[(I)(-b|--base)]} )) && base=${words[${words[(I)(-b|--base)]} + 1]}
+    case $words[2] in
+        branch-of|bo)
+            local -a subjects=(${(f)"$(git log --format=%s $base..HEAD 2>/dev/null)"})
+            shift words
+            (( CURRENT-- ))
+            # The matcher lets the typed text match anywhere in a subject, ignoring case.
+            _arguments '(-b --base)'{-b,--base}'[where the search starts, default origin/main]:ref:_stack_plan_refs' \
+                ":subject:{compadd -M 'm:{a-zA-Z}={A-Za-z} l:|=* r:|=*' -a subjects}"
+            ;;
+    esac
+}
+compdef _git_tools git-tools
 _zshrc_log_once "omz_alias" "OMZ git aliases: see ~/.oh-my-zsh/plugins/git/README.md or run 'omz plugin info git'"
 
 # Check that display variable is set (not sure if this is smart and/or right)
