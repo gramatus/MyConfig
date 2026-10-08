@@ -118,15 +118,6 @@ fi
   echo "---"
   echo ""
 
-  # Git branch -f commands — includes commit hash if present
-  for ((i = 1; i < ${#lines[@]}; i++)); do
-    echo "git branch -f ${lines[i]}"
-  done
-
-  echo ""
-  echo "---"
-  echo ""
-
   # Reset each branch to what is currently on origin
   for ((i = 1; i < ${#lines[@]}; i++)); do
     echo "git fetch origin +${lines[i]}:${lines[i]}"
