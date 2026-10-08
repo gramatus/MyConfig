@@ -263,3 +263,11 @@ if [[ -z "$TMUX" ]]; then
     # Hoever, I prefer to be able to exit out to zsh (I think)
     # exec tmux new-session
 fi
+
+export PATH="$HOME/.local/bin:$PATH"
+
+# Machine-only config, created empty by install.sh and never tracked
+if [[ -r ~/.zshrc.local ]]; then
+    source ~/.zshrc.local
+    _zshrc_log_once "local" "Loaded ~/.zshrc.local"
+fi

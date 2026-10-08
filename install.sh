@@ -39,6 +39,7 @@ ln -srfn .config/nvim.kickstart ~/.config/nvim # Need to symlink every folder in
 ln -srfn docs/KEYMAPS.md ~/nvim-keymaps.md
 ln -srfn docs/motions.md ~/nvim-motions.md
 ln -srfn .zshrc ~/.zshrc
+touch ~/.zshrc.local # Machine-only zsh config, sourced last by .zshrc
 ln -srfn .tmux.conf ~/.tmux.conf
 ln -srfn .bash_profile ~/.bash_profile
 
