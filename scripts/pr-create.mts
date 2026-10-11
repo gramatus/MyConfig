@@ -61,13 +61,13 @@ if (base !== defaultBranch) {
 const summaryDir = join(repoRoot, '.agent-context', 'localhistory');
 const branchSlug = branch.replaceAll('/', '-');
 const firstExisting = (...names: string[]) => names.map((name) => join(summaryDir, name)).find((path) => existsSync(path));
-const blurbPath =
-  firstExisting(`PR-SUMMARY-SIMPLE-NO-${branchSlug}.md`, `PR-SUMMARY-SIMPLE-${branchSlug}.md`) ??
-  fail(`no PR-SUMMARY-SIMPLE-${branchSlug}.md in ${summaryDir}; run /pr-summary first.`);
-const reviewerPath = firstExisting(`PR-SUMMARY-NO-${branchSlug}.md`, `PR-SUMMARY-${branchSlug}.md`);
+const bodyPath =
+  firstExisting(`PR-BODY-NO-${branchSlug}.md`, `PR-BODY-${branchSlug}.md`) ??
+  fail(`no PR-BODY-${branchSlug}.md in ${summaryDir}; run /pr-summary first.`);
+const reviewerPath = firstExisting(`PR-COMMENT-NO-${branchSlug}.md`, `PR-COMMENT-${branchSlug}.md`);
 
-const [titleLine, ...bodyLines] = readFileSync(blurbPath, 'utf8').trimStart().split('\n');
-if (!titleLine.startsWith('# ')) fail(`${blurbPath} does not start with a "# " title line.`);
+const [titleLine, ...bodyLines] = readFileSync(bodyPath, 'utf8').trimStart().split('\n');
+if (!titleLine.startsWith('# ')) fail(`${bodyPath} does not start with a "# " title line.`);
 const title = titleLine.slice(2).trim();
 const body = bodyLines.join('\n').trim();
 
