@@ -522,6 +522,18 @@ const sameNetChange = (label: string, from: string, to: string, onFrom: string, 
   return false;
 };
 
+// Git exits 0 when it pauses at an edit or break, so a rebase still in progress is a stop too.
+const exitUnlessRebaseFinished = (status: number | null) => {
+  if (status !== 0) {
+    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
+    process.exit(status ?? 1);
+  }
+  if (existsSync(gitQuiet('rev-parse', '--path-format=absolute', '--git-path', 'rebase-merge').trim())) {
+    attention('the rebase paused for an edit. When done: `git rebase --continue`, then: stack-plan verify');
+    process.exit(0);
+  }
+};
+
 // Checks whether cutting the stack at a branch and rebasing the rest onto the base would lose work; --apply then does it.
 const cutStack = (at: string, apply: boolean) => {
   const wip = currentBranch();
@@ -585,11 +597,7 @@ const cutStack = (at: string, apply: boolean) => {
   const args = ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', base, cutTip];
   heading('Rebase');
   traceGit(args);
-  const result = spawnSync('git', args, { stdio: 'inherit' });
-  if (result.status !== 0) {
-    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
-    process.exit(result.status ?? 1);
-  }
+  exitUnlessRebaseFinished(spawnSync('git', args, { stdio: 'inherit' }).status);
   verifyRebase();
 };
 
@@ -1118,10 +1126,7 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
       STACK_PLAN_TODO: todoPath,
     },
   });
-  if (result.status !== 0) {
-    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
-    process.exit(result.status ?? 1);
-  }
+  exitUnlessRebaseFinished(result.status);
   verifyRebase();
 };
 

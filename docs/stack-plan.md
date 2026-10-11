@@ -128,7 +128,7 @@ The rebase reads the notes and the saved order, not `stackplan.txt`, so what `sa
 
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. It is `--base` (`origin/main`) when that is the lowest branch of the stack. Moving the bottom branch therefore rebases the whole stack.
 
-If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. When a pick conflicts, the rebase stops as usual: resolve it, `git rebase --continue`, then run `stack-plan verify` yourself.
+If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. When a pick conflicts, the rebase stops as usual: resolve it, `git rebase --continue`, then run `stack-plan verify` yourself. The same goes for an `edit` or `break` you add while reviewing the todo. Git exits 0 at that pause, so stack-plan checks for a rebase still in progress and stops there instead of verifying.
 
 #### When rerere replays the wrong resolution
 
