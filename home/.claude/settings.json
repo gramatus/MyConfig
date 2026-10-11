@@ -3,6 +3,14 @@
   "theme": "auto",
   "remoteControlAtStartup": false,
   "autoUpdatesChannel": "stable",
+  "permissions": {
+    "allow": [
+      "Bash(git notes --ref=target show:*)",
+      "Bash(git notes --ref=target list:*)",
+      "Bash(git notes --ref target show:*)",
+      "Bash(git notes --ref target list:*)"
+    ]
+  },
   "hooks": {
     "ConfigChange": [
       {
