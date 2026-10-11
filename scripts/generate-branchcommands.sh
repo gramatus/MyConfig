@@ -169,7 +169,7 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
-    echo "/pr-summary-simple ${lines[i]} ${lines[i-1]}"
+    echo "/pr-summary ${lines[i]} ${lines[i-1]} body-only "
     echo ""
   done
   marker_before "${#lines[@]}" blank
