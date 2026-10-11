@@ -8,14 +8,8 @@
 # Every linked path, because prettier follows symlinks but resolves config from
 # the path given — the harness's own .prettierrc.yml is bypassed through a link.
 agent-common
-.github/copilot-instructions.md
 .github/agent-common
-.github/agents
-.github/prompts
-.github/instructions/alz-ai.instructions.md
-.github/instructions/terraform-evaluation.instructions.md
 .claude/agents
-.claude/commands
 .claude/hooks
 .claude/rules
 .claude/skills

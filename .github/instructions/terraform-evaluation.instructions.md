@@ -1,1 +1,0 @@
-../../.agent-harness/.github/instructions/terraform-evaluation.instructions.md

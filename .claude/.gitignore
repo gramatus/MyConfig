@@ -1,13 +1,13 @@
+# >>> agent-harness managed >>>
 # Shared content, COPIED into each consuming repo by the harness — git will not read an
 # ignore file through a symlink. Edit it in the harness, not in a consuming repo: the
-# harness rewrites this half of the file every run. A pattern you changed or added is not
-# lost — it moves below the marker at the end — and a comment survives only where it sits
-# directly above such a pattern.
+# harness rewrites everything between its managed markers every run, and anything edited
+# there is lost. Lines outside the markers are left alone.
 #
 # READ scripts/README.md IN THE HARNESS -> "The two copied files" BEFORE DELETING A LINE.
 # Some entries below look redundant and are not, and `.claude/settings.local.json` is
-# deliberately absent rather than overlooked. Patterns a repo adds for itself go below the
-# marker the refresh writes at the end.
+# deliberately absent rather than overlooked. Patterns a repo adds for itself go outside
+# the managed markers.
 
 # A safety net for the old layout, not duplication — read the README.
 active-work-context/*
@@ -34,3 +34,4 @@ local/
 input/*
 !input/README.md
 scheduled_tasks.lock
+# <<< agent-harness managed <<<

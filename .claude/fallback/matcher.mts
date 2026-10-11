@@ -4,7 +4,7 @@
 
 /**
  * The guard `.claude/fallback/guard.sh` runs when the bundle is absent: it asks before every
- * command the policy allows only within limits, and before a redirect that may write a file.
+ * command whose policy tier needs the hooks, and before a redirect that may write a file.
  * The linker renders it into each consumer's `.claude/fallback/matcher.mts` with the list filled in.
  */
 
@@ -193,15 +193,12 @@ interface PendingHeredoc {
   stripsTabs: boolean;
 }
 
-/** The tokens bash would see, or null for an unclosed quote or substitution. */
+/** The tokens bash would see, or null for anything unlexed, a stack overflow included. */
 export function lexShell(command: string): ShellToken[] | null {
   try {
     return lexList(command, 0, false).tokens;
-  } catch (error) {
-    if (error instanceof UnterminatedConstruct) {
-      return null;
-    }
-    throw error;
+  } catch {
+    return null;
   }
 }
 
@@ -699,7 +696,7 @@ function scanBackticks(
   throw new UnterminatedConstruct();
 }
 
-/** Lexes the body raw: its `\``, `\$` and `\\` read as escapes either way. */
+/** Lexes the body raw, so a `\`` or `\$` bash unescapes and expands is missed. */
 function lexBacktickBody(
   src: string,
   start: number,
@@ -878,7 +875,12 @@ function decodeAnsiCEscape(src: string, at: number): [string, number] {
         : `\\${letter}${match[0]}`;
     return [character, 1 + match[0].length];
   }
-  if (letter === "c" && at + 1 < src.length) {
+  // bash closes `$'\c'` at the quote, and reads the X in `\c\X` literally.
+  if (letter === "c" && at + 1 < src.length && src[at + 1] !== "'") {
+    if (src[at + 1] === "\\" && at + 2 < src.length) {
+      const literal = src[at + 2] === "\\" ? "" : src[at + 2];
+      return [String.fromCharCode(0x1c) + literal, 3];
+    }
     return [String.fromCharCode(src.charCodeAt(at + 1) & 0x1f), 2];
   }
   return [`\\${letter}`, 1];
@@ -892,7 +894,7 @@ interface ShellHookPayload {
   workspace_roots?: string[];
 }
 
-const LIMITED_COMMANDS: readonly string[] = ["git diff","git log","git show","git grep","git branch","git fetch","git reflog","git worktree add","git worktree remove","node","rg","perl","awk","find","mkdir","sort","uniq"];
+const GUARDED_COMMANDS: readonly string[] = ["rm","cp","curl","git -C","env","bash","sh","ln","sqlcmd","psql","git remote","git tag","git ls-remote","git config","npm --prefix","gh api","git diff","git log","git show","git grep","git branch","git fetch","git reflog","git worktree add","git worktree remove","node","rg","perl","awk","find","mkdir","sort","uniq"];
 
 const CURSOR_SHELL_EVENT = "beforeShellExecution";
 const CURSOR_PRE_TOOL_EVENT = "preToolUse";
@@ -904,9 +906,9 @@ function escapeRegExp(text: string): string {
 }
 
 /** Anywhere in the command, as whole words: over-asking is fine while the harness is broken. */
-function firstLimitedCommand(command: string): string | undefined {
-  return LIMITED_COMMANDS.find((limited) => {
-    const words = limited.split(" ").map(escapeRegExp).join("\\s+");
+function firstGuardedCommand(command: string): string | undefined {
+  return GUARDED_COMMANDS.find((guarded) => {
+    const words = guarded.split(" ").map(escapeRegExp).join("\\s+");
     return new RegExp(`\\b${words}\\b`).test(command);
   });
 }
@@ -947,8 +949,8 @@ function everyWorkspaceRootHasBundle(roots: readonly string[] | undefined): bool
   return !!roots?.length && roots.every((root) => existsSync(join(root, BUNDLE_IN_WORKSPACE)));
 }
 
-function approvalRequest(limited: string): string {
-  return `\`${limited}\` is allowed only within limits the agent-harness guard enforces, and the guard is not running here, so it needs your approval.`;
+function approvalRequest(guarded: string): string {
+  return `\`${guarded}\` is approved only in the forms the agent-harness guard checks, and the guard is not running here, so it needs your approval.`;
 }
 
 const REDIRECT_APPROVAL_REQUEST: Record<RedirectRisk, string> = {
@@ -966,7 +968,7 @@ function main(): void {
     return;
   }
   const event = payload.hook_event_name;
-  // Cursor drops an ask on preToolUse, and in Auto-Review on escalated or pre-approved shell calls.
+  // Cursor drops an ask on preToolUse.
   if (event === CURSOR_PRE_TOOL_EVENT) {
     process.stdout.write("{}");
     return;
@@ -978,11 +980,11 @@ function main(): void {
     return;
   }
   const command = payload.tool_input?.command ?? payload.command ?? "";
-  const limited = firstLimitedCommand(command);
+  const guarded = firstGuardedCommand(command);
   const risk = redirectRisk(command);
   let reason: string;
-  if (limited !== undefined) {
-    reason = approvalRequest(limited);
+  if (guarded !== undefined) {
+    reason = approvalRequest(guarded);
   } else if (risk !== undefined) {
     reason = REDIRECT_APPROVAL_REQUEST[risk];
   } else {

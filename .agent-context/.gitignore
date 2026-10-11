@@ -1,13 +1,13 @@
+# >>> agent-harness managed >>>
 # Shared content, COPIED into each consuming repo by the harness — git will not read an
 # ignore file through a symlink. Edit it in the harness, not in a consuming repo: the
-# harness rewrites this half of the file every run. A pattern you changed or added is not
-# lost — it moves below the marker at the end — and a comment survives only where it sits
-# directly above such a pattern.
+# harness rewrites everything between its managed markers every run, and anything edited
+# there is lost. Lines outside the markers are left alone.
 #
 # READ scripts/README.md IN THE HARNESS -> "The two copied files" BEFORE DELETING A LINE.
 # This is the single place that ignores everything the agent tooling writes into
 # .agent-context/, so several shared commands assume these paths are uncommittable.
-# Patterns a repo adds for itself go below the marker the refresh writes at the end.
+# Patterns a repo adds for itself go outside the managed markers.
 
 # Both globs are needed — read the README before dropping either.
 active-work-context/*
@@ -29,3 +29,4 @@ handoffs/
 handoff-log/
 conversations/
 hook-measurement/
+# <<< agent-harness managed <<<

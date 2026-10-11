@@ -8,6 +8,7 @@
       // >>> START: agent-harness managed block >>>
       // Rewritten on every run from scripts/managed/hook-registrations.mts in the harness. Outside the markers is yours.
       {
+        "matcher": "Shell|Write|Task",
         "command": "bash \".claude/fallback/guard.sh\"",
         "failClosed": true
       }
