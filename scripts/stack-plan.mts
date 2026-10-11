@@ -46,8 +46,11 @@ const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${a
 
 const traceGit = (args: string[]) => console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
 
+const changesRepo = ([subcommand, ...rest]: string[]) =>
+  (subcommand === 'notes' && (rest.includes('add') || rest.includes('remove'))) || (subcommand === 'config' && !rest.includes('--get'));
+
 const git = (...args: string[]) => {
-  traceGit(args);
+  if (verbose || changesRepo(args)) traceGit(args);
   try {
     return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
@@ -57,7 +60,8 @@ const git = (...args: string[]) => {
 };
 
 const USAGE = [
-  'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway] [--apply]',
+  'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway] [--apply] [--verbose]',
+  '  --verbose also echoes the read-only git commands; those that change the repository are always echoed',
   '  export (e)   write the plan file',
   '  save (s)     write notes from the plan',
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
@@ -89,7 +93,8 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
 
 const [given = '', ...args] = process.argv.slice(2);
 const [command, ...implied] = EXPANSIONS[given] ?? [given];
-const rest = [...implied, ...args.map((arg) => FLAG_ALIASES[arg] ?? arg)];
+const verbose = args.includes('--verbose');
+const rest = [...implied, ...args.filter((arg) => arg !== '--verbose').map((arg) => FLAG_ALIASES[arg] ?? arg)];
 
 const usageError = (message?: string): never => {
   if (message) console.error(redErr(`✗ ${message}`));
@@ -286,6 +291,15 @@ const gitQuiet = (...args: string[]) =>
 
 const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
 
+const fileExistsIn = (ref: string, file: string) => {
+  try {
+    gitQuiet('cat-file', '-e', `${ref}:${file}`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 type Merge = { ok: true; tree: string } | { ok: false; files: string[]; tree: string; messages: string[] };
 
 // A three-way merge in memory: the tree it would produce, or the conflicted files, the tree with markers, and git's messages.
@@ -330,10 +344,12 @@ const replaceFiles = (tree: string, commit: string, files: string[]) => {
 
 // Replays the planned picks in memory, resolving each conflict to the pick's side so later ones are found too.
 const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulation => {
-  console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
-  console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
-  console.error(dimErr(`  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`));
-  console.error(dimErr(`  (on a conflict: merge-tree -X theirs, then the pick's own version of any file still conflicted)`));
+  if (verbose) {
+    console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
+    console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
+    console.error(dimErr(`  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`));
+    console.error(dimErr(`  (on a conflict: merge-tree -X theirs, then the pick's own version of any file still conflicted)`));
+  }
   const conflicts: Conflict[] = [];
   let state = start;
   let parent = start;
@@ -366,7 +382,7 @@ const conflictSize = (tree: string, file: string) => {
   let regions = 0;
   let lines = 0;
   let inside = false;
-  const text = gitSucceeds('cat-file', '-e', `${tree}:${file}`) ? gitQuiet('cat-file', '-p', `${tree}:${file}`) : '';
+  const text = fileExistsIn(tree, file) ? gitQuiet('cat-file', '-p', `${tree}:${file}`) : '';
   for (const line of text.split('\n')) {
     if (MARKER_OPEN.test(line)) {
       regions++;
@@ -382,43 +398,75 @@ const changesAny = (sha: string, files: string[]) =>
 
 const subjectOf = (sha: string) => ({ sha, subject: gitQuiet('show', '-s', '--format=%s', sha).trim() });
 
-// Sizes each conflicted file, and names the commits on those files that the pick now sits above, or no longer does.
-const explainConflict = (conflict: Conflict, start: string) => {
+const oneLine = (commit: { sha: string; subject: string }) => commitLine(commit).trim();
+
+// Sizes each conflicted file, and names the commits on those files that the pick now comes after, or no longer does.
+const explainConflict = (conflict: Conflict, start: string, alreadyNamed: string[] = []) => {
   const { commit, files, tree, messages, before } = conflict;
-  for (const file of files) {
+  const sizes = files.map((file) => {
     const message = messages.find((line) => line.startsWith('CONFLICT') && line.includes(file)) ?? '';
-    const kind = /^CONFLICT \(([^)]+)\)/.exec(message)?.[1] ?? 'conflict';
+    const kind = /^CONFLICT \(([^)]+)\)/.exec(message)?.[1] ?? 'content';
     const { regions, lines } = conflictSize(tree, file);
     const size = regions ? `${regions} region${regions === 1 ? '' : 's'}, ${lines} lines` : 'no text markers';
-    console.log(`    ${file}  ${size}  (${kind})`);
-  }
+    return `${file}  ${size}${kind === 'content' ? '' : `  (${kind})`}`;
+  });
   const wasBelow = new Set(fileList(gitQuiet('rev-list', `${start}..${commit.sha}^`)));
   const isBelow = new Set(before.map((below) => below.sha));
+  const unnamed = (culprit: { sha: string }) => !alreadyNamed.includes(culprit.sha);
   // From the base side: commits the pick now sits on that it did not before, as after a cut or a moved branch.
   const fromBase = fileList(gitQuiet('log', '--format=%H', '--max-count=6', `${commit.sha}..${start}`, '--', ...files));
-  const nowBelow = [...before.filter((below) => !wasBelow.has(below.sha) && changesAny(below.sha, files)), ...fromBase.map(subjectOf)];
-  const noLongerBelow = [...wasBelow].filter((sha) => !isBelow.has(sha) && changesAny(sha, files)).map(subjectOf);
-  if (nowBelow.length) {
-    console.log('  now below it, and changing the same files:');
-    for (const culprit of nowBelow.slice(0, 6)) console.log(`  ${commitLine(culprit)}`);
-    if (fromBase.length > 5 || nowBelow.length > 6) console.log('    and more');
-  }
-  if (noLongerBelow.length) {
-    console.log('  no longer below it, and changing the same files:');
-    for (const culprit of noLongerBelow) console.log(`  ${commitLine(culprit)}`);
-  }
-  if (!nowBelow.length && !noLongerBelow.length) console.log('  no commit that moved relative to it changes those files');
+  const nowAfter = [...before.filter((below) => !wasBelow.has(below.sha) && changesAny(below.sha, files)), ...fromBase.map(subjectOf)];
+  const nowBefore = [...wasBelow].filter((sha) => !isBelow.has(sha) && changesAny(sha, files)).map(subjectOf);
+  const causes = [
+    ...nowAfter.filter(unnamed).slice(0, 6).map((culprit) => `now after  ${oneLine(culprit)}`),
+    ...(fromBase.length > 5 || nowAfter.length > 6 ? ['now after  more commits on those files'] : []),
+    ...nowBefore.filter(unnamed).map((culprit) => `now before ${oneLine(culprit)}`),
+  ];
+  if (!nowAfter.length && !nowBefore.length) causes.push('no commit that moved relative to it changes those files');
+  return { sizes, causes };
 };
 
-const reportConflicts = (simulation: Simulation, start: string, took = '') => {
+// A pick lands on the first update-ref after it in the todo, or on wip when none follows.
+const landingBranches = (todo: string[], wip: string) => {
+  const landsOn = new Map<string, string>();
+  let branch = wip;
+  for (const line of [...todo].reverse()) {
+    const ref = /^update-ref refs\/heads\/(.+)$/.exec(line)?.[1];
+    if (ref) branch = ref;
+    else if (/^(?:pick|fixup|squash) /.test(line)) landsOn.set(line.split(' ')[1], branch);
+  }
+  return landsOn;
+};
+
+const reportConflicts = (simulation: Simulation, start: string, took = '', landsOn?: Map<string, string>) => {
   const { conflicts, picks } = simulation;
-  bad(`${conflicts.length} of ${picks} picks would conflict${took}`);
+  // A conflict in files an earlier one shares goes under it, since it may only follow from the guessed resolution.
+  const groups: Conflict[][] = [];
   for (const conflict of conflicts) {
-    const assumed = conflict.assumed ? ', after an assumed resolution of an earlier conflict in the same files' : '';
-    console.log(`\npick ${conflict.at + 1} of ${picks}${assumed}:`);
-    console.log(commitLine(conflict.commit));
-    explainConflict(conflict, start);
-    if (conflict.takenWhole.length) console.log(`  assumed for what follows: the pick's own version of ${conflict.takenWhole.join(', ')}`);
+    const shares = (earlier: Conflict) => earlier.files.some((file) => conflict.files.includes(file));
+    const cause = conflict.assumed ? groups.findLast((group) => group.some(shares)) : undefined;
+    if (cause) cause.push(conflict);
+    else groups.push([conflict]);
+  }
+  bad(`${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`);
+  for (const group of groups) {
+    const [first, ...followOns] = group;
+    const branch = landsOn?.get(first.commit.sha);
+    console.log(`\n${oneLine(first.commit)}${branch ? `  → ${cyan(branch)}` : ''}`);
+    const { sizes, causes } = explainConflict(first, start);
+    for (const cause of causes) console.log(`  ${cause}`);
+    console.log('  conflicting in:');
+    for (const size of sizes) console.log(`    ${size}`);
+    for (const [index, conflict] of followOns.entries()) {
+      const named = group.slice(0, index + 1).map((earlier) => earlier.commit.sha);
+      const followOn = explainConflict(conflict, start, named);
+      if (index === 0) console.log('  then, after a guessed resolution of that, also conflicting:');
+      console.log(`    ${oneLine(conflict.commit)}`);
+      for (const line of [...followOn.sizes, ...followOn.causes]) console.log(`      ${line}`);
+    }
+    for (const conflict of group.filter((member) => member.takenWhole.length)) {
+      console.log(`  assumed for what follows: ${conflict.commit.sha.slice(0, 10)}'s own version of ${conflict.takenWhole.join(', ')}`);
+    }
   }
 };
 
@@ -440,7 +488,7 @@ const sameNetChange = (label: string, from: string, to: string, onFrom: string, 
   const files = new Set([...fileList(gitQuiet('diff', '--name-only', from, to)), ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo))]);
   const differing = [...files].filter((file) => patchId(from, to, file) !== patchId(onFrom, onTo, file));
   // A file that ends the same lost nothing: the new base already had that part of the change.
-  const blob = (ref: string, file: string) => (gitSucceeds('cat-file', '-e', `${ref}:${file}`) ? tipOf(`${ref}:${file}`) : '');
+  const blob = (ref: string, file: string) => (fileExistsIn(ref, file) ? gitQuiet('rev-parse', `${ref}:${file}`).trim() : '');
   const landed = differing.filter((file) => blob(onTo, file) === blob(to, file));
   const missing = differing.filter((file) => !landed.includes(file));
   if (landed.length) {
@@ -1019,7 +1067,7 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
     good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
     if (!simulation.sameTree) attention('the simulated result ends on a different tree than wip; verify will show where');
   } else {
-    reportConflicts(simulation, tipOf(rebaseBase), ` (${took})`);
+    reportConflicts(simulation, tipOf(rebaseBase), ` (${took})`, landingBranches(todo, wip));
     console.log('\nrerere may already hold resolutions for these; the preview cannot tell.');
   }
   if (preview) return;
