@@ -401,7 +401,7 @@ const subjectOf = (sha: string) => ({ sha, subject: gitQuiet('show', '-s', '--fo
 const oneLine = (commit: { sha: string; subject: string }) => commitLine(commit).trim();
 
 // Sizes each conflicted file, and names the commits on those files that the pick now comes after, or no longer does.
-const explainConflict = (conflict: Conflict, start: string, alreadyNamed: string[] = []) => {
+const explainConflict = (conflict: Conflict, start: string, landing?: Landing, alreadyNamed: string[] = []) => {
   const { commit, files, tree, messages, before } = conflict;
   const sizes = files.map((file) => {
     const message = messages.find((line) => line.startsWith('CONFLICT') && line.includes(file)) ?? '';
@@ -417,28 +417,44 @@ const explainConflict = (conflict: Conflict, start: string, alreadyNamed: string
   const fromBase = fileList(gitQuiet('log', '--format=%H', '--max-count=6', `${commit.sha}..${start}`, '--', ...files));
   const nowAfter = [...before.filter((below) => !wasBelow.has(below.sha) && changesAny(below.sha, files)), ...fromBase.map(subjectOf)];
   const nowBefore = [...wasBelow].filter((sha) => !isBelow.has(sha) && changesAny(sha, files)).map(subjectOf);
+  const fromBaseShas = new Set(fromBase);
+  const where = (culprit: { sha: string }) => {
+    const branch = fromBaseShas.has(culprit.sha) ? 'base' : landing?.landsOn.get(culprit.sha);
+    return branch ? `  → ${cyan(branch)}` : '';
+  };
   const causes = [
-    ...nowAfter.filter(unnamed).slice(0, 6).map((culprit) => `now after  ${oneLine(culprit)}`),
+    ...nowAfter.filter(unnamed).slice(0, 6).map((culprit) => `now after  ${oneLine(culprit)}${where(culprit)}`),
     ...(fromBase.length > 5 || nowAfter.length > 6 ? ['now after  more commits on those files'] : []),
-    ...nowBefore.filter(unnamed).map((culprit) => `now before ${oneLine(culprit)}`),
+    ...nowBefore.filter(unnamed).map((culprit) => `now before ${oneLine(culprit)}${where(culprit)}`),
   ];
   if (!nowAfter.length && !nowBefore.length) causes.push('no commit that moved relative to it changes those files');
-  return { sizes, causes };
+  return { sizes, causes, nowBefore };
 };
+
+type Landing = { landsOn: Map<string, string>; order: string[] };
 
 // A pick lands on the first update-ref after it in the todo, or on wip when none follows.
-const landingBranches = (todo: string[], wip: string) => {
+const landingBranches = (todo: string[], wip: string): Landing => {
   const landsOn = new Map<string, string>();
-  let branch = wip;
+  const order = [wip];
   for (const line of [...todo].reverse()) {
     const ref = /^update-ref refs\/heads\/(.+)$/.exec(line)?.[1];
-    if (ref) branch = ref;
-    else if (/^(?:pick|fixup|squash) /.test(line)) landsOn.set(line.split(' ')[1], branch);
+    if (ref) order.unshift(ref);
+    else if (/^(?:pick|fixup|squash) /.test(line)) landsOn.set(line.split(' ')[1], order[0]);
   }
-  return landsOn;
+  return { landsOn, order };
 };
 
-const reportConflicts = (simulation: Simulation, start: string, took = '', landsOn?: Map<string, string>) => {
+// The lowest branch the pick can land on and still come after every commit it now jumps ahead of.
+const orderKeepingBranch = (landing: Landing, pick: string, jumpedAhead: { sha: string }[]) => {
+  const positions = jumpedAhead.map((culprit) => landing.order.indexOf(landing.landsOn.get(culprit.sha) ?? ''));
+  const highest = Math.max(-1, ...positions);
+  if (highest < 0 || highest <= landing.order.indexOf(landing.landsOn.get(pick) ?? '')) return;
+  const branch = cyan(landing.order[highest]);
+  return highest === landing.order.length - 1 ? `land it on ${branch}` : `land it on ${branch} or a branch above it`;
+};
+
+const reportConflicts = (simulation: Simulation, start: string, took = '', landing?: Landing) => {
   const { conflicts, picks } = simulation;
   // A conflict in files an earlier one shares goes under it, since it may only follow from the guessed resolution.
   const groups: Conflict[][] = [];
@@ -451,15 +467,16 @@ const reportConflicts = (simulation: Simulation, start: string, took = '', lands
   bad(`${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`);
   for (const group of groups) {
     const [first, ...followOns] = group;
-    const branch = landsOn?.get(first.commit.sha);
+    const branch = landing?.landsOn.get(first.commit.sha);
     console.log(`\n${oneLine(first.commit)}${branch ? `  → ${cyan(branch)}` : ''}`);
-    const { sizes, causes } = explainConflict(first, start);
+    const { sizes, causes, nowBefore } = explainConflict(first, start, landing);
     for (const cause of causes) console.log(`  ${cause}`);
     console.log('  conflicting in:');
     for (const size of sizes) console.log(`    ${size}`);
+    const keepOrder = landing && orderKeepingBranch(landing, first.commit.sha, nowBefore);
     for (const [index, conflict] of followOns.entries()) {
       const named = group.slice(0, index + 1).map((earlier) => earlier.commit.sha);
-      const followOn = explainConflict(conflict, start, named);
+      const followOn = explainConflict(conflict, start, landing, named);
       if (index === 0) console.log('  then, after a guessed resolution of that, also conflicting:');
       console.log(`    ${oneLine(conflict.commit)}`);
       for (const line of [...followOn.sizes, ...followOn.causes]) console.log(`      ${line}`);
@@ -467,6 +484,7 @@ const reportConflicts = (simulation: Simulation, start: string, took = '', lands
     for (const conflict of group.filter((member) => member.takenWhole.length)) {
       console.log(`  assumed for what follows: ${conflict.commit.sha.slice(0, 10)}'s own version of ${conflict.takenWhole.join(', ')}`);
     }
+    if (keepOrder) console.log(`  to keep the old order: ${keepOrder}`);
   }
 };
 
