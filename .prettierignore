@@ -7,9 +7,8 @@
 
 # Every linked path, because prettier follows symlinks but resolves config from
 # the path given — the harness's own .prettierrc.yml is bypassed through a link.
-agent-common
-.github/agent-common
 .claude/agents
+.claude/guides
 .claude/hooks
 .claude/rules
 .claude/skills
