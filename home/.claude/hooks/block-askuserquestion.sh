@@ -21,10 +21,8 @@
 # top-level tool name.
 # Substring matching on raw JSON keeps this dependency-free — no jq, no node.
 #
-# Uses the JSON permissionDecision form (exit 0): permissionDecisionReason
-# is the channel Claude Code feeds back to the model on a deny, so that's
-# where the "ask in prose instead" steering lives. Do not also exit 2 —
-# the two contracts are mutually exclusive and exit 2 makes the JSON moot.
+# Uses both hook output envelopes: Agent Host expects the decision at the JSON
+# root, while Claude Code expects it inside hookSpecificOutput.
 #
 # Because PreToolUse hooks run before the permission-mode check, this
 # holds even under bypassPermissions / --dangerously-skip-permissions.
@@ -46,6 +44,8 @@ esac
 
 cat <<'JSON'
 {
+  "permissionDecision": "deny",
+  "permissionDecisionReason": "Question dialogs are disabled on this machine (personal preference) — ask in prose instead, and prefer doing that up front rather than reaching for the tool. If nobody can answer, because you are a headless or scheduled run, do not stop: say which option you are assuming and carry on, since a question handed back as a result is one nobody reads. Otherwise: the text you already wrote above this tool call is visible to the user — do NOT repeat your analysis, diagnosis, or context. Just take the question and options from this blocked call and render them as a short numbered list (one line each), then stop and wait for the answer. No preamble, no restating what the user has already seen.",
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
