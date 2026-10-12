@@ -171,6 +171,7 @@ _stack_plan() {
         'prepare:record the pre-rebase tip before a rebase run by hand'
         'verify:compare the stack with the pre-rebase tip'
         'cut:check that cutting the stack at a branch loses no work'
+        'sync:check putting the stack on its origin copies, with local work on top'
         'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
@@ -194,6 +195,7 @@ _stack_plan() {
     case $words[2] in
         apply|a) flags+=('(-f --anyway)'{-f,--anyway}'[rebase despite a predicted conflict]') ;;
         save|s|preview|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;;
+        sync) flags+=('--apply[do the sync once the check passes]' '(-f --anyway)'{-f,--anyway}'[sync despite a finding]' '--no-fetch[skip fetching and pruning origin first]') ;;
     esac
     shift words
     (( CURRENT-- ))

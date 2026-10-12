@@ -15,6 +15,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp prepare`    | Records the pre-rebase tip, so `verify` works after a rebase you run by hand.             |
 | `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
 | `sp cut <b>`    | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
+| `sp sync`       | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
 | `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -198,6 +199,33 @@ Above the cut it replays the remaining commits onto the base, as `preview` does,
 `stack-plan cut <branch> --apply` runs the same check, then does the cut: `git rebase -i --update-refs --empty=drop --onto <base> <branch>`, with the todo opened in your editor as for `apply`. It refuses when the check finds lost work, something it cannot tell, or a conflict, and `-f` (`--anyway`) cuts regardless. `--empty=drop` drops a commit the base already holds, which would otherwise stop the rebase.
 
 Before rebasing, it records the pre-rebase tip as `apply` does, plus a `# cut:` line holding the old cut tip, the new base and the cut branches. `verify` reads that line, so after a cut it compares the commits above the old cut with those on the new base. In place of the tree check, which cannot match once the base has moved, it compares the net change as `cut` does. A commit the rebase dropped because the base already holds its change counts as `already in the base`, not dropped. Once that passes, `verify` removes the cut branches from `stackplan.order` and prints the `git branch -D` that deletes them. It never deletes them itself. `prepare` and `apply` clear the `# cut:` line, so it only ever describes the latest rebase.
+
+### 7. Sync with origin after GitHub rebased the stack
+
+```shell
+stack-plan sync
+```
+
+```shell
+stack-plan sync --apply
+```
+
+When GitHub merges the bottom pull request of a stack, it rebases the ones above it, and every local branch then shows as diverged in `git-tools sync-check`. `sync` puts each stack branch back on its origin copy, and replays everything origin lacks on top. Its origin copy is the branch's upstream, or `origin/<branch>`. Like `cut`, it changes nothing without `--apply`, and `-f` (`--anyway`) does it despite a finding. It first runs `git fetch --prune origin`, so it compares against origin as it is now. `--no-fetch` skips that, for working offline or for comparing two runs against the same refs.
+
+It sorts every commit since the base, bottom to top, by its `git patch-id`, which a rebase leaves unchanged:
+
+- A local commit whose change origin holds under another SHA gives way to origin's copy. Origin's copy is taken whole, so a review fix pushed on GitHub comes along too.
+- A local commit origin lacks stays in its branch, on top of that branch's origin commits. It is listed as `kept local`. The branches above it then differ from origin again, and need a force push.
+- A branch that is not on origin, and the wip branch, have their commits replayed above the branch below them. The wip branch's own origin copy is left alone.
+- Origin's stack is the run of origin branches, counted from the top down, where each sits on the one below. A branch below that run is cut, because origin's stack has moved past it. That holds whether origin deleted the branch after merging it or still has a copy left behind. A branch that origin's stack still sits on is kept. Each cut branch gets the same containment check as `cut`. A branch the base does not plainly contain is listed with its files, as a finding to compare by hand. A squash merge that review changed, or lines the base changed again since, cause that. A cut branch keeps its old tip, so its commits stay reachable.
+
+It refuses when origin's branches do not sit on one another in stack order, or when origin's stack holds a merge commit. It reports a finding when origin's copy of a commit is older than yours, because syncing would then undo a local rewrite, and pushing is what you want. It also reports one when the in-memory replay predicts a conflict.
+
+When the replay is clean, two checks stand in for the tree check, which cannot match once the base has moved. The net change from the topmost origin branch up to wip must be the same before and after, as after a `cut`. The tip tree must also be unchanged, except in files where origin's copy of the stack differs from yours. A file that changes anywhere else means work went missing or appeared on the way, and it is a finding. When the tip tree is identical to the old one, a cut branch the containment check could not clear loses nothing either, so its flag stops counting as a finding.
+
+`--apply` runs `git rebase -i --update-refs --empty=drop --onto <onto> <fork>`. `<onto>` is where origin's lowest branch leaves the base, and `<fork>` is where the local stack does. Git's todo then holds exactly the local commits. The planned todo picks origin's commits, which git reuses unchanged where their parent matches, so a branch with nothing kept local ends up identical to origin. Each commit giving way is a `drop` line, which `rebase.missingCommitsCheck error` requires. Local commits kept in an origin branch carry `>>> [local]` after their hash.
+
+It records a `# sync:` line, which works like the `# cut:` line. After a sync, `verify` compares the old stack with the new one from where each leaves the base. It counts commits only origin had as `from origin`, and a dropped commit whose change origin holds as already there. It then runs the two checks the preview ran, on the real result. Cut branches are then removed from `stackplan.order` as after a cut.
 
 ## Where things live
 
