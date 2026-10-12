@@ -29,7 +29,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion|vscode_askQuestions",
+        "matcher": "AskUserQuestion|vscode_askQuestions|ask_user",
         "hooks": [
           {
             "type": "command",

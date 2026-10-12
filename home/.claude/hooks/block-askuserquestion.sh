@@ -15,9 +15,10 @@
 # checks tool_name itself and stands down when the call is something else.
 #
 # The tool has a different NAME per harness, not merely a different key
-# spelling: Claude calls it AskUserQuestion, Copilot vscode_askQuestions
-# (measured 2026-09-05 in GitHub Copilot Chat Hooks.log). Both key
-# spellings are matched as well, the payload shape being undocumented.
+# spelling: Claude calls it AskUserQuestion, legacy Copilot
+# vscode_askQuestions, and Agent Host ask_user (measured 2026-10-12).
+# Agent Host nests calls under toolCalls, while the other payloads use a
+# top-level tool name.
 # Substring matching on raw JSON keeps this dependency-free — no jq, no node.
 #
 # Uses the JSON permissionDecision form (exit 0): permissionDecisionReason
@@ -33,7 +34,8 @@ case "$payload" in
   *'"tool_name":"AskUserQuestion"'* | *'"tool_name": "AskUserQuestion"'* | \
   *'"toolName":"AskUserQuestion"'*  | *'"toolName": "AskUserQuestion"'* | \
   *'"tool_name":"vscode_askQuestions"'* | *'"tool_name": "vscode_askQuestions"'* | \
-  *'"toolName":"vscode_askQuestions"'*  | *'"toolName": "vscode_askQuestions"'*) ;;
+  *'"toolName":"vscode_askQuestions"'*  | *'"toolName": "vscode_askQuestions"'* | \
+  *'"name":"ask_user"'* | *'"name": "ask_user"'*) ;;
   *)
     # Not our tool, or a payload shape we do not recognise. Stand down
     # rather than guess: a false deny here disables the agent entirely,

@@ -101,10 +101,12 @@ echo "############### Symlinking reusable Claude Code content ###############"
 # manages it, so the user-level config and the project-level config can no
 # longer collide.
 mkdir -p ~/.claude/hooks
+mkdir -p ~/.copilot
 ln -srf home/.claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
 ln -srf home/.claude/hooks/pause-skill-reload-on-rebase.sh ~/.claude/hooks/pause-skill-reload-on-rebase.sh
 ln -srf home/.claude/settings.json ~/.claude/settings.json
 ln -srf home/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+ln -srf home/.claude/CLAUDE.md ~/.copilot/copilot-instructions.md
 
 echo "############### Installing Neovim ###############"
 # The tag /releases/latest redirects to; empty when offline. Avoids the API's rate limit.
