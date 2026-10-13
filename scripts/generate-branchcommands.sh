@@ -35,8 +35,10 @@ COMPARE_BASE="https://github.com/${slug}/compare"
 
 stack_log="$(git log --first-parent --simplify-by-decoration --decorate-refs='refs/heads/*' --format='%D' main..HEAD --reverse)"
 
-# The checked-out branch is the wip branch, and is left out of the stack.
+# The checked-out branch is left out of the stack only when its name contains "wip".
 current_branch="$(git symbolic-ref --short -q HEAD || true)"
+wip_branch=""
+if [[ "${current_branch,,}" == *wip* ]]; then wip_branch="$current_branch"; fi
 lines=(main)
 while IFS= read -r decoration; do
   [[ -z "$decoration" ]] && continue
@@ -44,7 +46,7 @@ while IFS= read -r decoration; do
   kept=()
   for ref in "${refs[@]}"; do
     ref="${ref# }"
-    [[ "$ref" == "$current_branch" ]] && continue
+    [[ -n "$wip_branch" && "$ref" == "$wip_branch" ]] && continue
     kept+=("$ref")
   done
   if (( ${#kept[@]} > 1 )); then
