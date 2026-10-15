@@ -18,6 +18,7 @@ const MOVED_MARKER = '>>> [moved]';
 const LOCAL_MARKER = '>>> [local]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
+const PRS_STOP_MARKER = '# --- PRs stop here ---';
 const ORDER_KEY = 'stackplan.order';
 const NEW_KEY = 'stackplan.new';
 const MODE_KEY = 'stackplan.mode';
@@ -833,6 +834,24 @@ const printByBranch = (order: string[], branchOf: (commit: Commit) => string, co
 
 const pickLine = (commit: Commit, marker = '') => `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
 
+type PullRequest = { number: number; base: string };
+
+/** Open pull requests keyed by head branch, or undefined when gh cannot list them. */
+const openPullRequests = (): Map<string, PullRequest> | undefined => {
+  let origin: string;
+  try {
+    origin = git('remote', 'get-url', 'origin').trim();
+  } catch {
+    return undefined;
+  }
+  const slug = origin.replace(/\.git$/, '').replace(/^.*github\.com[:/]/, '');
+  const fields = ['--json', 'number,headRefName,baseRefName'];
+  const result = spawnSync('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '500', ...fields], { encoding: 'utf8' });
+  if (result.status !== 0) return undefined;
+  const rows = JSON.parse(result.stdout) as { number: number; headRefName: string; baseRefName: string }[];
+  return new Map(rows.map((row) => [row.headRefName, { number: row.number, base: row.baseRefName }]));
+};
+
 const exportPlan = () => {
   const wip = currentBranch();
   const full = fullMode();
@@ -872,13 +891,29 @@ const exportPlan = () => {
       : []),
     '',
   ];
+  const pulls = openPullRequests();
+  const prWarnings: string[] = [];
+  let stopAt = branches.length;
+  branches.forEach((branch, i) => {
+    const pull = pulls?.get(branch);
+    if (!pull) {
+      stopAt = Math.min(stopAt, i);
+      return;
+    }
+    if (stopAt < i) prWarnings.push(`#${pull.number} (${branch}) sits above a branch with no PR`);
+    const below = i ? branches[i - 1] : base.replace(/^origin\//, '');
+    if (pull.base !== below) prWarnings.push(`#${pull.number} (${branch}) targets ${pull.base}, not ${below}`);
+  });
+
   // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
-  for (const branch of branches) {
+  branches.forEach((branch, i) => {
     const marker = branchMarker(branch, current, branches);
     const inBranch = full ? (own.get(branch) ?? []) : [];
     const moving = sections.get(branch)!.map((commit) => pickLine(commit, `${MOVED_MARKER} `));
+    if (pulls && i === stopAt) out.push(PRS_STOP_MARKER);
     out.push(...(marker ? [marker] : []), ...inBranch.map((commit) => pickLine(commit)), ...moving, `update-ref refs/heads/${branch}\n`);
-  }
+  });
+  if (pulls && stopAt === branches.length) out.push(PRS_STOP_MARKER);
   out.push(...sections.get(wip)!.map((commit) => pickLine(commit)), UNTAGGED_MARKER, ...untagged.map((commit) => pickLine(commit)), '');
 
   const path = planPath();
@@ -893,6 +928,8 @@ const exportPlan = () => {
   if (untagged.length) attention(`${untagged.length} untagged, below the marker`);
   else good('every waiting commit is placed');
   for (const commit of strayNotes) attention(`note "${commit.note}" names no stack branch:\n${commitLine(commit)}`);
+  if (!pulls) attention('could not list PRs with gh; no PR marker in the file');
+  for (const warning of prWarnings) attention(warning);
 };
 
 const savePlan = () => {

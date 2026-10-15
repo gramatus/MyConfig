@@ -87,6 +87,8 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 
 Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order saved but not yet rebased. Export marks them the way the apply todo does: `>>> [moved]` after the hash of a pick whose note moves it into a branch, and a `# >>> [new branch]` or `# >>> [moved branch]` line above a branch the saved order adds or moves. The markers show what was saved at export, not your edits since, and `save` ignores them.
 
+Export also asks `gh` for the open pull requests and writes `# --- PRs stop here ---` above the first branch that has none. A pick placed above that line lands in a branch already under review. Export warns about a PR that sits above a branch with no PR, and about one whose base is not the branch below it. When `gh` cannot list the PRs, export warns and leaves the marker out.
+
 #### Full mode
 
 `stack-plan mode full` makes every later export list each commit since the base, not only the ones waiting on the wip branch. The file then reads like a complete rebase todo: reorder picks within a branch, move a commit from one branch to another, or out of the stack onto the wip branch. `stack-plan mode short` switches back, and `stack-plan mode` alone shows which one is active. The mode lives in git config as `stackplan.mode`.
