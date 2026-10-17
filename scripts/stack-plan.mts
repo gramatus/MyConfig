@@ -765,7 +765,7 @@ const syncStack = (apply: boolean) => {
       findings++;
       attention(`${countOf(reworded.length, 'commit')} reworded locally; syncing drops that, so push instead`);
     } else if (replaced.length) {
-      good(`${countOf(replaced.length, 'commit')} only rebased locally; syncing is safe and returns them to origin's base`);
+      good(`${countOf(replaced.length, 'commit')} only rebased locally; syncing is safe`);
     }
   }
   const pendingReplaced = pending.filter((commit) => originCopyOf(commit));
@@ -774,6 +774,24 @@ const syncStack = (apply: boolean) => {
   dropped.push(...pendingReplaced);
   const replacedNote = pendingReplaced.length ? `, ${pendingReplaced.length} replaced by origin's copy` : '';
   console.log(`${cyan(wip)}  ${countOf(pendingKept.length, 'commit')} replayed${replacedNote}; its own origin copy is left alone`);
+
+  subheading(`Origin against ${base}`);
+  if (onto !== fork && isAncestor(onto, fork)) {
+    const lost = commitsIn(`${onto}..${fork}`);
+    console.log(`syncing moves the stack back onto origin's base, taking ${countOf(lost.length, 'commit')} of ${base} out from under it:`);
+    for (const commit of lost) console.log(commitLine(commit));
+  }
+  // Branches above the lowest conflicting one carry its conflict, so only that one is listed.
+  let mergesCleanly = true;
+  for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
+    const merged = mergeTree(onto, base, remote);
+    if (merged.ok) continue;
+    attention(`${remote} conflicts with ${base}, and syncing keeps that; rebase onto ${base} and push to fix it:`);
+    for (const file of merged.files) console.log(`    ${file}`);
+    mergesCleanly = false;
+    break;
+  }
+  if (mergesCleanly) good(`origin's stack merges into ${base} without conflicts`);
 
   if (!cut.length && !dropped.length && !newFromOrigin) {
     console.log('');
