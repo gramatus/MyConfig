@@ -611,13 +611,13 @@ const cutStack = (at: string, apply: boolean) => {
   verifyRebase();
 };
 
-type DatedCommit = Commit & { committed: number };
-
-const commitsIn = (range: string): DatedCommit[] =>
-  fileList(gitQuiet('log', '--reverse', '--first-parent', '--format=%H%x1f%ct%x1f%s', range)).map((record) => {
-    const [sha, committed, subject] = record.split('\x1f');
-    return { sha, subject, branches: [], note: '', committed: Number(committed) };
+const commitsIn = (range: string): Commit[] =>
+  fileList(gitQuiet('log', '--reverse', '--first-parent', '--format=%H%x1f%s', range)).map((record) => {
+    const [sha, subject] = record.split('\x1f');
+    return { sha, subject, branches: [], note: '' };
   });
+
+const messageAndAuthorOf = (sha: string) => gitQuiet('show', '-s', '--format=%an%x00%ae%x00%B', sha);
 
 // Merges and empty commits get no patch-id.
 const patchIdsIn = (range: string) => {
@@ -722,11 +722,9 @@ const syncStack = (apply: boolean) => {
 
   const originCommits = commitsIn(`${onto}..${topRemote}`);
   const originShas = new Set(originCommits.map((commit) => commit.sha));
-  const originCommittedAt = new Map(originCommits.map((commit) => [commit.sha, commit.committed]));
   const originShaById = new Map([...patchIdsIn(`${onto}..${topRemote}`)].map(([sha, id]) => [id, sha]));
   const localCommits = commitsIn(`${fork}..${wip}`);
   const localShas = new Set(localCommits.map((commit) => commit.sha));
-  const localCommittedAt = new Map(localCommits.map((commit) => [commit.sha, commit.committed]));
   const localIdOfSha = patchIdsIn(`${fork}..${wip}`);
   const localIds = new Set(localIdOfSha.values());
   const originIdOfSha = new Map([...originShaById].map(([id, sha]) => [sha, id]));
@@ -762,10 +760,12 @@ const syncStack = (apply: boolean) => {
       console.log(`${cyan(branch)}  ${remote}  ${parts.join(' · ')}`);
       for (const commit of carried) console.log(`  ${yellow('local')}${commitLine(commit)}`);
     }
-    const olderOnOrigin = replaced.filter((commit) => localCommittedAt.get(commit.sha)! > originCommittedAt.get(originCopyOf(commit)!)!);
-    if (olderOnOrigin.length) {
+    const reworded = replaced.filter((commit) => messageAndAuthorOf(commit.sha) !== messageAndAuthorOf(originCopyOf(commit)!));
+    if (reworded.length) {
       findings++;
-      attention(`origin's copy of ${countOf(olderOnOrigin.length, 'commit')} is older than yours; syncing undoes a local rewrite, so push instead`);
+      attention(`${countOf(reworded.length, 'commit')} reworded locally; syncing drops that, so push instead`);
+    } else if (replaced.length) {
+      good(`${countOf(replaced.length, 'commit')} only rebased locally; syncing is safe and returns them to origin's base`);
     }
   }
   const pendingReplaced = pending.filter((commit) => originCopyOf(commit));
