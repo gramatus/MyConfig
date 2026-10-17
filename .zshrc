@@ -145,9 +145,7 @@ _zshrc_log_once "vi_mode" "Enabled vi mode"
 
 # Save initial folder as WORKSPACE_FOLDER (useful in Codespaces/VSCode/DevContainers)
 export WORKSPACE_FOLDER=$PWD
-# Setup paths
-export PATH=$HOME/.npm-global/bin:$PATH:~/scripts
-_zshrc_log_once "env" "Set WORKSPACE_FOLDER=$WORKSPACE_FOLDER, added ~/scripts to PATH"
+_zshrc_log_once "env" "Set WORKSPACE_FOLDER=$WORKSPACE_FOLDER (PATH is set in .zshenv)"
 
 # Setup aliases
 alias cdw="cd $WORKSPACE_FOLDER" # Return to workspace folder
@@ -295,8 +293,6 @@ if [[ -z "$TMUX" ]]; then
     # Hoever, I prefer to be able to exit out to zsh (I think)
     # exec tmux new-session
 fi
-
-export PATH="$HOME/.local/bin:$PATH"
 
 # Machine-only config, created empty by install.sh and never tracked
 if [[ -r ~/.zshrc.local ]]; then
