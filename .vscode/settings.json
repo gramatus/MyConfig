@@ -197,5 +197,7 @@
     // <<< END: agent-harness managed block <<<
   },
   // The repository has no node_modules of its own; eslint.config.mjs borrows the harness's.
-  "eslint.nodePath": ".claude/hooks/node_modules"
+  "eslint.nodePath": ".claude/hooks/node_modules",
+  "search.followSymlinks": false,
+  "diffEditor.maxComputationTime": 1000
 }
