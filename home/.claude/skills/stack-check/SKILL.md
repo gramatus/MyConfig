@@ -16,7 +16,7 @@ Find out which branches would go red in CI before their pull requests exist, so 
 
 ## What typing this command approves
 
-**The user typing `/stack-check` approves the operations `scripts/worktree.mts` performs, and nothing else**: adding, moving and removing one scratch worktree, and linking the main checkout's `node_modules` into it.
+**The user typing `/stack-check` approves the operations `scripts/worktree.mts` performs, and nothing else**: adding, cleaning, moving and removing one scratch worktree, and linking the main checkout's `node_modules` into it.
 
 - Run the script as `node <this skill's base directory>/scripts/worktree.mts <subcommand>`, with the absolute path printed when this skill loaded.
 - **Never install dependencies.** The script links the main checkout's installs. Where `goto` warns that a lockfile differs, results for that package may not match the branch: say so in the report, and do not install.
@@ -27,7 +27,7 @@ Find out which branches would go red in CI before their pull requests exist, so 
 | --- | --- |
 | `open` | Adds the worktree at `.agent-context/.tmp/stack-check`, links every `node_modules`, then runs `branches` |
 | `branches` | Lists the stack bottom first, marking each branch with an open pull request |
-| `goto <branch>` | Discards what the last checks changed, checks the branch out, and warns where a lockfile differs from the main checkout's |
+| `goto <branch>` | Discards the tracked changes and the untracked and ignored files the last checks left, sparing the `node_modules` links, checks the branch out, and warns where a lockfile differs from the main checkout's |
 | `close` | Removes the links, then the worktree |
 
 ## Work out the checks
@@ -41,7 +41,7 @@ Find out which branches would go red in CI before their pull requests exist, so 
 ## Walk the stack
 
 1. Run `open`, and take the range from the arguments or from the pull request marks. Say in one line how many branches and checks the run covers, then go on without waiting.
-2. **Start one branch below the range, as the baseline.** Its failures existed before the range, so a failure it shares is not the range's.
+2. **Start one branch below the range, as the baseline.** Its failures existed before the range, so a failure it shares is not the range's. Where the range starts at the bottom of the stack, the baseline is the stack's base: `origin/main`, unless the user named another. `goto` takes any ref.
 3. For each branch, bottom first: run `goto <branch>`, then every check. Record each check's result, and for a failure the test or file and its first error line. Go on to the next branch after a failure.
 4. **A failure that also happened on the branch below is inherited.** Compare by test name, file and error message, not by exit status alone.
 5. **A failure caused by a missing file that git ignores is a setup gap, not red.** `git check-ignore <path>` in the main checkout tells you. List it under "Not covered".

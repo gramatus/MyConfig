@@ -49,7 +49,12 @@ const mainCheckout = dirname(
     '--git-common-dir',
   ).trim(),
 );
-const worktreePath = join(mainCheckout, '.agent-context', '.tmp', 'stack-check');
+const worktreePath = join(
+  mainCheckout,
+  '.agent-context',
+  '.tmp',
+  'stack-check',
+);
 
 /** Returns the main checkout's node_modules directories, relative to it. */
 const mainNodeModulesDirs = () =>
@@ -112,7 +117,9 @@ const branches = () => {
   console.log('stack, bottom first:');
   for (const branch of stackOrder()) {
     const pullRequest = pullRequests.get(branch);
-    console.log(pullRequest ? `  ${branch}  PR #${pullRequest}` : `  ${branch}`);
+    console.log(
+      pullRequest ? `  ${branch}  PR #${pullRequest}` : `  ${branch}`,
+    );
   }
 };
 
@@ -144,8 +151,19 @@ const goto = ([branch]: string[]) => {
     '--untracked-files=no',
   ).trim();
   if (changedByChecks) {
-    console.log(`discarding what the last checks changed:\n${changedByChecks}`);
+    console.log(
+      `discarding tracked files the last checks changed:\n${changedByChecks}`,
+    );
   }
+  // -x removes ignored build output too, and the exclude spares the node_modules links.
+  runGit(
+    worktreePath,
+    'clean',
+    '-d',
+    '--force',
+    '-x',
+    '--exclude=node_modules',
+  );
   runGit(worktreePath, 'checkout', '--force', '--detach', target);
   console.log(
     `at:       ${readGit(worktreePath, 'log', '-1', '--format=%h %s').trim()}`,
