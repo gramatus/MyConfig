@@ -179,7 +179,7 @@ The summary line starts with `✓` when no change differs, `!` when some did and
 
 Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 
-When the tree matches and nothing was dropped or added, `verify` finally removes the notes from every commit that has landed in its branch, in one `git notes remove`. Commits still waiting on the wip branch keep theirs. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
+When the tree matches and nothing was dropped or added, `verify` removes the notes from every commit that has landed in its branch, in one `git notes remove`, and then prints the tree verdict as its last line. Commits still waiting on the wip branch keep theirs. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
 
 ### 6. Cut the stack once its bottom has landed
 

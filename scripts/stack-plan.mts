@@ -1877,9 +1877,13 @@ const verifyRebase = () => {
     console.log(
       `  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`,
     );
-  } else if (!baseMoved) good(`tree matches the pre-rebase tip ${short}`);
-  if (!treeOk || droppedOrAdded.length) return;
+  }
+  if (treeOk && !droppedOrAdded.length) tidyAfterRebase(wip, cutBranches);
+  if (!stat && !baseMoved) good(`tree matches the pre-rebase tip ${short}`);
+};
 
+// Runs once verify has passed, so the plan's bookkeeping catches up with what the rebase did.
+const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
   const order = words(readConfig(ORDER_KEY));
   if (cutBranches.some((branch) => order.includes(branch))) {
     if (!dryRun)
