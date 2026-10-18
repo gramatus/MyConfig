@@ -66,6 +66,8 @@ Where the plan changes, usually by the user's own edit of stackplan.txt, run `pr
 
 A stop that shows the same commit again did not advance. Read git's output above the status before trying anything else.
 
+**Git and `stack-plan` write their hints for a person running git by hand.** Where one says to `git add` or run `git rebase --continue`, run this script's `continue`, which does both. It stages a removal only for a file already gone from the working tree, so where one says `git rm`, follow step 7 first.
+
 ## After the rebase
 
 `stack-plan verify` runs when the rebase finishes: `start` runs it on a rebase with no stops, and `continue` after the last stop. Read its conclusion:
