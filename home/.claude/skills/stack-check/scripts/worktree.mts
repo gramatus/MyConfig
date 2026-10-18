@@ -7,6 +7,7 @@ import {
   existsSync,
   lstatSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   unlinkSync,
 } from 'node:fs';
@@ -74,6 +75,11 @@ const mainNodeModulesDirs = () =>
 const requireWorktree = () => {
   if (!existsSync(worktreePath)) {
     fail('no stack-check worktree; run open first');
+  }
+  // A folder without its .git file resolves to the main checkout.
+  const topLevel = readGit(worktreePath, 'rev-parse', '--show-toplevel').trim();
+  if (realpathSync(topLevel) !== realpathSync(worktreePath)) {
+    fail(`${worktreePath} is not a worktree; inspect and remove it by hand`);
   }
 };
 
@@ -155,7 +161,7 @@ const goto = ([branch]: string[]) => {
       `discarding tracked files the last checks changed:\n${changedByChecks}`,
     );
   }
-  // -x removes ignored build output too, and the exclude spares the node_modules links.
+  // -x removes ignored output too, and the exclude spares node_modules links.
   runGit(
     worktreePath,
     'clean',
