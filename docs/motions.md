@@ -27,11 +27,9 @@
 
 Used with operators: `c`, `d`, `y`, `v`
 
-**Delimited** (a = includes delimiters):
-`"`, `'`, `` ` ``, `(`, `[`, `{`, `<`, `t` (tag)
+**Delimited** (a = includes delimiters): `"`, `'`, `` ` ``, `(`, `[`, `{`, `<`, `t` (tag)
 
-**Non-delimited** (a = includes surrounding whitespace):
-`w`, `W`, `s`, `p`
+**Non-delimited** (a = includes surrounding whitespace): `w`, `W`, `s`, `p`
 
 ### Key Distinction
 

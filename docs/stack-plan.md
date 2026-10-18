@@ -6,17 +6,17 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 
 `sp` is an alias for `stack-plan`, and zsh tab-completes its commands, the flags each one takes, and the refs after `-b`.
 
-| Command         | What it does                                                                              |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| `sp export`     | Replaces stackplan.txt. Commits with a note are put at the right place.                   |
-| `sp save`       | Saves the file as notes on the commits. Add `-n` to see what it will do.                  |
-| `sp preview`    | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either.     |
-| `sp apply`      | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict.   |
-| `sp prepare`    | Records the pre-rebase tip, so `verify` works after a rebase you run by hand.             |
-| `sp verify`     | Checks that the last rebase kept everything "as before", except the reordering.           |
-| `sp cut <b>`    | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
-| `sp sync`       | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
-| `sp mode full`  | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
+| Command | What it does |
+| --- | --- |
+| `sp export` | Replaces stackplan.txt. Commits with a note are put at the right place. |
+| `sp save` | Saves the file as notes on the commits. Add `-n` to see what it will do. |
+| `sp preview` | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either. |
+| `sp apply` | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
+| `sp prepare` | Records the pre-rebase tip, so `verify` works after a rebase you run by hand. |
+| `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
+| `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
+| `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
+| `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
 

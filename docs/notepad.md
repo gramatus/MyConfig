@@ -4,9 +4,7 @@
 
 ## Review results
 
-Good findings. Please fix them all, considering these comments:
-...
-Do it on this branch (it contains all the changes from the reviewed branch). I.e., do not check out the reviewed branch.
+Good findings. Please fix them all, considering these comments: ... Do it on this branch (it contains all the changes from the reviewed branch). I.e., do not check out the reviewed branch.
 
 ## Useful commands
 
