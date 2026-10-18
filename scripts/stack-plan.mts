@@ -64,16 +64,12 @@ const commitLine = (commit: { sha: string; subject: string }) =>
 const shellQuote = (arg: string) =>
   /^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`;
 
-const traceGit = (args: string[]) =>
-  console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
-
-const changesRepo = ([subcommand, ...rest]: string[]) =>
-  (subcommand === 'notes' &&
-    (rest.includes('add') || rest.includes('remove'))) ||
-  (subcommand === 'config' && !rest.includes('--get'));
+const traceGit = (args: string[]) => {
+  if (verbose) console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+};
 
 const git = (...args: string[]) => {
-  if (verbose || changesRepo(args)) traceGit(args);
+  traceGit(args);
   try {
     return execFileSync('git', args, {
       encoding: 'utf8',
@@ -90,7 +86,7 @@ const git = (...args: string[]) => {
 
 const USAGE = [
   'Usage: stack-plan <command> [-b|--base <ref>] [-n|--dry-run] [-f|--anyway] [--apply] [--verbose]',
-  '  --verbose also echoes the read-only git commands; those that change the repository are always echoed',
+  '  --verbose echoes each git command it runs to stderr',
   '  export (e)   write the plan file',
   '  save (s)     write notes from the plan',
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
@@ -2188,9 +2184,12 @@ const runRebase = (todo: string[], args: string[], adopted: string[] = []) => {
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
   const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
   heading('Rebase');
-  console.error(
-    dimErr(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`),
-  );
+  if (verbose)
+    console.error(
+      dimErr(
+        `$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`,
+      ),
+    );
   const result = spawnSync('git', args, {
     stdio: 'inherit',
     env: {

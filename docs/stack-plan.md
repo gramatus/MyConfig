@@ -43,7 +43,7 @@ Notes rather than a `Target:` trailer in the commit message, because a note sits
 
 Every step runs from inside the repository, with the wip branch checked out. `--base <ref>` (`-b`) changes the ref the stack sits on, and defaults to `origin/main`.
 
-Each git command that changes the repository is echoed to stderr as `$ git …` before it runs, so the output doubles as a record of what it did: writing notes, setting `stackplan.*` config, and the rebase. `verify` also echoes the `range-diff` and `diff --stat` it read, so they can be rerun by hand. `--verbose` echoes the read-only commands too, which shows how each answer was reached. `2>/dev/null` hides the trace and keeps only the result. In a terminal the trace is dimmed and the results are coloured: branches cyan, SHAs yellow, and outcomes marked green `✓`, yellow `!` or red `✗`. Setting `NO_COLOR`, or piping the output, turns colour off.
+`--verbose` echoes each git command to stderr as `$ git …` before it runs. The trace then records what the tool did, such as writing notes, setting `stackplan.*` config and starting the rebase, and shows how each answer was reached. It also gives `verify`'s `range-diff` and `diff --stat` in a form you can rerun by hand. Without `--verbose`, only the results are printed. In a terminal the trace is dimmed and the results are coloured: branches cyan, SHAs yellow, and outcomes marked green `✓`, yellow `!` or red `✗`. Setting `NO_COLOR`, or piping the output, turns colour off.
 
 ### 1. Export the plan
 
