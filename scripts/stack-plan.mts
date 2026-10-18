@@ -808,24 +808,27 @@ const sameNetChange = (
   return false;
 };
 
-// Git exits 0 when it pauses at an edit or break, so a rebase still in progress is a stop too.
+// Git exits 0 when it pauses at an edit or break, and non-zero when it refuses to start, so the rebase state decides.
 const exitUnlessRebaseFinished = (status: number | null) => {
+  const inProgress = existsSync(
+    gitQuiet(
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'rebase-merge',
+    ).trim(),
+  );
+  if (status !== 0 && !inProgress) {
+    bad('the rebase did not start; see the message above');
+    process.exit(status ?? 1);
+  }
   if (status !== 0) {
     attention(
       'the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify',
     );
     process.exit(status ?? 1);
   }
-  if (
-    existsSync(
-      gitQuiet(
-        'rev-parse',
-        '--path-format=absolute',
-        '--git-path',
-        'rebase-merge',
-      ).trim(),
-    )
-  ) {
+  if (inProgress) {
     attention(
       'the rebase paused for an edit. When done: `git rebase --continue`, then: stack-plan verify',
     );
