@@ -712,9 +712,6 @@ const reportConflicts = (
     if (cause) cause.push(conflict);
     else groups.push([conflict]);
   }
-  bad(
-    `${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`,
-  );
   for (const group of groups) {
     const [first, ...followOns] = group;
     const branch = landing?.landsOn.get(first.commit.sha);
@@ -747,6 +744,12 @@ const reportConflicts = (
     }
     if (keepOrder) console.log(`  to keep the old order: ${keepOrder}`);
   }
+  console.log(
+    '\nrerere may already hold resolutions for these; the preview cannot tell.',
+  );
+  bad(
+    `${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`,
+  );
 };
 
 // Whitespace and line numbers do not count, so the same change on a moved base gets the same id.
@@ -1244,9 +1247,6 @@ const syncStack = (apply: boolean) => {
   if (simulation.conflicts.length) {
     findings++;
     reportConflicts(simulation, onto, '', landingBranches(todo, wip));
-    console.log(
-      '\nrerere may already hold resolutions for these; the preview cannot tell.',
-    );
   } else {
     good(`all ${simulation.picks} picks apply cleanly in memory`);
     const newTop = picksUpToTop
@@ -2136,20 +2136,17 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
   const conflicted = simulation.conflicts.length > 0;
   if (!conflicted) {
-    good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
     if (!simulation.sameTree)
       attention(
         'the simulated result ends on a different tree than wip; verify will show where',
       );
+    good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
   } else {
     reportConflicts(
       simulation,
       tipOf(rebaseBase),
       ` (${took})`,
       landingBranches(todo, wip),
-    );
-    console.log(
-      '\nrerere may already hold resolutions for these; the preview cannot tell.',
     );
   }
   if (preview) return;
