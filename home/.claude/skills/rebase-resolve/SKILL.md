@@ -37,12 +37,7 @@ Paths are relative to the repository root.
 ## Before the rebase starts
 
 1. Run `preview`.
-2. **Check that every moved commit landed on the branch it belongs to, conflict or not.** The user often moves many commits across many branches in one plan, and a commit placed on the wrong branch usually applies cleanly, so no conflict reveals it. Read each branch's own commits with `git log --stat --format='%h %s' <branch below>..<branch>`. Compare each moved commit's subject, scope and files with those of its target branch and of every other branch. The signals, and the list is illustrative rather than exhaustive:
-   - it is a `fixup!` or `squash!` of a commit on another branch, or its subject names one;
-   - it touches files no commit on its target branch touches, while another branch's commits touch them;
-   - its conventional-commit scope matches another branch's commits and none of its target branch's.
-
-   One signal from the last two alone is too weak to report. Where the better branch is directly above or below, say so: a line one `update-ref` off is the usual slip. **Code the commit uses from a higher branch is not a signal.** Moving a concept below the code it was written on is what this skill exists for.
+2. **Check that every moved commit landed on the branch it belongs to, conflict or not.** The user often moves many commits across many branches in one plan, and a commit placed on the wrong branch usually applies cleanly, so no conflict reveals it. [commit-placement.md](../../guides/commit-placement.md) says how to read each branch's commits and which signs to look for. Apply it to each moved commit at the branch the preview gives it.
 
 3. For each conflict the preview predicts, read the moving commit's diff of the conflicting file with `git show <sha> -- <file>`. Grep the branch the commit will sit on for every symbol that diff relies on.
 4. Decide whether the move is feasible. A commit moved below the commits it was written on top of is the usual cause, and it is feasible when the symbols it needs exist at its new position. Where it would need rewriting beyond conflict resolution, stop and say so. Name the preview's "to keep the old order" line as the fallback.

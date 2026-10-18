@@ -103,7 +103,7 @@ echo "############### Symlinking reusable Claude Code content ###############"
 # longer collide.
 mkdir -p ~/.copilot
 # A real dir here would make ln nest the link inside it, so fold its contents into the repo first.
-for dir in hooks skills; do
+for dir in guides hooks skills; do
     if [ -d "$HOME/.claude/$dir" ] && [ ! -L "$HOME/.claude/$dir" ]; then
         cp -an "$HOME/.claude/$dir/." "home/.claude/$dir/" && rm -rf "$HOME/.claude/$dir"
     fi
