@@ -3,11 +3,19 @@
 // Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const NOTES_REF = 'refs/notes/target';
-const UNTAGGED_MARKER = '# ---- untagged: move each line above the update-ref of its branch ----';
+const UNTAGGED_MARKER =
+  '# ---- untagged: move each line above the update-ref of its branch ----';
 const EXPORTED_AT_PREFIX = '# exported-at: ';
 const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MODE_PREFIX = '# mode: ';
@@ -24,7 +32,8 @@ const NEW_KEY = 'stackplan.new';
 const MODE_KEY = 'stackplan.mode';
 
 // Colour only a terminal, and never when NO_COLOR is set (https://no-color.org).
-const colourOn = (stream: NodeJS.WriteStream) => !process.env.NO_COLOR && stream.isTTY === true;
+const colourOn = (stream: NodeJS.WriteStream) =>
+  !process.env.NO_COLOR && stream.isTTY === true;
 const style =
   (code: string, stream: NodeJS.WriteStream = process.stdout) =>
   (text: string) =>
@@ -38,27 +47,44 @@ const red = style('31');
 const dimErr = style('2', process.stderr);
 const redErr = style('31', process.stderr);
 
-const heading = (title: string) => console.log(`\n${bold(`── ${title} ${'─'.repeat(Math.max(3, 46 - title.length))}`)}`);
-const subheading = (title: string) => console.log(`\n${bold(`────── ${title} ${'─'.repeat(Math.max(3, 42 - title.length))}`)}`);
+const heading = (title: string) =>
+  console.log(
+    `\n${bold(`── ${title} ${'─'.repeat(Math.max(3, 46 - title.length))}`)}`,
+  );
+const subheading = (title: string) =>
+  console.log(
+    `\n${bold(`────── ${title} ${'─'.repeat(Math.max(3, 42 - title.length))}`)}`,
+  );
 const good = (text: string) => console.log(`${green('✓')} ${text}`);
 const attention = (text: string) => console.log(`${yellow('!')} ${text}`);
 const bad = (text: string) => console.log(`${red('✗')} ${text}`);
-const commitLine = (commit: { sha: string; subject: string }) => `  ${yellow(commit.sha.slice(0, 10))}  ${commit.subject}`;
+const commitLine = (commit: { sha: string; subject: string }) =>
+  `  ${yellow(commit.sha.slice(0, 10))}  ${commit.subject}`;
 
-const shellQuote = (arg: string) => (/^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
+const shellQuote = (arg: string) =>
+  /^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`;
 
-const traceGit = (args: string[]) => console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+const traceGit = (args: string[]) =>
+  console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
 
 const changesRepo = ([subcommand, ...rest]: string[]) =>
-  (subcommand === 'notes' && (rest.includes('add') || rest.includes('remove'))) || (subcommand === 'config' && !rest.includes('--get'));
+  (subcommand === 'notes' &&
+    (rest.includes('add') || rest.includes('remove'))) ||
+  (subcommand === 'config' && !rest.includes('--get'));
 
 const git = (...args: string[]) => {
   if (verbose || changesRepo(args)) traceGit(args);
   try {
-    return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync('git', args, {
+      encoding: 'utf8',
+      maxBuffer: 1 << 28,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   } catch (error) {
     const stderr = (error as { stderr?: string }).stderr?.trim();
-    throw new Error(`git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`);
+    throw new Error(
+      `git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`,
+    );
   }
 };
 
@@ -85,7 +111,11 @@ const EXPANSIONS: Record<string, string[]> = {
   a: ['apply'],
   v: ['verify'],
 };
-const FLAG_ALIASES: Record<string, string> = { '-b': '--base', '-n': '--dry-run', '-f': '--anyway' };
+const FLAG_ALIASES: Record<string, string> = {
+  '-b': '--base',
+  '-n': '--dry-run',
+  '-f': '--anyway',
+};
 const ALLOWED_FLAGS: Record<string, string[]> = {
   export: ['--base'],
   save: ['--base', '--dry-run'],
@@ -101,7 +131,12 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
 const [given = '', ...args] = process.argv.slice(2);
 const [command, ...implied] = EXPANSIONS[given] ?? [given];
 const verbose = args.includes('--verbose');
-const rest = [...implied, ...args.filter((arg) => arg !== '--verbose').map((arg) => FLAG_ALIASES[arg] ?? arg)];
+const rest = [
+  ...implied,
+  ...args
+    .filter((arg) => arg !== '--verbose')
+    .map((arg) => FLAG_ALIASES[arg] ?? arg),
+];
 
 const usageError = (message?: string): never => {
   if (message) console.error(redErr(`✗ ${message}`));
@@ -110,13 +145,18 @@ const usageError = (message?: string): never => {
 };
 let cutAt: string | undefined;
 if (command !== '_todo') {
-  const allowed = ALLOWED_FLAGS[command] ?? usageError(given ? `unknown command "${given}"` : undefined);
+  const allowed =
+    ALLOWED_FLAGS[command] ??
+    usageError(given ? `unknown command "${given}"` : undefined);
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
-    else if (command === 'cut' && !cutAt && !rest[i].startsWith('-')) cutAt = rest[i];
-    else if (!allowed.includes(rest[i])) usageError(`${rest[i]} does not apply to ${given}`);
+    else if (command === 'cut' && !cutAt && !rest[i].startsWith('-'))
+      cutAt = rest[i];
+    else if (!allowed.includes(rest[i]))
+      usageError(`${rest[i]} does not apply to ${given}`);
   }
-  if (command === 'mode' && rest.length > 1) usageError('mode takes one of full or short');
+  if (command === 'mode' && rest.length > 1)
+    usageError('mode takes one of full or short');
   if (command === 'cut' && !cutAt) usageError('cut needs the branch to cut at');
 }
 
@@ -127,16 +167,30 @@ const optionValue = (name: string) => {
 const base = optionValue('--base') ?? 'origin/main';
 const dryRun = rest.includes('--dry-run');
 
-type Commit = { sha: string; subject: string; branches: string[]; note: string };
+type Commit = {
+  sha: string;
+  subject: string;
+  branches: string[];
+  note: string;
+};
 type Verb = 'pick' | 'fixup' | 'squash';
 type Step = { pick: Commit; verb: Verb } | { updateRef: string };
 type Replay = { commit: Commit; fold: boolean };
-const VERBS: Record<string, Verb> = { pick: 'pick', p: 'pick', fixup: 'fixup', f: 'fixup', squash: 'squash', s: 'squash' };
-const folds = (step?: Step) => step !== undefined && 'pick' in step && step.verb !== 'pick';
+const VERBS: Record<string, Verb> = {
+  pick: 'pick',
+  p: 'pick',
+  fixup: 'fixup',
+  f: 'fixup',
+  squash: 'squash',
+  s: 'squash',
+};
+const folds = (step?: Step) =>
+  step !== undefined && 'pick' in step && step.verb !== 'pick';
 
 let root: string | undefined;
 const repoRoot = () => (root ??= git('rev-parse', '--show-toplevel').trim());
-const planPath = () => join(repoRoot(), '.agent-context/active-work-context/stackplan.txt');
+const planPath = () =>
+  join(repoRoot(), '.agent-context/active-work-context/stackplan.txt');
 const currentBranch = () => git('symbolic-ref', '--short', 'HEAD').trim();
 const tipOf = (ref: string) => git('rev-parse', ref).trim();
 
@@ -148,8 +202,10 @@ const gitSucceeds = (...args: string[]) => {
     return false;
   }
 };
-const isAncestor = (ancestor: string, descendant: string) => gitSucceeds('merge-base', '--is-ancestor', ancestor, descendant);
-const branchExists = (branch: string) => gitSucceeds('show-ref', '--verify', '--quiet', `refs/heads/${branch}`);
+const isAncestor = (ancestor: string, descendant: string) =>
+  gitSucceeds('merge-base', '--is-ancestor', ancestor, descendant);
+const branchExists = (branch: string) =>
+  gitSucceeds('show-ref', '--verify', '--quiet', `refs/heads/${branch}`);
 
 const words = (value: string) => value.split(/\s+/).filter(Boolean);
 const readConfig = (key: string) => {
@@ -165,7 +221,9 @@ const fullMode = () => readConfig(MODE_KEY) === 'full';
 // The order save stored, while it still covers the stack; a missing branch counts only while it waits to be created.
 const desiredOrder = (current: string[]) => {
   const waiting = words(readConfig(NEW_KEY));
-  const stored = words(readConfig(ORDER_KEY)).filter((branch) => current.includes(branch) || waiting.includes(branch));
+  const stored = words(readConfig(ORDER_KEY)).filter(
+    (branch) => current.includes(branch) || waiting.includes(branch),
+  );
   return current.every((branch) => stored.includes(branch)) ? stored : current;
 };
 
@@ -184,7 +242,8 @@ const movedBranches = (current: string[], order: string[]) => {
     }
   }
   const kept = new Set<string>();
-  for (let i = run.indexOf(Math.max(0, ...run)); i >= 0; i = previous[i]) kept.add(existing[i]);
+  for (let i = run.indexOf(Math.max(0, ...run)); i >= 0; i = previous[i])
+    kept.add(existing[i]);
   return existing.filter((branch) => !kept.has(branch));
 };
 
@@ -197,7 +256,8 @@ const readHeader = (prefix: string) =>
 
 const requireHeader = (prefix: string, remedy: string) => {
   const value = readHeader(prefix);
-  if (!value) throw new Error(`No "${prefix.trim()}" line in the plan; ${remedy}`);
+  if (!value)
+    throw new Error(`No "${prefix.trim()}" line in the plan; ${remedy}`);
   return value;
 };
 
@@ -211,7 +271,10 @@ const writeHeader = (prefix: string, sha: string) => {
 
 const dropHeader = (prefix: string) => {
   const lines = readFileSync(planPath(), 'utf8').split('\n');
-  writeFileSync(planPath(), lines.filter((line) => !line.startsWith(prefix)).join('\n'));
+  writeFileSync(
+    planPath(),
+    lines.filter((line) => !line.startsWith(prefix)).join('\n'),
+  );
 };
 
 // Sets the tip verify compares against, and replaces the folds and cut of any earlier rebase with this one's.
@@ -227,7 +290,10 @@ const recordPreRebase = (sha: string, folded: string[]) => {
 const ensurePlanFile = (wip: string) => {
   if (existsSync(planPath())) return;
   mkdirSync(dirname(planPath()), { recursive: true });
-  writeFileSync(planPath(), `# stack-plan for ${wip}, holding the pre-rebase tip for verify\n`);
+  writeFileSync(
+    planPath(),
+    `# stack-plan for ${wip}, holding the pre-rebase tip for verify\n`,
+  );
 };
 
 // For a rebase run by hand, so verify has a tip to compare against afterwards.
@@ -237,7 +303,9 @@ const prepareRebase = () => {
   const sha = tipOf(wip);
   recordPreRebase(sha, []);
   heading('Prepare');
-  good(`recorded ${yellow(sha.slice(0, 10))} as the pre-rebase tip of ${cyan(wip)}`);
+  good(
+    `recorded ${yellow(sha.slice(0, 10))} as the pre-rebase tip of ${cyan(wip)}`,
+  );
   console.log('Rebase by hand, then run: stack-plan verify');
 };
 
@@ -255,7 +323,8 @@ const logPreRebase = (sha: string) => {
 const readStack = (wip: string) => {
   const stored = words(readConfig(ORDER_KEY));
   // Branches sharing a commit have no order in git, so the saved order decides.
-  const rank = (branch: string) => (stored.includes(branch) ? stored.indexOf(branch) : stored.length);
+  const rank = (branch: string) =>
+    stored.includes(branch) ? stored.indexOf(branch) : stored.length;
   const records = git(
     'log',
     '--reverse',
@@ -270,8 +339,12 @@ const readStack = (wip: string) => {
     .filter(Boolean);
   const line: Commit[] = records.map((record) => {
     const [sha, subject, refs, note] = record.split('\x1f');
-    const branches = refs ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, '')) : [];
-    const stack = branches.filter((branch) => branch !== wip).sort((a, b) => rank(a) - rank(b));
+    const branches = refs
+      ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, ''))
+      : [];
+    const stack = branches
+      .filter((branch) => branch !== wip)
+      .sort((a, b) => rank(a) - rank(b));
     return { sha, subject, branches: stack, note: note?.trim() ?? '' };
   });
   const topIndex = line.findLastIndex((commit) => commit.branches.length > 0);
@@ -284,18 +357,29 @@ const readStack = (wip: string) => {
       segment = [];
     }
   }
-  return { line, branches: line.flatMap((commit) => commit.branches), pending: line.slice(topIndex + 1), own };
+  return {
+    line,
+    branches: line.flatMap((commit) => commit.branches),
+    pending: line.slice(topIndex + 1),
+    own,
+  };
 };
 
 const printOrderChanges = (current: string[], order: string[]) => {
   const below = (branch: string) => order[order.indexOf(branch) - 1] ?? base;
-  for (const branch of order.filter((name) => !current.includes(name))) console.log(`${cyan(branch)}  new, above ${below(branch)}`);
-  for (const branch of movedBranches(current, order)) console.log(`${cyan(branch)}  moves above ${below(branch)}`);
+  for (const branch of order.filter((name) => !current.includes(name)))
+    console.log(`${cyan(branch)}  new, above ${below(branch)}`);
+  for (const branch of movedBranches(current, order))
+    console.log(`${cyan(branch)}  moves above ${below(branch)}`);
 };
 
 // For loops of hundreds of calls, where echoing each one would bury the output.
 const gitQuiet = (...args: string[]) =>
-  execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', args, {
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
 const treeOf = (ref: string) => gitQuiet('rev-parse', `${ref}^{tree}`).trim();
 
@@ -308,19 +392,39 @@ const fileExistsIn = (ref: string, file: string) => {
   }
 };
 
-type Merge = { ok: true; tree: string } | { ok: false; files: string[]; tree: string; messages: string[] };
+type Merge =
+  | { ok: true; tree: string }
+  | { ok: false; files: string[]; tree: string; messages: string[] };
 
 // A three-way merge in memory: the tree it would produce, or the conflicted files, the tree with markers, and git's messages.
-const mergeTree = (mergeBase: string, ours: string, theirs: string, options: string[] = []): Merge => {
+const mergeTree = (
+  mergeBase: string,
+  ours: string,
+  theirs: string,
+  options: string[] = [],
+): Merge => {
   try {
-    const merged = gitQuiet('merge-tree', '--write-tree', '--name-only', ...options, `--merge-base=${mergeBase}`, ours, theirs);
+    const merged = gitQuiet(
+      'merge-tree',
+      '--write-tree',
+      '--name-only',
+      ...options,
+      `--merge-base=${mergeBase}`,
+      ours,
+      theirs,
+    );
     return { ok: true, tree: merged.split('\n')[0] };
   } catch (error) {
     const failure = error as { status?: number; stdout?: string };
     if (failure.status !== 1) throw error;
     const [tree, ...listed] = (failure.stdout ?? '').split('\n');
     const end = Math.max(0, listed.indexOf(''));
-    return { ok: false, files: [...new Set(listed.slice(0, end))], tree, messages: listed.slice(end + 1) };
+    return {
+      ok: false,
+      files: [...new Set(listed.slice(0, end))],
+      tree,
+      messages: listed.slice(end + 1),
+    };
   }
 };
 
@@ -335,28 +439,66 @@ type Conflict = {
   assumed: boolean;
   takenWhole: string[];
 };
-type Simulation = { picks: number; conflicts: Conflict[]; sameTree: boolean; tip: string; tipAfterPick: string[] };
+type Simulation = {
+  picks: number;
+  conflicts: Conflict[];
+  sameTree: boolean;
+  tip: string;
+  tipAfterPick: string[];
+};
 
 // Writes a tree from another, with each file replaced by its version in a commit, or removed where the commit has none.
 const replaceFiles = (tree: string, commit: string, files: string[]) => {
-  const env = { ...process.env, GIT_INDEX_FILE: join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-preview-index') };
-  const run = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const env = {
+    ...process.env,
+    GIT_INDEX_FILE: join(
+      git('rev-parse', '--absolute-git-dir').trim(),
+      'stack-plan-preview-index',
+    ),
+  };
+  const run = (...args: string[]) =>
+    execFileSync('git', args, {
+      encoding: 'utf8',
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   run('read-tree', tree);
   for (const file of files) {
     const [mode, , blob] = gitQuiet('ls-tree', commit, '--', file).split(/\s+/);
-    if (blob) run('update-index', '--add', '--cacheinfo', `${mode},${blob},${file}`);
+    if (blob)
+      run('update-index', '--add', '--cacheinfo', `${mode},${blob},${file}`);
     else run('update-index', '--force-remove', '--', file);
   }
   return run('write-tree').trim();
 };
 
 // Replays the planned picks in memory, resolving each conflict to the pick's side so later ones are found too.
-const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulation => {
+const simulateRebase = (
+  sequence: Replay[],
+  start: string,
+  wip: string,
+): Simulation => {
   if (verbose) {
-    console.error(dimErr(`$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`));
-    console.error(dimErr(`$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`));
-    console.error(dimErr(`  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`));
-    console.error(dimErr(`  (on a conflict: merge-tree -X theirs, then the pick's own version of any file still conflicted)`));
+    console.error(
+      dimErr(
+        `$ git merge-tree --write-tree --name-only --merge-base=<pick>^ <state> <pick>    (per pick)`,
+      ),
+    );
+    console.error(
+      dimErr(
+        `$ git commit-tree <tree> -p <state> -m 'stack-plan preview' --no-gpg-sign  (per pick)`,
+      ),
+    );
+    console.error(
+      dimErr(
+        `  (a fixup or squash commits onto <state>'s parent instead, replacing <state>)`,
+      ),
+    );
+    console.error(
+      dimErr(
+        `  (on a conflict: merge-tree -X theirs, then the pick's own version of any file still conflicted)`,
+      ),
+    );
   }
   const conflicts: Conflict[] = [];
   const tipAfterPick: string[] = [];
@@ -367,20 +509,48 @@ const simulateRebase = (sequence: Replay[], start: string, wip: string): Simulat
     if (!merged.ok) {
       const before = sequence.slice(0, index).map((replay) => replay.commit);
       const { files, tree, messages } = merged;
-      const assumed = conflicts.some((earlier) => earlier.files.some((file) => files.includes(file)));
-      const conflict: Conflict = { at: index, commit, files, tree, messages, before, assumed, takenWhole: [] };
+      const assumed = conflicts.some((earlier) =>
+        earlier.files.some((file) => files.includes(file)),
+      );
+      const conflict: Conflict = {
+        at: index,
+        commit,
+        files,
+        tree,
+        messages,
+        before,
+        assumed,
+        takenWhole: [],
+      };
       conflicts.push(conflict);
       merged = mergeTree(`${commit.sha}^`, state, commit.sha, ['-X', 'theirs']);
       if (!merged.ok) {
         conflict.takenWhole = merged.files;
-        merged = { ok: true, tree: replaceFiles(merged.tree, commit.sha, merged.files) };
+        merged = {
+          ok: true,
+          tree: replaceFiles(merged.tree, commit.sha, merged.files),
+        };
       }
     }
     if (!fold) parent = state;
-    state = gitQuiet('commit-tree', merged.tree, '-p', parent, '-m', 'stack-plan preview', '--no-gpg-sign').trim();
+    state = gitQuiet(
+      'commit-tree',
+      merged.tree,
+      '-p',
+      parent,
+      '-m',
+      'stack-plan preview',
+      '--no-gpg-sign',
+    ).trim();
     tipAfterPick.push(state);
   }
-  return { picks: sequence.length, conflicts, sameTree: treeOf(state) === treeOf(wip), tip: state, tipAfterPick };
+  return {
+    picks: sequence.length,
+    conflicts,
+    sameTree: treeOf(state) === treeOf(wip),
+    tip: state,
+    tipAfterPick,
+  };
 };
 
 const MARKER_OPEN = /^<{7}(?: |$)/;
@@ -392,7 +562,9 @@ const conflictSize = (tree: string, file: string) => {
   let regions = 0;
   let lines = 0;
   let inside = false;
-  const text = fileExistsIn(tree, file) ? gitQuiet('cat-file', '-p', `${tree}:${file}`) : '';
+  const text = fileExistsIn(tree, file)
+    ? gitQuiet('cat-file', '-p', `${tree}:${file}`)
+    : '';
   for (const line of text.split('\n')) {
     if (MARKER_OPEN.test(line)) {
       regions++;
@@ -404,40 +576,85 @@ const conflictSize = (tree: string, file: string) => {
 };
 
 const changesAny = (sha: string, files: string[]) =>
-  fileList(gitQuiet('diff-tree', '-r', '--root', '--no-commit-id', '--name-only', sha)).some((file) => files.includes(file));
+  fileList(
+    gitQuiet('diff-tree', '-r', '--root', '--no-commit-id', '--name-only', sha),
+  ).some((file) => files.includes(file));
 
-const subjectOf = (sha: string) => ({ sha, subject: gitQuiet('show', '-s', '--format=%s', sha).trim() });
+const subjectOf = (sha: string) => ({
+  sha,
+  subject: gitQuiet('show', '-s', '--format=%s', sha).trim(),
+});
 
-const oneLine = (commit: { sha: string; subject: string }) => commitLine(commit).trim();
+const oneLine = (commit: { sha: string; subject: string }) =>
+  commitLine(commit).trim();
 
 // Sizes each conflicted file, and names the commits on those files that the pick now comes after, or no longer does.
-const explainConflict = (conflict: Conflict, start: string, landing?: Landing, alreadyNamed: string[] = []) => {
+const explainConflict = (
+  conflict: Conflict,
+  start: string,
+  landing?: Landing,
+  alreadyNamed: string[] = [],
+) => {
   const { commit, files, tree, messages, before } = conflict;
   const sizes = files.map((file) => {
-    const message = messages.find((line) => line.startsWith('CONFLICT') && line.includes(file)) ?? '';
+    const message =
+      messages.find(
+        (line) => line.startsWith('CONFLICT') && line.includes(file),
+      ) ?? '';
     const kind = /^CONFLICT \(([^)]+)\)/.exec(message)?.[1] ?? 'content';
     const { regions, lines } = conflictSize(tree, file);
-    const size = regions ? `${regions} region${regions === 1 ? '' : 's'}, ${lines} lines` : 'no text markers';
+    const size = regions
+      ? `${regions} region${regions === 1 ? '' : 's'}, ${lines} lines`
+      : 'no text markers';
     return `${file}  ${size}${kind === 'content' ? '' : `  (${kind})`}`;
   });
-  const wasBelow = new Set(fileList(gitQuiet('rev-list', `${start}..${commit.sha}^`)));
+  const wasBelow = new Set(
+    fileList(gitQuiet('rev-list', `${start}..${commit.sha}^`)),
+  );
   const isBelow = new Set(before.map((below) => below.sha));
-  const unnamed = (culprit: { sha: string }) => !alreadyNamed.includes(culprit.sha);
+  const unnamed = (culprit: { sha: string }) =>
+    !alreadyNamed.includes(culprit.sha);
   // From the base side: commits the pick now sits on that it did not before, as after a cut or a moved branch.
-  const fromBase = fileList(gitQuiet('log', '--format=%H', '--max-count=6', `${commit.sha}..${start}`, '--', ...files));
-  const nowAfter = [...before.filter((below) => !wasBelow.has(below.sha) && changesAny(below.sha, files)), ...fromBase.map(subjectOf)];
-  const nowBefore = [...wasBelow].filter((sha) => !isBelow.has(sha) && changesAny(sha, files)).map(subjectOf);
+  const fromBase = fileList(
+    gitQuiet(
+      'log',
+      '--format=%H',
+      '--max-count=6',
+      `${commit.sha}..${start}`,
+      '--',
+      ...files,
+    ),
+  );
+  const nowAfter = [
+    ...before.filter(
+      (below) => !wasBelow.has(below.sha) && changesAny(below.sha, files),
+    ),
+    ...fromBase.map(subjectOf),
+  ];
+  const nowBefore = [...wasBelow]
+    .filter((sha) => !isBelow.has(sha) && changesAny(sha, files))
+    .map(subjectOf);
   const fromBaseShas = new Set(fromBase);
   const where = (culprit: { sha: string }) => {
-    const branch = fromBaseShas.has(culprit.sha) ? 'base' : landing?.landsOn.get(culprit.sha);
+    const branch = fromBaseShas.has(culprit.sha)
+      ? 'base'
+      : landing?.landsOn.get(culprit.sha);
     return branch ? `  → ${cyan(branch)}` : '';
   };
   const causes = [
-    ...nowAfter.filter(unnamed).slice(0, 6).map((culprit) => `now after  ${oneLine(culprit)}${where(culprit)}`),
-    ...(fromBase.length > 5 || nowAfter.length > 6 ? ['now after  more commits on those files'] : []),
-    ...nowBefore.filter(unnamed).map((culprit) => `now before ${oneLine(culprit)}${where(culprit)}`),
+    ...nowAfter
+      .filter(unnamed)
+      .slice(0, 6)
+      .map((culprit) => `now after  ${oneLine(culprit)}${where(culprit)}`),
+    ...(fromBase.length > 5 || nowAfter.length > 6
+      ? ['now after  more commits on those files']
+      : []),
+    ...nowBefore
+      .filter(unnamed)
+      .map((culprit) => `now before ${oneLine(culprit)}${where(culprit)}`),
   ];
-  if (!nowAfter.length && !nowBefore.length) causes.push('no commit that moved relative to it changes those files');
+  if (!nowAfter.length && !nowBefore.length)
+    causes.push('no commit that moved relative to it changes those files');
   return { sizes, causes, nowBefore };
 };
 
@@ -450,49 +667,83 @@ const landingBranches = (todo: string[], wip: string): Landing => {
   for (const line of [...todo].reverse()) {
     const ref = /^update-ref refs\/heads\/(.+)$/.exec(line)?.[1];
     if (ref) order.unshift(ref);
-    else if (/^(?:pick|fixup|squash) /.test(line)) landsOn.set(line.split(' ')[1], order[0]);
+    else if (/^(?:pick|fixup|squash) /.test(line))
+      landsOn.set(line.split(' ')[1], order[0]);
   }
   return { landsOn, order };
 };
 
 // The lowest branch the pick can land on and still come after every commit it now jumps ahead of.
-const orderKeepingBranch = (landing: Landing, pick: string, jumpedAhead: { sha: string }[]) => {
-  const positions = jumpedAhead.map((culprit) => landing.order.indexOf(landing.landsOn.get(culprit.sha) ?? ''));
+const orderKeepingBranch = (
+  landing: Landing,
+  pick: string,
+  jumpedAhead: { sha: string }[],
+) => {
+  const positions = jumpedAhead.map((culprit) =>
+    landing.order.indexOf(landing.landsOn.get(culprit.sha) ?? ''),
+  );
   const highest = Math.max(-1, ...positions);
-  if (highest < 0 || highest <= landing.order.indexOf(landing.landsOn.get(pick) ?? '')) return;
+  if (
+    highest < 0 ||
+    highest <= landing.order.indexOf(landing.landsOn.get(pick) ?? '')
+  )
+    return;
   const branch = cyan(landing.order[highest]);
-  return highest === landing.order.length - 1 ? `land it on ${branch}` : `land it on ${branch} or a branch above it`;
+  return highest === landing.order.length - 1
+    ? `land it on ${branch}`
+    : `land it on ${branch} or a branch above it`;
 };
 
-const reportConflicts = (simulation: Simulation, start: string, took = '', landing?: Landing) => {
+const reportConflicts = (
+  simulation: Simulation,
+  start: string,
+  took = '',
+  landing?: Landing,
+) => {
   const { conflicts, picks } = simulation;
   // A conflict in files an earlier one shares goes under it, since it may only follow from the guessed resolution.
   const groups: Conflict[][] = [];
   for (const conflict of conflicts) {
-    const shares = (earlier: Conflict) => earlier.files.some((file) => conflict.files.includes(file));
-    const cause = conflict.assumed ? groups.findLast((group) => group.some(shares)) : undefined;
+    const shares = (earlier: Conflict) =>
+      earlier.files.some((file) => conflict.files.includes(file));
+    const cause = conflict.assumed
+      ? groups.findLast((group) => group.some(shares))
+      : undefined;
     if (cause) cause.push(conflict);
     else groups.push([conflict]);
   }
-  bad(`${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`);
+  bad(
+    `${groups.length} conflict${groups.length === 1 ? '' : 's'}, in ${conflicts.length} of ${picks} picks${took}`,
+  );
   for (const group of groups) {
     const [first, ...followOns] = group;
     const branch = landing?.landsOn.get(first.commit.sha);
-    console.log(`\n${oneLine(first.commit)}${branch ? `  → ${cyan(branch)}` : ''}`);
+    console.log(
+      `\n${oneLine(first.commit)}${branch ? `  → ${cyan(branch)}` : ''}`,
+    );
     const { sizes, causes, nowBefore } = explainConflict(first, start, landing);
     for (const cause of causes) console.log(`  ${cause}`);
     console.log('  conflicting in:');
     for (const size of sizes) console.log(`    ${size}`);
-    const keepOrder = landing && orderKeepingBranch(landing, first.commit.sha, nowBefore);
+    const keepOrder =
+      landing && orderKeepingBranch(landing, first.commit.sha, nowBefore);
     for (const [index, conflict] of followOns.entries()) {
-      const named = group.slice(0, index + 1).map((earlier) => earlier.commit.sha);
+      const named = group
+        .slice(0, index + 1)
+        .map((earlier) => earlier.commit.sha);
       const followOn = explainConflict(conflict, start, landing, named);
-      if (index === 0) console.log('  then, after a guessed resolution of that, also conflicting:');
+      if (index === 0)
+        console.log(
+          '  then, after a guessed resolution of that, also conflicting:',
+        );
       console.log(`    ${oneLine(conflict.commit)}`);
-      for (const line of [...followOn.sizes, ...followOn.causes]) console.log(`      ${line}`);
+      for (const line of [...followOn.sizes, ...followOn.causes])
+        console.log(`      ${line}`);
     }
     for (const conflict of group.filter((member) => member.takenWhole.length)) {
-      console.log(`  assumed for what follows: ${conflict.commit.sha.slice(0, 10)}'s own version of ${conflict.takenWhole.join(', ')}`);
+      console.log(
+        `  assumed for what follows: ${conflict.commit.sha.slice(0, 10)}'s own version of ${conflict.takenWhole.join(', ')}`,
+      );
     }
     if (keepOrder) console.log(`  to keep the old order: ${keepOrder}`);
   }
@@ -502,32 +753,57 @@ const reportConflicts = (simulation: Simulation, start: string, took = '', landi
 const patchId = (from: string, to: string, path?: string) => {
   const diff = gitQuiet('diff', from, to, ...(path ? ['--', path] : []));
   if (!diff) return '';
-  return execFileSync('git', ['patch-id', '--stable'], { input: diff, encoding: 'utf8', maxBuffer: 1 << 28 }).split(' ')[0];
+  return execFileSync('git', ['patch-id', '--stable'], {
+    input: diff,
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+  }).split(' ')[0];
 };
 
 const fileList = (output: string) => output.split('\n').filter(Boolean);
 
 // Whether from..to and onFrom..onTo make the same change; false when some file ends differently.
-const sameNetChange = (label: string, from: string, to: string, onFrom: string, onTo: string, onName: string) => {
+const sameNetChange = (
+  label: string,
+  from: string,
+  to: string,
+  onFrom: string,
+  onTo: string,
+  onName: string,
+) => {
   if (patchId(from, to) === patchId(onFrom, onTo)) {
     good(`the net change of ${label} is the same on ${onName}`);
     return true;
   }
-  const files = new Set([...fileList(gitQuiet('diff', '--name-only', from, to)), ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo))]);
-  const differing = [...files].filter((file) => patchId(from, to, file) !== patchId(onFrom, onTo, file));
+  const files = new Set([
+    ...fileList(gitQuiet('diff', '--name-only', from, to)),
+    ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo)),
+  ]);
+  const differing = [...files].filter(
+    (file) => patchId(from, to, file) !== patchId(onFrom, onTo, file),
+  );
   // A file that ends the same lost nothing: the new base already had that part of the change.
-  const blob = (ref: string, file: string) => (fileExistsIn(ref, file) ? gitQuiet('rev-parse', `${ref}:${file}`).trim() : '');
-  const landed = differing.filter((file) => blob(onTo, file) === blob(to, file));
+  const blob = (ref: string, file: string) =>
+    fileExistsIn(ref, file)
+      ? gitQuiet('rev-parse', `${ref}:${file}`).trim()
+      : '';
+  const landed = differing.filter(
+    (file) => blob(onTo, file) === blob(to, file),
+  );
   const missing = differing.filter((file) => !landed.includes(file));
   if (landed.length) {
-    attention(`part of ${label} is already in ${onName}, so these files end the same:`);
+    attention(
+      `part of ${label} is already in ${onName}, so these files end the same:`,
+    );
     for (const file of landed) console.log(`    ${file}`);
   }
   if (!missing.length) {
     good(`the rest of the net change of ${label} is the same on ${onName}`);
     return true;
   }
-  bad(`the net change of ${label} differs on ${onName}, and these files end differently:`);
+  bad(
+    `the net change of ${label} differs on ${onName}, and these files end differently:`,
+  );
   for (const file of missing) console.log(`    ${file}`);
   return false;
 };
@@ -535,11 +811,24 @@ const sameNetChange = (label: string, from: string, to: string, onFrom: string, 
 // Git exits 0 when it pauses at an edit or break, so a rebase still in progress is a stop too.
 const exitUnlessRebaseFinished = (status: number | null) => {
   if (status !== 0) {
-    attention('the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify');
+    attention(
+      'the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify',
+    );
     process.exit(status ?? 1);
   }
-  if (existsSync(gitQuiet('rev-parse', '--path-format=absolute', '--git-path', 'rebase-merge').trim())) {
-    attention('the rebase paused for an edit. When done: `git rebase --continue`, then: stack-plan verify');
+  if (
+    existsSync(
+      gitQuiet(
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-path',
+        'rebase-merge',
+      ).trim(),
+    )
+  ) {
+    attention(
+      'the rebase paused for an edit. When done: `git rebase --continue`, then: stack-plan verify',
+    );
     process.exit(0);
   }
 };
@@ -548,7 +837,10 @@ const exitUnlessRebaseFinished = (status: number | null) => {
 const cutStack = (at: string, apply: boolean) => {
   const wip = currentBranch();
   const { line, branches } = readStack(wip);
-  if (!branches.includes(at)) throw new Error(`${at} is not a stack branch below ${wip}; the stack is: ${branches.join(' ')}`);
+  if (!branches.includes(at))
+    throw new Error(
+      `${at} is not a stack branch below ${wip}; the stack is: ${branches.join(' ')}`,
+    );
   heading(`Cut at ${at}, onto ${base}`);
   let lost = 0;
   let unclear = 0;
@@ -558,44 +850,74 @@ const cutStack = (at: string, apply: boolean) => {
   const below = branches.slice(0, branches.indexOf(at) + 1);
   const fork = git('merge-base', base, wip).trim();
   for (const [index, branch] of below.entries()) {
-    const merged = mergeTree(index === 0 ? fork : tipOf(below[index - 1]), base, branch);
+    const merged = mergeTree(
+      index === 0 ? fork : tipOf(below[index - 1]),
+      base,
+      branch,
+    );
     if (!merged.ok) {
       unclear++;
-      attention(`${cyan(branch)}  can't tell: ${base} changed these again since, so compare by hand`);
+      attention(
+        `${cyan(branch)}  can't tell: ${base} changed these again since, so compare by hand`,
+      );
       for (const file of merged.files) console.log(`    ${file}`);
-    } else if (merged.tree === treeOf(base)) good(`${cyan(branch)}  contained in ${base}`);
+    } else if (merged.tree === treeOf(base))
+      good(`${cyan(branch)}  contained in ${base}`);
     else {
       lost++;
       bad(`${cyan(branch)}  would be lost: ${base} lacks its changes to`);
-      for (const file of fileList(gitQuiet('diff', '--name-only', base, merged.tree))) console.log(`    ${file}`);
+      for (const file of fileList(
+        gitQuiet('diff', '--name-only', base, merged.tree),
+      ))
+        console.log(`    ${file}`);
     }
   }
 
   subheading(`Above the cut: rebased onto ${base}`);
-  const above = line.slice(line.findIndex((commit) => commit.branches.includes(at)) + 1);
+  const above = line.slice(
+    line.findIndex((commit) => commit.branches.includes(at)) + 1,
+  );
   if (!above.length) good('no commits above the cut');
   else {
-    const simulation = simulateRebase(above.map((commit) => ({ commit, fold: false })), tipOf(base), wip);
+    const simulation = simulateRebase(
+      above.map((commit) => ({ commit, fold: false })),
+      tipOf(base),
+      wip,
+    );
     if (simulation.conflicts.length) {
       unclear++;
       reportConflicts(simulation, tipOf(base));
     } else {
       good(`all ${simulation.picks} picks apply cleanly in memory`);
-      if (!sameNetChange(`${at}..${wip}`, at, wip, tipOf(base), simulation.tip, base)) lost++;
+      if (
+        !sameNetChange(
+          `${at}..${wip}`,
+          at,
+          wip,
+          tipOf(base),
+          simulation.tip,
+          base,
+        )
+      )
+        lost++;
     }
   }
 
   subheading('Conclusion');
   if (lost) bad(`cutting at ${at} would lose work; see the files above`);
-  else if (unclear) attention(`no loss found, but some of it needs a look by hand; see above`);
+  else if (unclear)
+    attention(`no loss found, but some of it needs a look by hand; see above`);
   else good(`cutting at ${at} and rebasing onto ${base} loses no work`);
   if (!apply) {
-    if (!lost && !unclear) console.log(`To do it: stack-plan cut ${at} --apply`);
+    if (!lost && !unclear)
+      console.log(`To do it: stack-plan cut ${at} --apply`);
     if (lost || unclear) process.exit(1);
     return;
   }
   if ((lost || unclear) && !rest.includes('--anyway')) {
-    console.log(`\nNothing rewritten. To cut anyway: stack-plan cut ${at} --apply -f`);
+    console.log(
+      `\nNothing rewritten. To cut anyway: stack-plan cut ${at} --apply -f`,
+    );
     process.exit(1);
   }
 
@@ -604,7 +926,15 @@ const cutStack = (at: string, apply: boolean) => {
   recordPreRebase(tipOf(wip), []);
   writeHeader(CUT_PREFIX, [cutTip, tipOf(base), ...below].join(' '));
   // A commit the base already holds becomes empty, and the check above already counted it as landed.
-  const args = ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', base, cutTip];
+  const args = [
+    'rebase',
+    '-i',
+    '--update-refs',
+    '--empty=drop',
+    '--onto',
+    base,
+    cutTip,
+  ];
   heading('Rebase');
   traceGit(args);
   exitUnlessRebaseFinished(spawnSync('git', args, { stdio: 'inherit' }).status);
@@ -612,34 +942,64 @@ const cutStack = (at: string, apply: boolean) => {
 };
 
 const commitsIn = (range: string): Commit[] =>
-  fileList(gitQuiet('log', '--reverse', '--first-parent', '--format=%H%x1f%s', range)).map((record) => {
+  fileList(
+    gitQuiet('log', '--reverse', '--first-parent', '--format=%H%x1f%s', range),
+  ).map((record) => {
     const [sha, subject] = record.split('\x1f');
     return { sha, subject, branches: [], note: '' };
   });
 
-const messageAndAuthorOf = (sha: string) => gitQuiet('show', '-s', '--format=%an%x00%ae%x00%B', sha);
+const messageAndAuthorOf = (sha: string) =>
+  gitQuiet('show', '-s', '--format=%an%x00%ae%x00%B', sha);
 
 // Merges and empty commits get no patch-id.
 const patchIdsIn = (range: string) => {
-  const log = gitQuiet('log', '-p', '--no-merges', '--no-color', '--no-ext-diff', '--format=commit %H', range);
+  const log = gitQuiet(
+    'log',
+    '-p',
+    '--no-merges',
+    '--no-color',
+    '--no-ext-diff',
+    '--format=commit %H',
+    range,
+  );
   const idOfSha = new Map<string, string>();
   if (!log.trim()) return idOfSha;
-  const output = execFileSync('git', ['patch-id', '--stable'], { input: log, encoding: 'utf8', maxBuffer: 1 << 28 });
-  for (const [id, sha] of fileList(output).map((entry) => entry.split(' '))) idOfSha.set(sha, id);
+  const output = execFileSync('git', ['patch-id', '--stable'], {
+    input: log,
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+  });
+  for (const [id, sha] of fileList(output).map((entry) => entry.split(' ')))
+    idOfSha.set(sha, id);
   return idOfSha;
 };
 
 const remoteOf = (branch: string) => {
-  const upstream = git('for-each-ref', '--format=%(upstream:short)', `refs/heads/${branch}`).trim();
+  const upstream = git(
+    'for-each-ref',
+    '--format=%(upstream:short)',
+    `refs/heads/${branch}`,
+  ).trim();
   const remote = upstream || `origin/${branch}`;
-  return gitSucceeds('rev-parse', '--verify', '--quiet', `${remote}^{commit}`) ? remote : undefined;
+  return gitSucceeds('rev-parse', '--verify', '--quiet', `${remote}^{commit}`)
+    ? remote
+    : undefined;
 };
 
-const countOf = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+const countOf = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 // A sync may change a file at the tip only where origin's stack differs from the local one.
-const sameTipOutsideOrigin = (oldTop: string, oldTip: string, newTop: string, newTip: string) => {
-  const originDiffers = new Set(fileList(gitQuiet('diff', '--name-only', oldTop, newTop)));
+const sameTipOutsideOrigin = (
+  oldTop: string,
+  oldTip: string,
+  newTop: string,
+  newTip: string,
+) => {
+  const originDiffers = new Set(
+    fileList(gitQuiet('diff', '--name-only', oldTop, newTop)),
+  );
   const changed = fileList(gitQuiet('diff', '--name-only', oldTip, newTip));
   const unexpected = changed.filter((file) => !originDiffers.has(file));
   if (!changed.length) {
@@ -647,7 +1007,9 @@ const sameTipOutsideOrigin = (oldTop: string, oldTip: string, newTop: string, ne
     return true;
   }
   if (!unexpected.length) {
-    good(`the tip tree is unchanged, except ${countOf(changed.length, 'file')} where origin's stack differs from yours`);
+    good(
+      `the tip tree is unchanged, except ${countOf(changed.length, 'file')} where origin's stack differs from yours`,
+    );
     return true;
   }
   bad(`the tip tree changes outside origin's changes, in:`);
@@ -660,7 +1022,10 @@ const syncStack = (apply: boolean) => {
   if (!rest.includes('--no-fetch')) {
     const fetchArgs = ['fetch', '--prune', 'origin'];
     traceGit(fetchArgs);
-    if (spawnSync('git', fetchArgs, { stdio: 'inherit' }).status !== 0) throw new Error('git fetch failed; run again with --no-fetch to use the refs as they are');
+    if (spawnSync('git', fetchArgs, { stdio: 'inherit' }).status !== 0)
+      throw new Error(
+        'git fetch failed; run again with --no-fetch to use the refs as they are',
+      );
   }
   const wip = currentBranch();
   const { branches, pending, own } = readStack(wip);
@@ -671,66 +1036,110 @@ const syncStack = (apply: boolean) => {
       return remote ? [[branch, remote] as const] : [];
     }),
   );
-  const highestRemote = branches.map((branch) => remoteOfBranch.get(branch)).findLast(Boolean);
-  if (!highestRemote) throw new Error('no stack branch is on origin; nothing to sync with');
+  const highestRemote = branches
+    .map((branch) => remoteOfBranch.get(branch))
+    .findLast(Boolean);
+  if (!highestRemote)
+    throw new Error('no stack branch is on origin; nothing to sync with');
   heading(`Sync with origin, onto ${base}`);
   let findings = 0;
 
   subheading(`Below origin's stack`);
   // Origin's stack is the run of origin branches, from the top down, each sitting on the one below; it has moved past the rest.
-  const branchesOnOrigin = branches.filter((branch) => remoteOfBranch.has(branch));
-  const remoteAt = (index: number) => remoteOfBranch.get(branchesOnOrigin[index])!;
+  const branchesOnOrigin = branches.filter((branch) =>
+    remoteOfBranch.has(branch),
+  );
+  const remoteAt = (index: number) =>
+    remoteOfBranch.get(branchesOnOrigin[index])!;
   let lowestInOriginStack = branchesOnOrigin.length - 1;
-  while (lowestInOriginStack > 0 && isAncestor(remoteAt(lowestInOriginStack - 1), remoteAt(lowestInOriginStack))) lowestInOriginStack--;
-  const lowestOnOrigin = branches.indexOf(branchesOnOrigin[lowestInOriginStack]);
+  while (
+    lowestInOriginStack > 0 &&
+    isAncestor(remoteAt(lowestInOriginStack - 1), remoteAt(lowestInOriginStack))
+  )
+    lowestInOriginStack--;
+  const lowestOnOrigin = branches.indexOf(
+    branchesOnOrigin[lowestInOriginStack],
+  );
   const cut: string[] = [];
   let unclearCuts = 0;
   for (const branch of branches.slice(0, lowestOnOrigin)) {
     if (isAncestor(tipOf(branch), highestRemote)) {
-      attention(`${cyan(branch)}  not on origin, but origin's stack still sits on it, so it stays`);
+      attention(
+        `${cyan(branch)}  not on origin, but origin's stack still sits on it, so it stays`,
+      );
       break;
     }
-    const merged = mergeTree(cut.length ? tipOf(cut.at(-1)!) : fork, base, branch);
+    const merged = mergeTree(
+      cut.length ? tipOf(cut.at(-1)!) : fork,
+      base,
+      branch,
+    );
     cut.push(branch);
-    const leftOnOrigin = remoteOfBranch.has(branch) ? ` (${remoteOfBranch.get(branch)} is left behind)` : '';
+    const leftOnOrigin = remoteOfBranch.has(branch)
+      ? ` (${remoteOfBranch.get(branch)} is left behind)`
+      : '';
     if (merged.ok && merged.tree === treeOf(base)) {
       good(`${cyan(branch)}  cut, contained in ${base}${leftOnOrigin}`);
       continue;
     }
     unclearCuts++;
-    const files = merged.ok ? fileList(gitQuiet('diff', '--name-only', base, merged.tree)) : merged.files;
-    const why = merged.ok ? `${base} lacks part of it` : `${base} changed these again since`;
-    attention(`${cyan(branch)}  cut${leftOnOrigin}, but ${why}; compare by hand:`);
+    const files = merged.ok
+      ? fileList(gitQuiet('diff', '--name-only', base, merged.tree))
+      : merged.files;
+    const why = merged.ok
+      ? `${base} lacks part of it`
+      : `${base} changed these again since`;
+    attention(
+      `${cyan(branch)}  cut${leftOnOrigin}, but ${why}; compare by hand:`,
+    );
     for (const file of files) console.log(`    ${file}`);
   }
   if (!cut.length) good(`no branch below origin's stack to cut`);
 
   const kept = branches.slice(cut.length);
   const adopted = kept.filter((branch) => remoteOfBranch.has(branch));
-  if (!adopted.length) throw new Error('no stack branch above the cut is on origin; nothing to sync with');
+  if (!adopted.length)
+    throw new Error(
+      'no stack branch above the cut is on origin; nothing to sync with',
+    );
   const topBranch = adopted.at(-1)!;
   const topRemote = remoteOfBranch.get(topBranch)!;
   const onto = git('merge-base', base, remoteOfBranch.get(adopted[0])!).trim();
   let below = { name: base, sha: onto };
   for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
-    if (!isAncestor(below.sha, remote)) throw new Error(`${remote} does not sit on ${below.name}; origin's stack is not one line`);
+    if (!isAncestor(below.sha, remote))
+      throw new Error(
+        `${remote} does not sit on ${below.name}; origin's stack is not one line`,
+      );
     below = { name: remote, sha: remote };
   }
   if (git('rev-list', '--merges', `${onto}..${topRemote}`).trim()) {
-    throw new Error(`origin's stack holds merge commits, which the rebase cannot replay; sync by hand`);
+    throw new Error(
+      `origin's stack holds merge commits, which the rebase cannot replay; sync by hand`,
+    );
   }
 
   const originCommits = commitsIn(`${onto}..${topRemote}`);
   const originShas = new Set(originCommits.map((commit) => commit.sha));
-  const originShaById = new Map([...patchIdsIn(`${onto}..${topRemote}`)].map(([sha, id]) => [id, sha]));
+  const originShaById = new Map(
+    [...patchIdsIn(`${onto}..${topRemote}`)].map(([sha, id]) => [id, sha]),
+  );
   const localCommits = commitsIn(`${fork}..${wip}`);
   const localShas = new Set(localCommits.map((commit) => commit.sha));
   const localIdOfSha = patchIdsIn(`${fork}..${wip}`);
   const localIds = new Set(localIdOfSha.values());
-  const originIdOfSha = new Map([...originShaById].map(([id, sha]) => [sha, id]));
-  const newToLocal = (commit: Commit) => !localShas.has(commit.sha) && !localIds.has(originIdOfSha.get(commit.sha) ?? '');
-  const originCopyOf = (commit: Commit) => (originShas.has(commit.sha) ? undefined : originShaById.get(localIdOfSha.get(commit.sha) ?? ''));
-  const notOnOrigin = (commit: Commit) => !originShas.has(commit.sha) && !originCopyOf(commit);
+  const originIdOfSha = new Map(
+    [...originShaById].map(([id, sha]) => [sha, id]),
+  );
+  const newToLocal = (commit: Commit) =>
+    !localShas.has(commit.sha) &&
+    !localIds.has(originIdOfSha.get(commit.sha) ?? '');
+  const originCopyOf = (commit: Commit) =>
+    originShas.has(commit.sha)
+      ? undefined
+      : originShaById.get(localIdOfSha.get(commit.sha) ?? '');
+  const notOnOrigin = (commit: Commit) =>
+    !originShas.has(commit.sha) && !originCopyOf(commit);
 
   subheading('Branches');
   const { todo, sequence, pick } = newTodo();
@@ -752,33 +1161,58 @@ const syncStack = (apply: boolean) => {
     if (remote) belowRemote = remote;
 
     const newCount = fromOrigin.filter(newToLocal).length;
-    newFromOrigin += fromOrigin.filter((commit) => !localShas.has(commit.sha)).length;
-    if (!remote) attention(`${cyan(branch)}  not on origin: ${countOf(carried.length, 'commit')} replayed`);
-    else if (!newCount && !replaced.length && !carried.length) good(`${cyan(branch)}  in sync with ${remote}`);
+    newFromOrigin += fromOrigin.filter(
+      (commit) => !localShas.has(commit.sha),
+    ).length;
+    if (!remote)
+      attention(
+        `${cyan(branch)}  not on origin: ${countOf(carried.length, 'commit')} replayed`,
+      );
+    else if (!newCount && !replaced.length && !carried.length)
+      good(`${cyan(branch)}  in sync with ${remote}`);
     else {
-      const parts = [`${newCount} new from origin`, `${replaced.length} replaced by origin's copy`, `${carried.length} kept local`];
+      const parts = [
+        `${newCount} new from origin`,
+        `${replaced.length} replaced by origin's copy`,
+        `${carried.length} kept local`,
+      ];
       console.log(`${cyan(branch)}  ${remote}  ${parts.join(' · ')}`);
-      for (const commit of carried) console.log(`  ${yellow('local')}${commitLine(commit)}`);
+      for (const commit of carried)
+        console.log(`  ${yellow('local')}${commitLine(commit)}`);
     }
-    const reworded = replaced.filter((commit) => messageAndAuthorOf(commit.sha) !== messageAndAuthorOf(originCopyOf(commit)!));
+    const reworded = replaced.filter(
+      (commit) =>
+        messageAndAuthorOf(commit.sha) !==
+        messageAndAuthorOf(originCopyOf(commit)!),
+    );
     if (reworded.length) {
       findings++;
-      attention(`${countOf(reworded.length, 'commit')} reworded locally; syncing drops that, so push instead`);
+      attention(
+        `${countOf(reworded.length, 'commit')} reworded locally; syncing drops that, so push instead`,
+      );
     } else if (replaced.length) {
-      good(`${countOf(replaced.length, 'commit')} only rebased locally; syncing is safe`);
+      good(
+        `${countOf(replaced.length, 'commit')} only rebased locally; syncing is safe`,
+      );
     }
   }
   const pendingReplaced = pending.filter((commit) => originCopyOf(commit));
   const pendingKept = pending.filter(notOnOrigin);
   for (const commit of pendingKept) pick(commit);
   dropped.push(...pendingReplaced);
-  const replacedNote = pendingReplaced.length ? `, ${pendingReplaced.length} replaced by origin's copy` : '';
-  console.log(`${cyan(wip)}  ${countOf(pendingKept.length, 'commit')} replayed${replacedNote}; its own origin copy is left alone`);
+  const replacedNote = pendingReplaced.length
+    ? `, ${pendingReplaced.length} replaced by origin's copy`
+    : '';
+  console.log(
+    `${cyan(wip)}  ${countOf(pendingKept.length, 'commit')} replayed${replacedNote}; its own origin copy is left alone`,
+  );
 
   subheading(`Origin against ${base}`);
   if (onto !== fork && isAncestor(onto, fork)) {
     const lost = commitsIn(`${onto}..${fork}`);
-    console.log(`syncing moves the stack back onto origin's base, taking ${countOf(lost.length, 'commit')} of ${base} out from under it:`);
+    console.log(
+      `syncing moves the stack back onto origin's base, taking ${countOf(lost.length, 'commit')} of ${base} out from under it:`,
+    );
     for (const commit of lost) console.log(commitLine(commit));
   }
   // Branches above the lowest conflicting one carry its conflict, so only that one is listed.
@@ -786,12 +1220,15 @@ const syncStack = (apply: boolean) => {
   for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
     const merged = mergeTree(onto, base, remote);
     if (merged.ok) continue;
-    attention(`${remote} conflicts with ${base}, and syncing keeps that; rebase onto ${base} and push to fix it:`);
+    attention(
+      `${remote} conflicts with ${base}, and syncing keeps that; rebase onto ${base} and push to fix it:`,
+    );
     for (const file of merged.files) console.log(`    ${file}`);
     mergesCleanly = false;
     break;
   }
-  if (mergesCleanly) good(`origin's stack merges into ${base} without conflicts`);
+  if (mergesCleanly)
+    good(`origin's stack merges into ${base} without conflicts`);
 
   if (!cut.length && !dropped.length && !newFromOrigin) {
     console.log('');
@@ -804,12 +1241,28 @@ const syncStack = (apply: boolean) => {
   if (simulation.conflicts.length) {
     findings++;
     reportConflicts(simulation, onto, '', landingBranches(todo, wip));
-    console.log('\nrerere may already hold resolutions for these; the preview cannot tell.');
+    console.log(
+      '\nrerere may already hold resolutions for these; the preview cannot tell.',
+    );
   } else {
     good(`all ${simulation.picks} picks apply cleanly in memory`);
-    const newTop = picksUpToTop ? simulation.tipAfterPick[picksUpToTop - 1] : onto;
-    const sameAboveTop = sameNetChange(`${topBranch}..${wip}`, topBranch, wip, newTop, simulation.tip, topBranch);
-    const sameTip = sameTipOutsideOrigin(tipOf(topBranch), wip, newTop, simulation.tip);
+    const newTop = picksUpToTop
+      ? simulation.tipAfterPick[picksUpToTop - 1]
+      : onto;
+    const sameAboveTop = sameNetChange(
+      `${topBranch}..${wip}`,
+      topBranch,
+      wip,
+      newTop,
+      simulation.tip,
+      topBranch,
+    );
+    const sameTip = sameTipOutsideOrigin(
+      tipOf(topBranch),
+      wip,
+      newTop,
+      simulation.tip,
+    );
     if (!sameAboveTop || !sameTip) findings++;
     if (unclearCuts && treeOf(simulation.tip) === treeOf(wip)) {
       good(`so the cut branches lose nothing, whatever their checks above say`);
@@ -820,28 +1273,52 @@ const syncStack = (apply: boolean) => {
 
   subheading('Conclusion');
   if (findings) attention('some of it needs a look by hand; see above');
-  else good(`every local commit is on origin or replayed on top, and ${countOf(dropped.length, 'commit')} give way to origin's copy or the base`);
+  else
+    good(
+      `every local commit is on origin or replayed on top, and ${countOf(dropped.length, 'commit')} give way to origin's copy or the base`,
+    );
   if (!apply) {
     if (findings) process.exit(1);
     console.log('To do it: stack-plan sync --apply');
     return;
   }
   if (findings && !rest.includes('--anyway')) {
-    console.log('\nNothing rewritten. To sync anyway: stack-plan sync --apply -f');
+    console.log(
+      '\nNothing rewritten. To sync anyway: stack-plan sync --apply -f',
+    );
     process.exit(1);
   }
 
   ensurePlanFile(wip);
   recordPreRebase(tipOf(wip), []);
-  writeHeader(SYNC_PREFIX, [onto, fork, tipOf(topBranch), tipOf(topRemote), topBranch, ...cut].join(' '));
+  writeHeader(
+    SYNC_PREFIX,
+    [onto, fork, tipOf(topBranch), tipOf(topRemote), topBranch, ...cut].join(
+      ' ',
+    ),
+  );
   const drops = dropped.map((commit) => `drop ${commit.sha} ${commit.subject}`);
-  const syncTodo = [...(drops.length ? ["# on origin under another SHA, or merged into the base", ...drops, ''] : []), ...todo];
+  const syncTodo = [
+    ...(drops.length
+      ? ['# on origin under another SHA, or merged into the base', ...drops, '']
+      : []),
+    ...todo,
+  ];
   // Rebasing from the fork makes git's todo exactly the local commits, so the plan accounts for each one.
-  runRebase(syncTodo, ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', onto, fork], [...originShas]);
+  runRebase(
+    syncTodo,
+    ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', onto, fork],
+    [...originShas],
+  );
 };
 
 // Prints commits under their branch, in stack order.
-const printByBranch = (order: string[], branchOf: (commit: Commit) => string, commits: Commit[], label = cyan) => {
+const printByBranch = (
+  order: string[],
+  branchOf: (commit: Commit) => string,
+  commits: Commit[],
+  label = cyan,
+) => {
   for (const branch of order) {
     const group = commits.filter((commit) => branchOf(commit) === branch);
     if (!group.length) continue;
@@ -850,7 +1327,8 @@ const printByBranch = (order: string[], branchOf: (commit: Commit) => string, co
   }
 };
 
-const pickLine = (commit: Commit, marker = '') => `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
+const pickLine = (commit: Commit, marker = '') =>
+  `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
 
 type PullRequest = { number: number; base: string };
 
@@ -864,10 +1342,33 @@ const openPullRequests = (): Map<string, PullRequest> | undefined => {
   }
   const slug = origin.replace(/\.git$/, '').replace(/^.*github\.com[:/]/, '');
   const fields = ['--json', 'number,headRefName,baseRefName'];
-  const result = spawnSync('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '500', ...fields], { encoding: 'utf8' });
+  const result = spawnSync(
+    'gh',
+    [
+      'pr',
+      'list',
+      '--repo',
+      slug,
+      '--state',
+      'open',
+      '--limit',
+      '500',
+      ...fields,
+    ],
+    { encoding: 'utf8' },
+  );
   if (result.status !== 0) return undefined;
-  const rows = JSON.parse(result.stdout) as { number: number; headRefName: string; baseRefName: string }[];
-  return new Map(rows.map((row) => [row.headRefName, { number: row.number, base: row.baseRefName }]));
+  const rows = JSON.parse(result.stdout) as {
+    number: number;
+    headRefName: string;
+    baseRefName: string;
+  }[];
+  return new Map(
+    rows.map((row) => [
+      row.headRefName,
+      { number: row.number, base: row.baseRefName },
+    ]),
+  );
 };
 
 const exportPlan = () => {
@@ -876,7 +1377,9 @@ const exportPlan = () => {
   const { line, branches: current, pending, own } = readStack(wip);
   // An order saved but not yet rebased is exported as planned, like the notes are.
   const branches = desiredOrder(current);
-  const sections = new Map<string, Commit[]>([...branches, wip].map((branch) => [branch, []]));
+  const sections = new Map<string, Commit[]>(
+    [...branches, wip].map((branch) => [branch, []]),
+  );
   const untagged: Commit[] = [];
   const strayNotes: Commit[] = [];
   for (const commit of pending) {
@@ -889,8 +1392,12 @@ const exportPlan = () => {
   }
 
   // The pre-rebase tip belongs to the last rebase, not to this export, so it carries over.
-  const lastPreRebase = existsSync(planPath()) ? readHeader(PRE_REBASE_PREFIX) : undefined;
-  const lastFolded = existsSync(planPath()) ? readHeader(FOLDED_PREFIX) : undefined;
+  const lastPreRebase = existsSync(planPath())
+    ? readHeader(PRE_REBASE_PREFIX)
+    : undefined;
+  const lastFolded = existsSync(planPath())
+    ? readHeader(FOLDED_PREFIX)
+    : undefined;
   const out = [
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
@@ -918,21 +1425,39 @@ const exportPlan = () => {
       stopAt = Math.min(stopAt, i);
       return;
     }
-    if (stopAt < i) prWarnings.push(`#${pull.number} (${branch}) sits above a branch with no PR`);
+    if (stopAt < i)
+      prWarnings.push(
+        `#${pull.number} (${branch}) sits above a branch with no PR`,
+      );
     const below = i ? branches[i - 1] : base.replace(/^origin\//, '');
-    if (pull.base !== below) prWarnings.push(`#${pull.number} (${branch}) targets ${pull.base}, not ${below}`);
+    if (pull.base !== below)
+      prWarnings.push(
+        `#${pull.number} (${branch}) targets ${pull.base}, not ${below}`,
+      );
   });
 
   // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
   branches.forEach((branch, i) => {
     const marker = branchMarker(branch, current, branches);
     const inBranch = full ? (own.get(branch) ?? []) : [];
-    const moving = sections.get(branch)!.map((commit) => pickLine(commit, `${MOVED_MARKER} `));
+    const moving = sections
+      .get(branch)!
+      .map((commit) => pickLine(commit, `${MOVED_MARKER} `));
     if (pulls && i === stopAt) out.push(PRS_STOP_MARKER);
-    out.push(...(marker ? [marker] : []), ...inBranch.map((commit) => pickLine(commit)), ...moving, `update-ref refs/heads/${branch}\n`);
+    out.push(
+      ...(marker ? [marker] : []),
+      ...inBranch.map((commit) => pickLine(commit)),
+      ...moving,
+      `update-ref refs/heads/${branch}\n`,
+    );
   });
   if (pulls && stopAt === branches.length) out.push(PRS_STOP_MARKER);
-  out.push(...sections.get(wip)!.map((commit) => pickLine(commit)), UNTAGGED_MARKER, ...untagged.map((commit) => pickLine(commit)), '');
+  out.push(
+    ...sections.get(wip)!.map((commit) => pickLine(commit)),
+    UNTAGGED_MARKER,
+    ...untagged.map((commit) => pickLine(commit)),
+    '',
+  );
 
   const path = planPath();
   mkdirSync(dirname(path), { recursive: true });
@@ -941,11 +1466,19 @@ const exportPlan = () => {
 
   heading(full ? 'Export (full)' : 'Export');
   console.log(`${bold('wrote')}  ${path}`);
-  const inBranches = full ? ` · ${line.length - pending.length} in branches` : '';
-  console.log(`${pending.length} waiting · ${pending.length - untagged.length} placed${inBranches} · ${branches.length} stack branches`);
-  if (untagged.length) attention(`${untagged.length} untagged, below the marker`);
+  const inBranches = full
+    ? ` · ${line.length - pending.length} in branches`
+    : '';
+  console.log(
+    `${pending.length} waiting · ${pending.length - untagged.length} placed${inBranches} · ${branches.length} stack branches`,
+  );
+  if (untagged.length)
+    attention(`${untagged.length} untagged, below the marker`);
   else good('every waiting commit is placed');
-  for (const commit of strayNotes) attention(`note "${commit.note}" names no stack branch:\n${commitLine(commit)}`);
+  for (const commit of strayNotes)
+    attention(
+      `note "${commit.note}" names no stack branch:\n${commitLine(commit)}`,
+    );
   if (!pulls) attention('could not list PRs with gh; no PR marker in the file');
   for (const warning of prWarnings) attention(warning);
 };
@@ -978,7 +1511,8 @@ const savePlan = () => {
       if (!line || line.startsWith('#')) return;
       const [verb, arg = ''] = line.split(/\s+/);
       if (verb === 'update-ref') {
-        if (pastMarker) errors.push(`${where}: update-ref below the untagged marker`);
+        if (pastMarker)
+          errors.push(`${where}: update-ref below the untagged marker`);
         const branch = arg.replace(/^refs\/heads\//, '');
         updateRefs.push(branch);
         steps.push({ updateRef: branch });
@@ -986,14 +1520,26 @@ const savePlan = () => {
         held = [];
       } else if (Object.hasOwn(VERBS, verb)) {
         const kind = VERBS[verb];
-        const commit = listable.find((candidate) => candidate.sha.startsWith(arg));
+        const commit = listable.find((candidate) =>
+          candidate.sha.startsWith(arg),
+        );
         const scope = full ? `in ${base}..${wip}` : `waiting on ${wip}`;
-        if (kind !== 'pick' && !full) errors.push(`${where}: ${kind} needs full mode (stack-plan mode full)`);
+        if (kind !== 'pick' && !full)
+          errors.push(
+            `${where}: ${kind} needs full mode (stack-plan mode full)`,
+          );
         // Folding across an update-ref would leave the branch on the commit before the fold.
-        else if (kind !== 'pick' && !(steps.at(-1) && 'pick' in steps.at(-1)!)) {
-          errors.push(`${where}: ${kind} must follow a pick in the same branch`);
-        } else if (!commit) errors.push(`${where}: ${arg} is not ${scope}; export again`);
-        else if (listed.has(commit.sha)) errors.push(`${where}: ${arg} is listed twice`);
+        else if (
+          kind !== 'pick' &&
+          !(steps.at(-1) && 'pick' in steps.at(-1)!)
+        ) {
+          errors.push(
+            `${where}: ${kind} must follow a pick in the same branch`,
+          );
+        } else if (!commit)
+          errors.push(`${where}: ${arg} is not ${scope}; export again`);
+        else if (listed.has(commit.sha))
+          errors.push(`${where}: ${arg} is listed twice`);
         else {
           listed.add(commit.sha);
           steps.push({ pick: commit, verb: kind });
@@ -1001,14 +1547,19 @@ const savePlan = () => {
           if (pastMarker) targets.set(commit.sha, undefined);
           else held.push(commit.sha);
         }
-      } else errors.push(`${where}: expected pick, fixup, squash or update-ref, got "${verb}"`);
+      } else
+        errors.push(
+          `${where}: expected pick, fixup, squash or update-ref, got "${verb}"`,
+        );
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
   // A folded commit stops existing, so its note goes rather than piling onto the commit it folds into.
   for (const sha of folded) targets.set(sha, undefined);
   if (full !== fullMode()) {
-    errors.push(`the plan was exported in ${full ? 'full' : 'short'} mode, and the mode is now ${full ? 'short' : 'full'}; export again`);
+    errors.push(
+      `the plan was exported in ${full ? 'full' : 'short'} mode, and the mode is now ${full ? 'short' : 'full'}; export again`,
+    );
   }
   const created = updateRefs.filter((branch) => !branches.includes(branch));
   const recorded = requireHeader(EXPORTED_AT_PREFIX, 'export again');
@@ -1018,28 +1569,46 @@ const savePlan = () => {
   const rewritten = recorded !== current && !isAncestor(recorded, current);
   if (rewritten) {
     // Every SHA in the file is gone, so per-line errors would only repeat this one.
-    errors.splice(0, errors.length, `${wip} was rewritten since export (was ${recorded.slice(0, 10)}); export again`);
+    errors.splice(
+      0,
+      errors.length,
+      `${wip} was rewritten since export (was ${recorded.slice(0, 10)}); export again`,
+    );
   } else {
-    for (const sha of git('rev-list', '--first-parent', `${recorded}..${current}`).split('\n')) {
+    for (const sha of git(
+      'rev-list',
+      '--first-parent',
+      `${recorded}..${current}`,
+    ).split('\n')) {
       if (sha) addedSinceExport.add(sha);
     }
     for (const branch of branches) {
-      if (!updateRefs.includes(branch)) errors.push(`update-ref ${branch} is missing; every stack branch keeps its line`);
+      if (!updateRefs.includes(branch))
+        errors.push(
+          `update-ref ${branch} is missing; every stack branch keeps its line`,
+        );
     }
     for (const branch of new Set(updateRefs)) {
-      if (updateRefs.indexOf(branch) !== updateRefs.lastIndexOf(branch)) errors.push(`update-ref ${branch} is listed twice`);
+      if (updateRefs.indexOf(branch) !== updateRefs.lastIndexOf(branch))
+        errors.push(`update-ref ${branch} is listed twice`);
     }
     for (const branch of created) {
-      if (!gitSucceeds('check-ref-format', '--branch', branch)) errors.push(`${branch} is not a valid branch name`);
-      else if (branchExists(branch)) errors.push(`${branch} already exists outside the stack`);
+      if (!gitSucceeds('check-ref-format', '--branch', branch))
+        errors.push(`${branch} is not a valid branch name`);
+      else if (branchExists(branch))
+        errors.push(`${branch} already exists outside the stack`);
     }
     const lowest = updateRefs[0];
     if (created.includes(lowest) && ![...targets.values()].includes(lowest)) {
-      errors.push(`${lowest} is new and empty at the bottom of the stack, where git cannot tell it from ${base}`);
+      errors.push(
+        `${lowest} is new and empty at the bottom of the stack, where git cannot tell it from ${base}`,
+      );
     }
     for (const commit of listable) {
       if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
-        errors.push(`${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`);
+        errors.push(
+          `${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`,
+        );
       }
     }
   }
@@ -1051,41 +1620,67 @@ const savePlan = () => {
     process.exit(1);
   }
 
-  const toTag = pending.filter((commit) => listed.has(commit.sha) && (targets.get(commit.sha) ?? '') !== commit.note);
+  const toTag = pending.filter(
+    (commit) =>
+      listed.has(commit.sha) && (targets.get(commit.sha) ?? '') !== commit.note,
+  );
   const tagged = toTag.filter((commit) => targets.get(commit.sha));
   const untagged = toTag.filter((commit) => !targets.get(commit.sha));
-  printByBranch([...updateRefs, wip], (commit) => targets.get(commit.sha) ?? '', tagged, (branch) =>
-    cyan(branch === wip ? `${branch} (stays)` : branch),
+  printByBranch(
+    [...updateRefs, wip],
+    (commit) => targets.get(commit.sha) ?? '',
+    tagged,
+    (branch) => cyan(branch === wip ? `${branch} (stays)` : branch),
   );
   if (untagged.length) {
     console.log(yellow('untag'));
     for (const commit of untagged) console.log(commitLine(commit));
   }
   if (!dryRun) {
-    for (const commit of tagged) git('notes', `--ref=${NOTES_REF}`, 'add', '-f', '-m', targets.get(commit.sha)!, commit.sha);
-    for (const commit of untagged) git('notes', `--ref=${NOTES_REF}`, 'remove', commit.sha);
+    for (const commit of tagged)
+      git(
+        'notes',
+        `--ref=${NOTES_REF}`,
+        'add',
+        '-f',
+        '-m',
+        targets.get(commit.sha)!,
+        commit.sha,
+      );
+    for (const commit of untagged)
+      git('notes', `--ref=${NOTES_REF}`, 'remove', commit.sha);
   }
-  if (toTag.length) good(`${toTag.length} notes ${dryRun ? 'would change' : 'changed'}`);
+  if (toTag.length)
+    good(`${toTag.length} notes ${dryRun ? 'would change' : 'changed'}`);
   else good('notes already match the plan');
 
   printOrderChanges(branches, updateRefs);
-  if (updateRefs.join(' ') !== readConfig(ORDER_KEY) || created.join(' ') !== readConfig(NEW_KEY)) {
+  if (
+    updateRefs.join(' ') !== readConfig(ORDER_KEY) ||
+    created.join(' ') !== readConfig(NEW_KEY)
+  ) {
     if (!dryRun) {
       git('config', ORDER_KEY, updateRefs.join(' '));
       if (created.length) git('config', NEW_KEY, created.join(' '));
       else if (readConfig(NEW_KEY)) git('config', '--unset', NEW_KEY);
     }
-    good(`stack order ${dryRun ? 'would be saved' : 'saved'} in git config ${ORDER_KEY}`);
+    good(
+      `stack order ${dryRun ? 'would be saved' : 'saved'} in git config ${ORDER_KEY}`,
+    );
   }
 
-  const unplaced = pending.filter((commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha));
+  const unplaced = pending.filter(
+    (commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha),
+  );
   if (unplaced.length) {
     attention('left untagged, committed after export:');
     for (const commit of unplaced) console.log(commitLine(commit));
   }
   if (current !== recorded) {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
-    console.log(`${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`);
+    console.log(
+      `${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`,
+    );
   }
   steps.push(...unplaced.map((pick) => ({ pick, verb: 'pick' as const })));
   return { targets, order: updateRefs, steps: full ? steps : undefined };
@@ -1096,29 +1691,53 @@ type Planned = ReturnType<typeof savePlan>;
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
 const verifyRebase = () => {
   const wip = currentBranch();
-  const recorded = requireHeader(PRE_REBASE_PREFIX, 'stack-plan apply records one when it rebases');
+  const recorded = requireHeader(
+    PRE_REBASE_PREFIX,
+    'stack-plan apply records one when it rebases',
+  );
   const short = yellow(recorded.slice(0, 10));
   heading('Verify');
 
   // After a cut, the old range starts at the cut tip and the new one at the base the rest moved onto.
-  const [cutTip, newBase, ...branchesCutByCut] = words(readHeader(CUT_PREFIX) ?? '');
-  const [syncOnto, syncFork, syncOldTop, syncOrigin, syncTop, ...branchesCutBySync] = words(readHeader(SYNC_PREFIX) ?? '');
+  const [cutTip, newBase, ...branchesCutByCut] = words(
+    readHeader(CUT_PREFIX) ?? '',
+  );
+  const [
+    syncOnto,
+    syncFork,
+    syncOldTop,
+    syncOrigin,
+    syncTop,
+    ...branchesCutBySync
+  ] = words(readHeader(SYNC_PREFIX) ?? '');
   const baseMoved = Boolean(cutTip || syncOnto);
   const oldFrom = syncFork ?? cutTip ?? base;
   const newFrom = syncOnto ?? newBase ?? base;
   const cutBranches = syncOnto ? branchesCutBySync : branchesCutByCut;
 
   // Both run before anything prints, so the details come first and the verdict ends the output.
-  const rangeArgs = ['range-diff', colourOn(process.stdout) ? '--color=always' : '--no-color', `${oldFrom}..${recorded}`, `${newFrom}..${wip}`];
+  const rangeArgs = [
+    'range-diff',
+    colourOn(process.stdout) ? '--color=always' : '--no-color',
+    `${oldFrom}..${recorded}`,
+    `${newFrom}..${wip}`,
+  ];
   const statArgs = ['diff', '--stat', recorded, wip];
   const entries = splitRangeDiff(gitQuiet(...rangeArgs));
   const stat = baseMoved ? '' : gitQuiet(...statArgs).trimEnd();
   // range-diff pairs a fold's commits unpredictably, so every entry from a planned fold is set apart instead.
-  const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) => pair.split('>'));
+  const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) =>
+    pair.split('>'),
+  );
   const foldShas = foldGroups.flat();
-  const foldSubjects = new Set(foldGroups.map(([, target]) => gitQuiet('log', '-1', '--format=%s', target).trim()));
+  const foldSubjects = new Set(
+    foldGroups.map(([, target]) =>
+      gitQuiet('log', '-1', '--format=%s', target).trim(),
+    ),
+  );
   for (const entry of entries) {
-    const fromOld = entry.oldSha && foldShas.some((sha) => sha.startsWith(entry.oldSha!));
+    const fromOld =
+      entry.oldSha && foldShas.some((sha) => sha.startsWith(entry.oldSha!));
     const asNew = entry.kind === '>' && foldSubjects.has(entry.subject);
     if (entry.kind !== '=' && (fromOld || asNew)) entry.kind = 'folded';
   }
@@ -1126,15 +1745,22 @@ const verifyRebase = () => {
   // After a sync, origin's copy holds the change of a commit it replaced.
   const holdsDroppedChanges = syncOrigin ?? newBase;
   // sync checked each cut branch whole, since a squash merge holds no single commit of it.
-  const onSyncCutBranch = (sha: string) => syncOnto !== undefined && cutBranches.some((branch) => isAncestor(sha, branch));
+  const onSyncCutBranch = (sha: string) =>
+    syncOnto !== undefined &&
+    cutBranches.some((branch) => isAncestor(sha, branch));
   if (baseMoved) {
     for (const entry of entries.filter((candidate) => candidate.kind === '<')) {
       if (onSyncCutBranch(entry.oldSha)) {
         entry.kind = 'landed';
         continue;
       }
-      const merged = mergeTree(`${entry.oldSha}^`, holdsDroppedChanges, entry.oldSha);
-      if (merged.ok && merged.tree === treeOf(holdsDroppedChanges)) entry.kind = 'landed';
+      const merged = mergeTree(
+        `${entry.oldSha}^`,
+        holdsDroppedChanges,
+        entry.oldSha,
+      );
+      if (merged.ok && merged.tree === treeOf(holdsDroppedChanges))
+        entry.kind = 'landed';
     }
   }
   if (syncOrigin) {
@@ -1143,25 +1769,38 @@ const verifyRebase = () => {
     }
   }
 
-  const worthReading = entries.filter((entry) => ['!', '<', '>'].includes(entry.kind));
+  const worthReading = entries.filter((entry) =>
+    ['!', '<', '>'].includes(entry.kind),
+  );
   if (worthReading.length) {
     subheading('Range diff changes');
-    console.log(worthReading.map((entry) => entry.lines.join('\n').trimEnd()).join('\n\n'));
+    console.log(
+      worthReading
+        .map((entry) => entry.lines.join('\n').trimEnd())
+        .join('\n\n'),
+    );
   }
 
   subheading('Conclusion');
   traceGit(rangeArgs);
-  const count = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind).length;
+  const count = (kind: Entry['kind']) =>
+    entries.filter((entry) => entry.kind === kind).length;
   const foldedCount = count('folded') ? ` · ${count('folded')} from folds` : '';
-  const landedCount = count('landed') ? ` · ${count('landed')} already in the base` : '';
-  const originCount = count('origin') ? ` · ${count('origin')} from origin` : '';
+  const landedCount = count('landed')
+    ? ` · ${count('landed')} already in the base`
+    : '';
+  const originCount = count('origin')
+    ? ` · ${count('origin')} from origin`
+    : '';
   const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}${originCount}`;
   if (count('<') || count('>')) bad(`${summary}; read the entries above`);
   else if (count('!')) attention(`${summary}; read the changed entries above`);
   else good(summary);
   const contextOnly = entries.filter((entry) => entry.kind === 'context');
   if (contextOnly.length) {
-    console.log(`\nOnly the surrounding lines moved, the change itself is the same:`);
+    console.log(
+      `\nOnly the surrounding lines moved, the change itself is the same:`,
+    );
     for (const entry of contextOnly) console.log(entry.lines[0]);
   }
   const changed = entries.filter((entry) => entry.kind === '!');
@@ -1174,12 +1813,16 @@ const verifyRebase = () => {
   }
   const foldedEntries = entries.filter((entry) => entry.kind === 'folded');
   if (foldedEntries.length) {
-    console.log(`\nFrom a planned fixup or squash, so expected; the tree check below still covers them:`);
+    console.log(
+      `\nFrom a planned fixup or squash, so expected; the tree check below still covers them:`,
+    );
     for (const entry of foldedEntries) console.log(entry.lines[0]);
   }
   const landedEntries = entries.filter((entry) => entry.kind === 'landed');
   if (landedEntries.length) {
-    console.log(`\nDropped because the new base or origin already holds the change, so nothing is lost:`);
+    console.log(
+      `\nDropped because the new base or origin already holds the change, so nothing is lost:`,
+    );
     for (const entry of landedEntries) console.log(entry.lines[0]);
   }
   const originEntries = entries.filter((entry) => entry.kind === 'origin');
@@ -1187,7 +1830,9 @@ const verifyRebase = () => {
     console.log(`\nTaken from origin, which you did not have locally:`);
     for (const entry of originEntries) console.log(entry.lines[0]);
   }
-  const droppedOrAdded = entries.filter((entry) => entry.kind === '<' || entry.kind === '>');
+  const droppedOrAdded = entries.filter(
+    (entry) => entry.kind === '<' || entry.kind === '>',
+  );
   if (droppedOrAdded.length) {
     console.log(`\nDropped (<) or added (>), full entries above:`);
     for (const entry of droppedOrAdded) console.log(entry.lines[0]);
@@ -1196,44 +1841,85 @@ const verifyRebase = () => {
   console.log('');
   // A cut or sync moves the rest onto a base that has changed, so the tree cannot match; the net change above it still must.
   const syncedOk = () => {
-    const sameAboveTop = sameNetChange(`${syncOldTop.slice(0, 10)}..${recorded.slice(0, 10)}`, syncOldTop, recorded, tipOf(syncTop), wip, syncTop);
-    return sameTipOutsideOrigin(syncOldTop, recorded, tipOf(syncTop), wip) && sameAboveTop;
+    const sameAboveTop = sameNetChange(
+      `${syncOldTop.slice(0, 10)}..${recorded.slice(0, 10)}`,
+      syncOldTop,
+      recorded,
+      tipOf(syncTop),
+      wip,
+      syncTop,
+    );
+    return (
+      sameTipOutsideOrigin(syncOldTop, recorded, tipOf(syncTop), wip) &&
+      sameAboveTop
+    );
   };
   const treeOk = syncOnto
     ? syncedOk()
     : cutTip
-      ? sameNetChange(`${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`, cutTip, recorded, newBase, wip, newBase.slice(0, 10))
+      ? sameNetChange(
+          `${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`,
+          cutTip,
+          recorded,
+          newBase,
+          wip,
+          newBase.slice(0, 10),
+        )
       : !stat;
   if (!baseMoved) traceGit(statArgs);
   if (stat) {
     bad(`tree differs from the pre-rebase tip ${short}`);
     console.log(stat);
     console.log(`To put the pre-rebase tree back as uncommitted changes:`);
-    console.log(`  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`);
+    console.log(
+      `  git restore --source=${recorded.slice(0, 10)} --staged --worktree :/`,
+    );
   } else if (!baseMoved) good(`tree matches the pre-rebase tip ${short}`);
   if (!treeOk || droppedOrAdded.length) return;
 
   const order = words(readConfig(ORDER_KEY));
   if (cutBranches.some((branch) => order.includes(branch))) {
-    if (!dryRun) git('config', ORDER_KEY, order.filter((branch) => !cutBranches.includes(branch)).join(' '));
-    good(`cut branches ${dryRun ? 'would be removed' : 'removed'} from ${ORDER_KEY}: ${cutBranches.join(', ')}`);
+    if (!dryRun)
+      git(
+        'config',
+        ORDER_KEY,
+        order.filter((branch) => !cutBranches.includes(branch)).join(' '),
+      );
+    good(
+      `cut branches ${dryRun ? 'would be removed' : 'removed'} from ${ORDER_KEY}: ${cutBranches.join(', ')}`,
+    );
   }
   const leftOver = cutBranches.filter(branchExists);
-  if (leftOver.length) console.log(`The cut branches are still there. To delete them:\n  git branch -D ${leftOver.join(' ')}`);
+  if (leftOver.length)
+    console.log(
+      `The cut branches are still there. To delete them:\n  git branch -D ${leftOver.join(' ')}`,
+    );
 
   const waitingToCreate = words(readConfig(NEW_KEY));
   if (waitingToCreate.length && waitingToCreate.every(branchExists)) {
     if (!dryRun) git('config', '--unset', NEW_KEY);
-    good(`new branches ${dryRun ? 'would be marked' : 'marked'} created: ${waitingToCreate.join(', ')}`);
+    good(
+      `new branches ${dryRun ? 'would be marked' : 'marked'} created: ${waitingToCreate.join(', ')}`,
+    );
   }
 
   // A note on a commit no longer waiting on wip has done its job; the pre-rebase commits keep their copies.
   const { line, pending } = readStack(wip);
   const waiting = new Set(pending.map((commit) => commit.sha));
-  const landed = line.filter((commit) => commit.note && !waiting.has(commit.sha));
+  const landed = line.filter(
+    (commit) => commit.note && !waiting.has(commit.sha),
+  );
   if (!landed.length) return;
-  if (!dryRun) git('notes', `--ref=${NOTES_REF}`, 'remove', ...landed.map((commit) => commit.sha));
-  good(`${landed.length} notes ${dryRun ? 'would be removed' : 'removed'} from commits now in their branch`);
+  if (!dryRun)
+    git(
+      'notes',
+      `--ref=${NOTES_REF}`,
+      'remove',
+      ...landed.map((commit) => commit.sha),
+    );
+  good(
+    `${landed.length} notes ${dryRun ? 'would be removed' : 'removed'} from commits now in their branch`,
+  );
 };
 
 type Entry = {
@@ -1245,18 +1931,31 @@ type Entry = {
 };
 
 // Header lines look like "12:  abc1234 = 14:  def5678 subject"; = means the patch is unchanged.
-const RANGE_DIFF_HEADER = /^\s*(?:\d+|-):\s+(\S+)\s+([=!<>])\s+(?:\d+|-):\s+(\S+)\s*(.*)$/;
+const RANGE_DIFF_HEADER =
+  /^\s*(?:\d+|-):\s+(\S+)\s+([=!<>])\s+(?:\d+|-):\s+(\S+)\s*(.*)$/;
 
 // Splits range-diff output per commit, and marks a ! entry "context" when only its context lines differ.
 const splitRangeDiff = (output: string) => {
   const entries: Entry[] = [];
   for (const line of output.split('\n')) {
-    const [, oldSha, marker, newSha, subject] = RANGE_DIFF_HEADER.exec(stripColour(line)) ?? [];
-    if (marker) entries.push({ kind: marker as Entry['kind'], oldSha, newSha, subject, lines: [line] });
+    const [, oldSha, marker, newSha, subject] =
+      RANGE_DIFF_HEADER.exec(stripColour(line)) ?? [];
+    if (marker)
+      entries.push({
+        kind: marker as Entry['kind'],
+        oldSha,
+        newSha,
+        subject,
+        lines: [line],
+      });
     else entries.at(-1)?.lines.push(line);
   }
   for (const entry of entries) {
-    if (entry.kind === '!' && onlyContextDiffers(entry.lines.slice(1).map(stripColour))) entry.kind = 'context';
+    if (
+      entry.kind === '!' &&
+      onlyContextDiffers(entry.lines.slice(1).map(stripColour))
+    )
+      entry.kind = 'context';
   }
   return entries;
 };
@@ -1292,22 +1991,36 @@ const newTodo = () => {
 
 const branchMarker = (branch: string, branches: string[], order: string[]) => {
   const below = order[order.indexOf(branch) - 1] ?? base;
-  if (!branches.includes(branch)) return `# ${NEW_BRANCH_MARKER} ${branch}, above ${below}`;
-  if (movedBranches(branches, order).includes(branch)) return `# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`;
+  if (!branches.includes(branch))
+    return `# ${NEW_BRANCH_MARKER} ${branch}, above ${below}`;
+  if (movedBranches(branches, order).includes(branch))
+    return `# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`;
 };
 
 // Short mode: each branch keeps its own commits as a block, and waiting commits join the branch their note names.
 const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   const { branches, pending, own } = readStack(wip);
   // A dry-run save writes no notes or config, so its plan stands in for them.
-  for (const commit of pending) if (planned?.targets.has(commit.sha)) commit.note = planned.targets.get(commit.sha) ?? '';
+  for (const commit of pending)
+    if (planned?.targets.has(commit.sha))
+      commit.note = planned.targets.get(commit.sha) ?? '';
   const order = planned?.order ?? desiredOrder(branches);
-  const moves = pending.filter((commit) => commit.note !== wip && order.includes(commit.note));
-  const receives = (branch: string) => moves.some((commit) => commit.note === branch);
+  const moves = pending.filter(
+    (commit) => commit.note !== wip && order.includes(commit.note),
+  );
+  const receives = (branch: string) =>
+    moves.some((commit) => commit.note === branch);
   let first = 0;
-  while (first < order.length && order[first] === branches[first] && !receives(order[first])) first++;
+  while (
+    first < order.length &&
+    order[first] === branches[first] &&
+    !receives(order[first])
+  )
+    first++;
   if (first === order.length) {
-    good(`no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`);
+    good(
+      `no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`,
+    );
     return;
   }
   // Everything below the first changed branch stays as it is.
@@ -1322,15 +2035,21 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
     const marker = branchMarker(branch, branches, order);
     if (marker) todo.push(marker);
     for (const commit of own.get(branch) ?? []) pick(commit);
-    for (const commit of moves.filter((move) => move.note === branch)) pick(commit, `${MOVED_MARKER} `);
+    for (const commit of moves.filter((move) => move.note === branch))
+      pick(commit, `${MOVED_MARKER} `);
     todo.push(`update-ref refs/heads/${branch}`, '');
   }
-  for (const commit of pending.filter((commit) => !moved.has(commit.sha))) pick(commit);
+  for (const commit of pending.filter((commit) => !moved.has(commit.sha)))
+    pick(commit);
   return { todo, sequence, rebaseBase };
 };
 
 // Full mode: the plan's own steps are the todo, from the last commit where they still match history.
-const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | undefined => {
+const fullRebase = (
+  wip: string,
+  steps: Step[],
+  planned: Planned,
+): Rebase | undefined => {
   const { line, branches, own } = readStack(wip);
   const current: Step[] = line.flatMap((commit) => [
     { pick: commit, verb: 'pick' as const },
@@ -1338,7 +2057,9 @@ const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | unde
   ]);
   const same = (a: Step, b?: Step) =>
     b !== undefined &&
-    ('pick' in a ? 'pick' in b && a.verb === 'pick' && a.pick.sha === b.pick.sha : 'updateRef' in b && a.updateRef === b.updateRef);
+    ('pick' in a
+      ? 'pick' in b && a.verb === 'pick' && a.pick.sha === b.pick.sha
+      : 'updateRef' in b && a.updateRef === b.updateRef);
   let kept = 0;
   while (kept < steps.length && same(steps[kept], current[kept])) kept++;
   // A fold needs the commit it folds into inside the todo, so the rebase starts below that commit.
@@ -1351,7 +2072,11 @@ const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | unde
   const lastCommit = lastKept && 'pick' in lastKept ? lastKept.pick : undefined;
   const rebaseBase = lastCommit?.sha ?? base;
 
-  const branchOf = new Map([...own].flatMap(([branch, commits]) => commits.map((commit) => [commit.sha, branch] as const)));
+  const branchOf = new Map(
+    [...own].flatMap(([branch, commits]) =>
+      commits.map((commit) => [commit.sha, branch] as const),
+    ),
+  );
   const was = (commit: Commit) => branchOf.get(commit.sha) ?? wip;
   const goes = (commit: Commit) => planned.targets.get(commit.sha) ?? wip;
   const foldedInto = new Map<string, Commit>();
@@ -1362,19 +2087,26 @@ const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | unde
     else foldedInto.set(step.pick.sha, into!);
   }
   const order = planned.order;
-  const moved = line.filter((commit) => !foldedInto.has(commit.sha) && was(commit) !== goes(commit));
+  const moved = line.filter(
+    (commit) => !foldedInto.has(commit.sha) && was(commit) !== goes(commit),
+  );
   printByBranch([...order, wip], goes, moved);
   for (const [sha, target] of foldedInto) {
-    console.log(`${yellow('fold')}${commitLine(line.find((commit) => commit.sha === sha)!)}\n  into${commitLine(target)}`);
+    console.log(
+      `${yellow('fold')}${commitLine(line.find((commit) => commit.sha === sha)!)}\n  into${commitLine(target)}`,
+    );
   }
   printOrderChanges(branches, order);
-  console.log(`${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : cyan(base)}`);
+  console.log(
+    `${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : cyan(base)}`,
+  );
 
   const { todo, sequence, pick } = newTodo();
   let sectionStart = 0;
   for (const step of steps.slice(kept)) {
     if ('pick' in step) {
-      const movesBranch = step.verb === 'pick' && was(step.pick) !== goes(step.pick);
+      const movesBranch =
+        step.verb === 'pick' && was(step.pick) !== goes(step.pick);
       pick(step.pick, movesBranch ? `${MOVED_MARKER} ` : '', step.verb);
       continue;
     }
@@ -1389,7 +2121,9 @@ const fullRebase = (wip: string, steps: Step[], planned: Planned): Rebase | unde
 const applyStack = (planned?: Planned, preview = dryRun) => {
   const wip = currentBranch();
   heading(preview ? 'Plan (dry run)' : 'Plan');
-  const rebase = planned?.steps ? fullRebase(wip, planned.steps, planned) : shortRebase(wip, planned);
+  const rebase = planned?.steps
+    ? fullRebase(wip, planned.steps, planned)
+    : shortRebase(wip, planned);
   if (!rebase) return;
   const { todo, sequence, rebaseBase } = rebase;
 
@@ -1400,23 +2134,41 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
   const conflicted = simulation.conflicts.length > 0;
   if (!conflicted) {
     good(`all ${simulation.picks} picks apply cleanly in memory (${took})`);
-    if (!simulation.sameTree) attention('the simulated result ends on a different tree than wip; verify will show where');
+    if (!simulation.sameTree)
+      attention(
+        'the simulated result ends on a different tree than wip; verify will show where',
+      );
   } else {
-    reportConflicts(simulation, tipOf(rebaseBase), ` (${took})`, landingBranches(todo, wip));
-    console.log('\nrerere may already hold resolutions for these; the preview cannot tell.');
+    reportConflicts(
+      simulation,
+      tipOf(rebaseBase),
+      ` (${took})`,
+      landingBranches(todo, wip),
+    );
+    console.log(
+      '\nrerere may already hold resolutions for these; the preview cannot tell.',
+    );
   }
   if (preview) return;
   if (conflicted && !rest.includes('--anyway')) {
-    console.log('\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:');
+    console.log(
+      '\nNothing rewritten. Change the plan (export, edit, apply), or resolve it by hand:',
+    );
     console.log('  stack-plan apply -f');
     process.exit(1);
   }
-  if (!existsSync(planPath())) throw new Error('No stackplan.txt to record the pre-rebase tip in; run stack-plan export first');
+  if (!existsSync(planPath()))
+    throw new Error(
+      'No stackplan.txt to record the pre-rebase tip in; run stack-plan export first',
+    );
 
   // Each fold as <folded>><target>; range-diff may report either one as dropped, so verify accepts both.
   const folded: string[] = [];
   sequence.forEach(({ commit, fold }, index) => {
-    if (fold) folded.push(`${commit.sha}>${sequence.findLast((replay, at) => at < index && !replay.fold)!.commit.sha}`);
+    if (fold)
+      folded.push(
+        `${commit.sha}>${sequence.findLast((replay, at) => at < index && !replay.fold)!.commit.sha}`,
+      );
   });
   recordPreRebase(tipOf(wip), folded);
   runRebase(todo, ['rebase', '-i', '--update-refs', rebaseBase]);
@@ -1424,12 +2176,17 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
 
 /** Runs the rebase with the planned todo in place of git's, then verifies; `adopted` may be picked though git's todo lacks them. */
 const runRebase = (todo: string[], args: string[], adopted: string[] = []) => {
-  const todoPath = join(git('rev-parse', '--absolute-git-dir').trim(), 'stack-plan-todo');
+  const todoPath = join(
+    git('rev-parse', '--absolute-git-dir').trim(),
+    'stack-plan-todo',
+  );
   writeFileSync(todoPath, todo.join('\n'));
   const reviewEditor = git('var', 'GIT_SEQUENCE_EDITOR').trim();
   const editor = `node ${shellQuote(realpathSync(process.argv[1]))} _todo`;
   heading('Rebase');
-  console.error(dimErr(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`));
+  console.error(
+    dimErr(`$ GIT_SEQUENCE_EDITOR=${shellQuote(editor)} git ${args.join(' ')}`),
+  );
   const result = spawnSync('git', args, {
     stdio: 'inherit',
     env: {
@@ -1445,8 +2202,16 @@ const runRebase = (todo: string[], args: string[], adopted: string[] = []) => {
 };
 
 const picksIn = (todo: string) =>
-  todo.split('\n').flatMap((line) => /^(?:pick|p|fixup|f|squash|s)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
-const dropsIn = (todo: string) => todo.split('\n').flatMap((line) => /^(?:drop|d)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
+  todo
+    .split('\n')
+    .flatMap(
+      (line) =>
+        /^(?:pick|p|fixup|f|squash|s)\s+([0-9a-f]+)/.exec(line)?.[1] ?? [],
+    );
+const dropsIn = (todo: string) =>
+  todo
+    .split('\n')
+    .flatMap((line) => /^(?:drop|d)\s+([0-9a-f]+)/.exec(line)?.[1] ?? []);
 
 // Runs as git's sequence editor: swaps git's todo for the planned one when both hold the same picks, then opens the user's editor.
 const editTodo = (todoPath: string) => {
@@ -1457,16 +2222,28 @@ const editTodo = (todoPath: string) => {
   const adopted = words(process.env.STACK_PLAN_ADOPTED ?? '');
   const original = readFileSync(todoPath, 'utf8');
   const gitShas = picksIn(original);
-  const inGitTodo = (sha: string) => gitShas.some((abbrev) => sha.startsWith(abbrev));
+  const inGitTodo = (sha: string) =>
+    gitShas.some((abbrev) => sha.startsWith(abbrev));
   const problems = gitShas
     .filter((abbrev) => !accountedShas.some((sha) => sha.startsWith(abbrev)))
     .map((abbrev) => `${abbrev} is in git's todo but not in the plan`);
-  const unexpected = plannedShas.filter((sha) => !inGitTodo(sha) && !adopted.includes(sha));
-  problems.push(...unexpected.map((sha) => `${sha.slice(0, 10)} is in the plan but not in git's todo`));
+  const unexpected = plannedShas.filter(
+    (sha) => !inGitTodo(sha) && !adopted.includes(sha),
+  );
+  problems.push(
+    ...unexpected.map(
+      (sha) => `${sha.slice(0, 10)} is in the plan but not in git's todo`,
+    ),
+  );
   const expected = accountedShas.filter(inGitTodo).length;
-  if (gitShas.length !== expected) problems.push(`git's todo has ${gitShas.length} picks, the plan accounts for ${expected}`);
+  if (gitShas.length !== expected)
+    problems.push(
+      `git's todo has ${gitShas.length} picks, the plan accounts for ${expected}`,
+    );
   if (problems.length) {
-    console.error(redErr(`✗ stack-plan: ${problems.join('; ')}. Rebase not started.`));
+    console.error(
+      redErr(`✗ stack-plan: ${problems.join('; ')}. Rebase not started.`),
+    );
     process.exit(1);
   }
   const help = original.split('\n').filter((line) => line.startsWith('#'));
@@ -1474,7 +2251,9 @@ const editTodo = (todoPath: string) => {
 
   const review = process.env.STACK_PLAN_EDITOR;
   if (review) {
-    const result = spawnSync('sh', ['-c', `${review} "$1"`, 'sh', todoPath], { stdio: 'inherit' });
+    const result = spawnSync('sh', ['-c', `${review} "$1"`, 'sh', todoPath], {
+      stdio: 'inherit',
+    });
     process.exit(result.status ?? 1);
   }
 };
@@ -1482,11 +2261,15 @@ const editTodo = (todoPath: string) => {
 const setMode = () => {
   const [wanted] = rest;
   if (wanted === 'full') git('config', MODE_KEY, 'full');
-  else if (wanted === 'short' && readConfig(MODE_KEY)) git('config', '--unset', MODE_KEY);
+  else if (wanted === 'short' && readConfig(MODE_KEY))
+    git('config', '--unset', MODE_KEY);
   heading('Mode');
   const full = fullMode();
-  console.log(`${bold(full ? 'full' : 'short')}  export lists ${full ? 'every commit since the base' : 'only the commits waiting to move'}`);
-  if (wanted) console.log('Run stack-plan export to write the plan in this mode.');
+  console.log(
+    `${bold(full ? 'full' : 'short')}  export lists ${full ? 'every commit since the base' : 'only the commits waiting to move'}`,
+  );
+  if (wanted)
+    console.log('Run stack-plan export to write the plan in this mode.');
 };
 
 try {
@@ -1494,10 +2277,11 @@ try {
   else if (command === 'save' || command === 'preview' || command === 'apply') {
     const planned = savePlan();
     // Full mode always passes the plan, because notes cannot hold the order within a branch.
-    if (command === 'preview') applyStack(dryRun || planned.steps ? planned : undefined, true);
-    else if (command === 'apply') applyStack(planned.steps ? planned : undefined);
-  }
-  else if (command === 'verify') verifyRebase();
+    if (command === 'preview')
+      applyStack(dryRun || planned.steps ? planned : undefined, true);
+    else if (command === 'apply')
+      applyStack(planned.steps ? planned : undefined);
+  } else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
   else if (command === 'cut') cutStack(cutAt!, rest.includes('--apply'));

@@ -7,10 +7,19 @@
 //
 // Usage: claude-ps [--idle MINUTES]   (default 60)
 
-import { closeSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  readSync,
+  statSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 
-const IDLE_THRESHOLD_MIN = Number(process.argv[process.argv.indexOf('--idle') + 1]) || 60;
+const IDLE_THRESHOLD_MIN =
+  Number(process.argv[process.argv.indexOf('--idle') + 1]) || 60;
 
 const read = (path: string) => {
   try {
@@ -29,8 +38,10 @@ const statFields = (pid: number) => {
   return stat.slice(stat.lastIndexOf(')') + 2).split(' ');
 };
 
-const bootMs = Number(/btime (\d+)/.exec(read('/proc/stat') ?? '')?.[1] ?? 0) * 1000;
-const startedAt = (pid: number) => bootMs + (Number(statFields(pid)[19]) / 100) * 1000;
+const bootMs =
+  Number(/btime (\d+)/.exec(read('/proc/stat') ?? '')?.[1] ?? 0) * 1000;
+const startedAt = (pid: number) =>
+  bootMs + (Number(statFields(pid)[19]) / 100) * 1000;
 
 // ---------------------------------------------------------------- transcripts
 
@@ -165,7 +176,8 @@ const headSummary = (path: string) => {
       if (!line.trim()) continue;
       try {
         const summary = (JSON.parse(line) as TranscriptRecord).summary;
-        if (typeof summary === 'string' && summary) return summary.replace(/\s+/g, ' ').trim();
+        if (typeof summary === 'string' && summary)
+          return summary.replace(/\s+/g, ' ').trim();
       } catch {
         break;
       }
@@ -195,7 +207,11 @@ const transcriptsFor = (cwd: string): TranscriptFile[] => {
       .filter((f) => f.endsWith('.jsonl'))
       .map((f) => {
         const path = `${projectRoot}/${key}/${f}`;
-        return { path, birthMs: firstRecordMs(path), mtimeMs: statSync(path).mtimeMs };
+        return {
+          path,
+          birthMs: firstRecordMs(path),
+          mtimeMs: statSync(path).mtimeMs,
+        };
       })
       .filter((f) => f.birthMs > 0);
   } catch {
@@ -241,7 +257,8 @@ for (const entry of readdirSync('/proc')) {
   if (!args[0]?.endsWith('/claude')) continue;
 
   const status = read(`/proc/${pid}/status`) ?? '';
-  const field = (name: string) => Number(new RegExp(`${name}:\\s+(\\d+)`).exec(status)?.[1] ?? 0);
+  const field = (name: string) =>
+    Number(new RegExp(`${name}:\\s+(\\d+)`).exec(status)?.[1] ?? 0);
 
   let cwd = '?';
   try {
@@ -280,7 +297,8 @@ for (const entry of readdirSync('/proc')) {
       } catch {
         continue;
       }
-      if (target.includes('/.claude/projects/') && target.endsWith('.jsonl')) session.transcript = target;
+      if (target.includes('/.claude/projects/') && target.endsWith('.jsonl'))
+        session.transcript = target;
     }
   } catch {
     // no fd access
@@ -288,7 +306,9 @@ for (const entry of readdirSync('/proc')) {
 
   // Next best: --resume=<id> names the transcript outright.
   if (!session.transcript) {
-    const resume = args.find((a) => a.startsWith('--resume='))?.slice('--resume='.length);
+    const resume = args
+      .find((a) => a.startsWith('--resume='))
+      ?.slice('--resume='.length);
     if (resume) {
       for (const project of readdirSync(projectRoot)) {
         const candidate = `${projectRoot}/${project}/${resume}.jsonl`;
@@ -324,7 +344,9 @@ for (let pid = process.pid; pid > 1; ) {
     self = match;
     break;
   }
-  const ppid = Number(/PPid:\s+(\d+)/.exec(read(`/proc/${pid}/status`) ?? '')?.[1] ?? 0);
+  const ppid = Number(
+    /PPid:\s+(\d+)/.exec(read(`/proc/${pid}/status`) ?? '')?.[1] ?? 0,
+  );
   if (!ppid || ppid === pid) break;
   pid = ppid;
 }
@@ -379,9 +401,12 @@ for (const s of sessions) {
 // percentages here feed the earlyoom check as numbers, not just as text. Change the
 // wording in one and change it in the other.
 const meminfo = read('/proc/meminfo') ?? '';
-const mem = (name: string) => Number(new RegExp(`${name}:\\s+(\\d+)`).exec(meminfo)?.[1] ?? 0);
+const mem = (name: string) =>
+  Number(new RegExp(`${name}:\\s+(\\d+)`).exec(meminfo)?.[1] ?? 0);
 const memPct = (mem('MemAvailable') * 100) / mem('MemTotal');
-const swapPct = mem('SwapTotal') ? (mem('SwapFree') * 100) / mem('SwapTotal') : 0;
+const swapPct = mem('SwapTotal')
+  ? (mem('SwapFree') * 100) / mem('SwapTotal')
+  : 0;
 
 const totalRss = sessions.reduce((n, s) => n + s.rssMb, 0);
 const totalSwap = sessions.reduce((n, s) => n + s.swapMb, 0);
@@ -405,21 +430,37 @@ if (earlyoom) {
   const opt = (flag: string) => a[a.indexOf(flag) + 1] ?? '?';
   const memLow = memPct < Number(opt('-m'));
   const swapLow = swapPct < Number(opt('-s'));
-  const state = memLow && swapLow ? 'FIRING' : memLow || swapLow ? 'one of two thresholds crossed' : 'idle';
+  const state =
+    memLow && swapLow
+      ? 'FIRING'
+      : memLow || swapLow
+        ? 'one of two thresholds crossed'
+        : 'idle';
   console.log(`earlyoom: mem<${opt('-m')}% and swap<${opt('-s')}% -> ${state}`);
 }
 
 const pad = (v: string | number, n: number) => String(v).padEnd(n);
 const order = { session: 0, helper: 1 };
-sessions.sort((a, b) => order[a.kind] - order[b.kind] || (b.idleMin ?? -1) - (a.idleMin ?? -1));
+sessions.sort(
+  (a, b) =>
+    order[a.kind] - order[b.kind] || (b.idleMin ?? -1) - (a.idleMin ?? -1),
+);
 
 console.log(
   `\n${pad('PID', 8)}${pad('RSS', 7)}${pad('SWAP', 7)}${pad('OOM', 5)}${pad('AGE', 7)}${pad('IDLE', 7)}${pad('RECS', 6)}${pad('WHERE', 30)}LAST PROMPT`,
 );
 
 for (const s of sessions) {
-  const where = s.kind === 'helper' ? '(chrome helper)' : `${s.cwd.split('/').pop()}${s.branch ? `@${s.branch}` : ''}`;
-  const mins = (v: number | undefined) => (v === undefined ? '-' : v >= 60 ? `${Math.floor(v / 60)}h${v % 60}m` : `${v}m`);
+  const where =
+    s.kind === 'helper'
+      ? '(chrome helper)'
+      : `${s.cwd.split('/').pop()}${s.branch ? `@${s.branch}` : ''}`;
+  const mins = (v: number | undefined) =>
+    v === undefined
+      ? '-'
+      : v >= 60
+        ? `${Math.floor(v / 60)}h${v % 60}m`
+        : `${v}m`;
   let label = s.prompt
     ? s.prompt.slice(0, 60)
     : s.summary
@@ -435,7 +476,10 @@ for (const s of sessions) {
     pad(s.pid, 8) +
       pad(`${s.rssMb}M`, 7) +
       pad(s.swapMb ? `${s.swapMb}M` : '-', 7) +
-      pad(s.oom + (s.oomAdj ? `${s.oomAdj > 0 ? '+' : ''}${s.oomAdj}` : ''), 5) +
+      pad(
+        s.oom + (s.oomAdj ? `${s.oomAdj > 0 ? '+' : ''}${s.oomAdj}` : ''),
+        5,
+      ) +
       pad(mins(s.ageMin), 7) +
       pad(mins(s.idleMin), 7) +
       pad(s.records || '-', 6) +
@@ -446,12 +490,21 @@ for (const s of sessions) {
 
 // A '~' prefix marks a start-time guess rather than a fact the process stated.
 if (sessions.some((s) => s.inferred)) {
-  console.log(`\n~ = transcript inferred from start time; identity may be swapped with another session started nearby.`);
+  console.log(
+    `\n~ = transcript inferred from start time; identity may be swapped with another session started nearby.`,
+  );
 }
 
-const stale = sessions.filter((s) => s !== self && s.kind === 'session' && (s.idleMin ?? 0) >= IDLE_THRESHOLD_MIN);
+const stale = sessions.filter(
+  (s) =>
+    s !== self &&
+    s.kind === 'session' &&
+    (s.idleMin ?? 0) >= IDLE_THRESHOLD_MIN,
+);
 if (stale.length) {
   const freed = stale.reduce((n, s) => n + s.rssMb, 0);
-  console.log(`\nIdle over ${IDLE_THRESHOLD_MIN}m — ${stale.length} sessions holding ${freed} MB:`);
+  console.log(
+    `\nIdle over ${IDLE_THRESHOLD_MIN}m — ${stale.length} sessions holding ${freed} MB:`,
+  );
   console.log(`  kill ${stale.map((s) => s.pid).join(' ')}`);
 }
