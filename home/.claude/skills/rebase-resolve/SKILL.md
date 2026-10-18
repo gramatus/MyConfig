@@ -12,6 +12,8 @@ When the `ARGUMENTS:` line is not expanded, use the user's invocation text. Any 
 
 Take a stack-plan reorder from preview to a verified result without handing git steps back to the user. `/repos/MyConfig/docs/stack-plan.md` is the tool's guide: read it before the first step if this session has not.
 
+**Name every commit by its subject, or a recognisable part of it, in anything the user reads.** A sha may follow as a second handle, never stand alone, because the user does not keep shas in their head. This binds the asks above all, which the user must be able to answer without looking anything up.
+
 ## What typing this command approves
 
 **The user typing `/rebase-resolve` approves the git operations `scripts/rebase.mts` performs, and nothing else.** This is a declared exception to two rules that otherwise bind you: the system prompt's "commit or push only when the user asks", and a harness guide's "a blocked operation is never wrapped". The exception covers this script and this rebase, so:
@@ -19,6 +21,7 @@ Take a stack-plan reorder from preview to a verified result without handing git 
 - Run the script as `node <this skill's base directory>/scripts/rebase.mts <subcommand>`, with the absolute path printed when this skill loaded. A `~` or `$HOME` in the command trips other shell rules.
 - Run `stack-plan` through the script, never directly. A harness may refuse the bare command.
 - Never run a mutating git verb yourself: no `add`, `commit`, `rebase`, `reset`, `checkout`, `push` or branch deletion. Where the script cannot do what a stop needs, stop and report, leaving the rebase where it is.
+- Edit stackplan.txt only when the user asks, before `start`. It is a file edit, not a git operation, so this exception is not what allows it.
 
 | Subcommand | Does |
 | --- | --- |
@@ -33,11 +36,20 @@ Paths are relative to the repository root.
 
 ## Before the rebase starts
 
-1. Run `preview`. For each conflict it predicts, read the moving commit's diff of the conflicting file with `git show <sha> -- <file>`. Grep the branch the commit will sit on for every symbol that diff relies on.
-2. Decide whether the move is feasible. A commit moved below the commits it was written on top of is the usual cause, and it is feasible when the symbols it needs exist at its new position. Where it would need rewriting beyond conflict resolution, stop and say so. Name the preview's "to keep the old order" line as the fallback.
-3. Ask the user one question, then wait: are other sessions on this repository idle? They share one HEAD, so a commit made mid-rebase lands wherever the rebase has got to. **Where this session has been working on something else, suggest in the same message running the rebase in a fresh session**, and go on in this one if they say so.
+1. Run `preview`.
+2. **Check that every moved commit landed on the branch it belongs to, conflict or not.** The user often moves many commits across many branches in one plan, and a commit placed on the wrong branch usually applies cleanly, so no conflict reveals it. Read each branch's own commits with `git log --stat --format='%h %s' <branch below>..<branch>`. Compare each moved commit's subject, scope and files with those of its target branch and of every other branch. The signals, and the list is illustrative rather than exhaustive:
+   - it is a `fixup!` or `squash!` of a commit on another branch, or its subject names one;
+   - it touches files no commit on its target branch touches, while another branch's commits touch them;
+   - its conventional-commit scope matches another branch's commits and none of its target branch's.
 
-That answer is the last stop before the end. From `start` onwards, run through without asking.
+   One signal from the last two alone is too weak to report. Where the better branch is directly above or below, say so: a line one `update-ref` off is the usual slip. **Code the commit uses from a higher branch is not a signal.** Moving a concept below the code it was written on is what this skill exists for.
+
+3. For each conflict the preview predicts, read the moving commit's diff of the conflicting file with `git show <sha> -- <file>`. Grep the branch the commit will sit on for every symbol that diff relies on.
+4. Decide whether the move is feasible. A commit moved below the commits it was written on top of is the usual cause, and it is feasible when the symbols it needs exist at its new position. Where it would need rewriting beyond conflict resolution, stop and say so. Name the preview's "to keep the old order" line as the fallback.
+5. **Where a moved commit lands below a commit on the same topic that created the code it edits, the concept may have moved only in part.** The step 6 message asks whether to move that commit as well, ahead of the fallback.
+6. Send one message, then wait. It names each suspect placement from step 2: the commit, where it lands, where it probably belongs and why. It asks whether other sessions on this repository are idle. They share one HEAD, so a commit made mid-rebase lands wherever the rebase has got to. **Where this session has been working on something else, suggest in the same message running the rebase in a fresh session**, and go on in this one if they say so.
+
+Where the plan changes, usually by the user's own edit of stackplan.txt, run `preview` again and repeat steps 2 to 5, stopping again only for something the new preview raises. From `start` onwards, run through without asking.
 
 ## At each stop
 
