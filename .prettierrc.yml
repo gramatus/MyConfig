@@ -1,0 +1,4 @@
+# Prettier's defaults, except where noted.
+# Never re-wrap prose: a paragraph stays on one line and the editor soft-wraps it.
+proseWrap: never
+singleQuote: true

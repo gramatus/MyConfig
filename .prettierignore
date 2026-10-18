@@ -18,3 +18,8 @@
 # Agent-generated output.
 .agent-context
 # <<< agent-harness managed <<<
+
+# Rendered by the harness linker, which would overwrite any formatting.
+.claude/fallback/
+# Comment-only, which Prettier's JSON parser rejects.
+.config/nvim/coc-settings.json

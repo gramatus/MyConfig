@@ -8,6 +8,8 @@
     "typecheck": "npm run typecheck:scripts && npm run typecheck:skills",
     "typecheck:scripts": ".claude/hooks/node_modules/.bin/tsc -p scripts",
     "typecheck:skills": ".claude/hooks/node_modules/.bin/tsc -p .",
-    "check": "npm run typecheck && npm run lint"
+    "format": ".claude/hooks/node_modules/.bin/prettier --write .",
+    "format:check": ".claude/hooks/node_modules/.bin/prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check"
   }
 }
