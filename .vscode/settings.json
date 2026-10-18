@@ -5,13 +5,7 @@
   "github.copilot.chat.agentDebugLog.fileLogging.enabled": true,
   "chat.useClaudeHooks": true,
   // <<< END: agent-harness managed block <<<
-  "chat.instructionsFilesLocations": {
-    // >>> START: agent-harness managed block >>>
-    // Rewritten on every run from scripts/managed/vscode-settings.mts in the harness. Outside the markers is yours.
-    ".github/instructions": true,
-    ".alz-ai/.github/instructions": true
-    // <<< END: agent-harness managed block <<<
-  },
+  "chat.instructionsFilesLocations": {},
   "search.exclude": {
     // >>> START: agent-harness managed block >>>
     // Rewritten on every run from scripts/managed/vscode-settings.mts in the harness. Outside the markers is yours.
@@ -65,19 +59,20 @@
     // ask: generated from .claude/hooks/src/policy.ts; see docs/architecture/agent-harness-setup.md in the harness.
     // Read managed/README.md in the harness before deleting — it calls Azure DevOps as the user.
     "node .claude/skills/ado-work-items/scripts/read.mts": false,
-    "mv": false,
     "wget": false,
     "az": false,
     // Read managed/README.md in the harness before deleting — omission would not retract it.
     "git mergetool": false,
     "yarn workspaces": false,
     "yarn workspace": false,
+    "vale sync": false,
     // Reached through the repository's own scripts (`npm run lint`). Read managed/README.md in the harness before deleting — omission would not retract it.
     "eslint": false,
     // Reached through the repository's own scripts (`npm run format`). Read managed/README.md in the harness before deleting — omission would not retract it.
     "prettier": false,
     // askCanBeLifted: generated from .claude/hooks/src/policy.ts; see docs/architecture/agent-harness-setup.md in the harness.
     "rm": false,
+    "mv": false,
     "cp": false,
     "curl": false,
     "git -C": false,
@@ -87,6 +82,7 @@
     "/^git diff(\\s|$)/": true,
     "git log": true,
     "git show": true,
+    "git range-diff": true,
     "git grep": true,
     "git branch": true,
     "git fetch": true,
@@ -101,6 +97,8 @@
     "mkdir": true,
     "sort": true,
     "uniq": true,
+    "rsvg-convert": true,
+    "vale": true,
     // allow: generated from .claude/hooks/src/policy.ts; see docs/architecture/agent-harness-setup.md in the harness.
     "git status": true,
     "git blame": true,
@@ -128,6 +126,9 @@
     "gh release list": true,
     "gh search issues": true,
     "gh search prs": true,
+    "gh search code": true,
+    "gh search repos": true,
+    "gh search commits": true,
     "npm run": true,
     "npm test": true,
     "npm start": true,

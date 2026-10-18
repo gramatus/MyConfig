@@ -1,0 +1,1 @@
+# Terms only this repository uses, one regular expression per line. Team-wide terms come from the shared package.

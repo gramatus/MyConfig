@@ -11,7 +11,7 @@ The shared instruction set for this repository lives in a nested checkout at `.a
 
 **Do not restore the checkout yourself.** Not by cloning, not by linking, not by renaming back a copy you found on disk. Report the state and stop. Repairing it is the user's call, and an agent that repairs and then carries on proceeds on conventions nobody loaded.
 
-For the user, once they have decided to restore it: if `.agent-harness/` is absent, clone it back first — `node .agent-harness/scripts/link-harness.mjs` lives inside that directory and cannot run until it exists. If the directory is present and only the symlinks are missing, that command is the whole fix. The devcontainer's `postStartCommand` normally does both on every container start.
+For the user, once they have decided to restore it: run `./agent-harness.sh` from the repository root. It clones `.agent-harness/` back if it is absent, then recreates the symlinks. The devcontainer's `postStartCommand` normally runs it on every container start.
 
 @.agent-harness/CLAUDE.md
 

@@ -1,0 +1,6 @@
+[
+  {
+    "match": "^__replace_me__(\\s|$)",
+    "reason": "Starter rule — replace the `match` regex and `reason` with your own, or delete this entry. The current match pattern never fires on any real command. `match` is a JavaScript regular expression (new RegExp) tested against the raw command string — not jq/PCRE syntax; an entry whose regex fails to compile is skipped. Format: { \"match\": \"<regex>\", \"reason\": \"<text>\" }. First matching rule wins. See .claude/hooks/README.md for details."
+  }
+]

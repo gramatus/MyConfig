@@ -25,4 +25,10 @@ lazy-lock.json
 # Managed by <harness>/scripts/link-harness.mjs — edit there, not below.
 /.agent-harness/
 /.alz-ai/
+/.vale/*
+!/.vale/config/
+/.vale/config/*
+!/.vale/config/vocabularies/
+/.vale/config/vocabularies/*
+!/.vale/config/vocabularies/Repo/
 # <<< agent-harness managed <<<

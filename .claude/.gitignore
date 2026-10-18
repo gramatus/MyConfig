@@ -28,9 +28,6 @@ responses/
 hooks/log.jsonl
 hooks/state/
 
-# Resolves to the CONSUMER's .claude/local/, not this checkout — read the README.
-local/
-
 input/*
 !input/README.md
 scheduled_tasks.lock

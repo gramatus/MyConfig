@@ -894,7 +894,7 @@ interface ShellHookPayload {
   workspace_roots?: string[];
 }
 
-const GUARDED_COMMANDS: readonly string[] = ["rm","cp","curl","git -C","env","bash","sh","ln","sqlcmd","psql","git remote","git tag","git ls-remote","git config","npm --prefix","gh api","git diff","git log","git show","git grep","git branch","git fetch","git reflog","git worktree add","git worktree remove","node","rg","perl","awk","find","mkdir","sort","uniq"];
+const GUARDED_COMMANDS: readonly string[] = ["rm","mv","cp","curl","git -C","env","bash","sh","ln","sqlcmd","psql","git remote","git tag","git ls-remote","git config","npm --prefix","gh api","git diff","git log","git show","git range-diff","git grep","git branch","git fetch","git reflog","git worktree add","git worktree remove","node","rg","perl","awk","find","mkdir","sort","uniq","rsvg-convert","vale"];
 
 const CURSOR_SHELL_EVENT = "beforeShellExecution";
 const CURSOR_PRE_TOOL_EVENT = "preToolUse";
