@@ -9,6 +9,10 @@ lazy-lock.json
 # Stuff from the agent harness that don't belong here
 .github/instructions/alz-ai.instructions.md
 
+# Claude Code's own writes into ~/.claude/skills, which links here
+/home/.claude/skills/synced/
+/home/.claude/skills/.trash/
+
 # Ignore everything in the agent-context folder, except some very narrow carve-outs
 /.agent-context/*
 !/.agent-context/.gitignore

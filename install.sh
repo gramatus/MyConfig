@@ -101,10 +101,14 @@ echo "############### Symlinking reusable Claude Code content ###############"
 # or blocked the link. `home/` mirrors the destination path and nothing else
 # manages it, so the user-level config and the project-level config can no
 # longer collide.
-mkdir -p ~/.claude/hooks
 mkdir -p ~/.copilot
-ln -srf home/.claude/hooks/block-askuserquestion.sh ~/.claude/hooks/block-askuserquestion.sh
-ln -srf home/.claude/hooks/pause-skill-reload-on-rebase.sh ~/.claude/hooks/pause-skill-reload-on-rebase.sh
+# A real dir here would make ln nest the link inside it, so fold its contents into the repo first.
+for dir in hooks skills; do
+    if [ -d "$HOME/.claude/$dir" ] && [ ! -L "$HOME/.claude/$dir" ]; then
+        cp -an "$HOME/.claude/$dir/." "home/.claude/$dir/" && rm -rf "$HOME/.claude/$dir"
+    fi
+    ln -srfn "home/.claude/$dir" "$HOME/.claude/$dir"
+done
 ln -srf home/.claude/settings.json ~/.claude/settings.json
 ln -srf home/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 ln -srf home/.claude/CLAUDE.md ~/.copilot/copilot-instructions.md
