@@ -7,7 +7,7 @@
 //
 // Usage: claude-ps [--idle MINUTES]   (default 60)
 
-import { closeSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { closeSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 const IDLE_THRESHOLD_MIN = Number(process.argv[process.argv.indexOf('--idle') + 1]) || 60;
