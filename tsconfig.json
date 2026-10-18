@@ -1,0 +1,17 @@
+// Editor diagnostics for the skills' .mts scripts; scripts/tsconfig.json says why and what it borrows.
+// Sited here rather than in home/, because home/ mirrors the install destination and nothing else.
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "types": ["node"],
+    "typeRoots": [".claude/hooks/node_modules/@types"]
+  },
+  "include": ["home/.claude/skills/*/scripts/*.mts"]
+}

@@ -195,5 +195,7 @@
     "pwsh --version": true,
     "bash --version": true
     // <<< END: agent-harness managed block <<<
-  }
+  },
+  // The repository has no node_modules of its own; eslint.config.mjs borrows the harness's.
+  "eslint.nodePath": ".claude/hooks/node_modules"
 }

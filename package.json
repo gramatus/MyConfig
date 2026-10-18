@@ -1,0 +1,13 @@
+{
+  "name": "myconfig",
+  "private": true,
+  "description": "Check scripts only. No dependencies of its own: the binaries are borrowed from the agent harness's hook tooling.",
+  "scripts": {
+    "lint": ".claude/hooks/node_modules/.bin/eslint --max-warnings 0 scripts home/.claude/skills",
+    "lint:fix": ".claude/hooks/node_modules/.bin/eslint --fix scripts home/.claude/skills",
+    "typecheck": "npm run typecheck:scripts && npm run typecheck:skills",
+    "typecheck:scripts": ".claude/hooks/node_modules/.bin/tsc -p scripts",
+    "typecheck:skills": ".claude/hooks/node_modules/.bin/tsc -p .",
+    "check": "npm run typecheck && npm run lint"
+  }
+}
