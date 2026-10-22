@@ -70,16 +70,10 @@ A stop that shows the same commit again did not advance. Read git's output above
 - **The tree must match the pre-rebase tip.** Where it does not, report the files it lists and stop. Restoring is the user's call.
 - **The "changed" entries must be exactly the commits you resolved at a stop.** Any other changed, dropped or added entry is a finding.
 
-Then test each branch whose commits moved, at its new position:
-
-1. Check the branch out with `git worktree add --detach <scratch dir>/<name> <branch>`.
-2. Link the dependencies the repository's testing guide names, as `ln -s <abs source> <abs target>`.
-3. Run the repository's typecheck and test scripts there.
-4. Run each failure again on the branch below. A failure both share is older breakage.
-5. Remove the link, then `git worktree remove` the worktree.
+Stop there. Do not test the branches: `/stack-review` judges the stack's shape next, and `/stack-check` runs each branch's checks once that shape holds. Name both in the report.
 
 ## The report
 
-- **Header:** whether the tree matched, and whether the moved branches build and pass, failures from older breakage aside.
+- **Header:** whether the tree matched, and that `/stack-review` and then `/stack-check` come next.
 - **Body:** one numbered item per stop, naming the commit, the file and what the resolution kept.
 - **Findings:** older breakage, each as `F1`, `F2` and so on, naming the commit that introduced it and the branches that carry it. Never fix one in this run.
