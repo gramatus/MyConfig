@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -103,6 +103,7 @@ const USAGE = [
   '               it fetches and prunes origin first, unless --no-fetch',
   '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
   '               --apply then moves those branches, and -f moves the clean ones despite a finding',
+  '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -127,6 +128,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   cut: ['--base', '--apply', '--anyway'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
   extract: ['--base', '--apply', '--anyway'],
+  extractable: ['--base'],
   mode: ['full', 'short'],
 };
 
@@ -1536,6 +1538,135 @@ const extractBranches = (apply: boolean) => {
   }
 };
 
+const replaysOf = (commits: Commit[]): Replay[] =>
+  commits.map((commit) => ({ commit, fold: false }));
+
+// Tries each branch above the PRs and the __ block onto the base alone, and moved down to just above them.
+const extractableBranches = () => {
+  const wip = currentBranch();
+  const { branches, own, pending } = readStack(wip);
+  const pulls = openPullRequests();
+  heading(`Extractable onto ${base}`);
+  if (!pulls)
+    attention(
+      `could not list PRs with gh, so only the ${EXTRACT_SOURCE_PREFIX} block holds branches back`,
+    );
+  const anchorAt = branches.findLastIndex(
+    (branch) => isExtractSource(branch) || pulls?.has(branch),
+  );
+  const movable = (branch: string) => branches.indexOf(branch) > anchorAt;
+  const branchOfSha = new Map(
+    branches.flatMap((branch) =>
+      (own.get(branch) ?? []).map((commit) => [commit.sha, branch] as const),
+    ),
+  );
+  const commitsOf = (group: string[]) =>
+    branches
+      .filter((branch) => group.includes(branch))
+      .flatMap((branch) => own.get(branch) ?? []);
+
+  // Grows the group by the branches each conflict needs, until it applies onto the base or needs an unmovable one.
+  const standaloneGroup = (branch: string) => {
+    let group = [branch];
+    for (;;) {
+      const [conflict] = simulateRebase(
+        replaysOf(commitsOf(group)),
+        tipOf(base),
+        wip,
+      ).conflicts;
+      if (!conflict) return { group };
+      const files = conflict.files.join(', ');
+      const conflictAt = branches.indexOf(
+        branchOfSha.get(conflict.commit.sha) ?? branch,
+      );
+      const needs = branches
+        .slice(0, conflictAt)
+        .filter(
+          (below) =>
+            !group.includes(below) &&
+            (own.get(below) ?? []).some((commit) =>
+              changesAny(commit.sha, conflict.files),
+            ),
+        );
+      if (!needs.length)
+        return { group, blocker: `conflicts with ${base} itself (${files})` };
+      const unmovable = needs.filter((need) => !movable(need));
+      if (unmovable.length)
+        return { group, blocker: `needs ${unmovable.join(', ')} (${files})` };
+      group = [...group, ...needs];
+    }
+  };
+
+  const moveConflict = (group: string[]) => {
+    const start =
+      anchorAt >= 0
+        ? tipOf(branches[anchorAt])
+        : git('merge-base', base, wip).trim();
+    const stayingAbove = branches
+      .slice(anchorAt + 1)
+      .filter((branch) => !group.includes(branch));
+    const sequence = [
+      ...commitsOf(group),
+      ...commitsOf(stayingAbove),
+      ...pending,
+    ];
+    const [conflict] = simulateRebase(
+      replaysOf(sequence),
+      start,
+      wip,
+    ).conflicts;
+    if (!conflict) return;
+    const where = branchOfSha.get(conflict.commit.sha) ?? wip;
+    return `${where} conflicts after the move (${conflict.files.join(', ')})`;
+  };
+
+  subheading('Branches');
+  const extractable = new Set<string>();
+  const tested = branches.filter(movable);
+  if (!tested.length)
+    good(
+      `no branch above the PRs and the ${EXTRACT_SOURCE_PREFIX} block to test`,
+    );
+  for (const branch of tested) {
+    if (!own.get(branch)?.length) {
+      attention(`${cyan(branch)}  no commits of its own`);
+      continue;
+    }
+    const { group, blocker } = standaloneGroup(branch);
+    if (blocker) {
+      bad(`${cyan(branch)}  ${blocker}`);
+      continue;
+    }
+    const others = group.filter((member) => member !== branch);
+    const together = others.length
+      ? `, together with ${others.join(', ')}`
+      : '';
+    const blockedMove = moveConflict(group);
+    if (blockedMove) {
+      attention(`${cyan(branch)}  stands alone${together}, but ${blockedMove}`);
+      continue;
+    }
+    good(
+      `${cyan(branch)}  stands alone on ${base}${together} · moves down cleanly`,
+    );
+    for (const member of group) extractable.add(member);
+  }
+
+  subheading('Conclusion');
+  if (!extractable.size) {
+    attention('no branch can leave the stack as it stands');
+    return;
+  }
+  good(
+    `${extractable.size} branch${extractable.size === 1 ? '' : 'es'} can leave the stack as far as the text shows; nothing checked that they build`,
+  );
+  console.log(
+    `To mark them, rename each, then move its update-ref line into the ${EXTRACT_SOURCE_PREFIX} block and apply:`,
+  );
+  for (const branch of branches.filter((name) => extractable.has(name)))
+    console.log(`  git branch -m ${branch} ${EXTRACT_SOURCE_PREFIX}${branch}`);
+};
+
 // Prints commits under their branch, in stack order.
 const printByBranch = (
   order: string[],
@@ -2540,6 +2671,7 @@ try {
   else if (command === 'cut') cutStack(cutAt!, rest.includes('--apply'));
   else if (command === 'sync') syncStack(rest.includes('--apply'));
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
+  else if (command === 'extractable') extractableBranches();
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

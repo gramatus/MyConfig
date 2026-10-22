@@ -17,6 +17,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
+| `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
 | `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -245,6 +246,13 @@ stack-plan extract --apply
 ```
 
 Some branches in a stack do not depend on the branches below them, and could be pull requests of their own on the base. `extract` lets such a branch leave the stack while wip keeps its commits. Inside the stack the branch keeps a `__` prefix, as in `__skills/foo`, and is called an extract source. Its extracted copy is the branch named without the prefix, `skills/foo`, and it sits on the base rather than in the stack. The prefix is reserved for this, so every `__` branch in the stack is an extract source.
+
+`stack-plan extractable` finds the candidates. It tests each branch above the PR branches and the `__` block, and changes nothing. A branch is a candidate when two in-memory replays are clean:
+
+- Its own commits replayed onto `--base`. When that conflicts, it adds the branches below that change the conflicting files and tries again, so a branch that needs another one is reported together with it. A needed branch that has a PR, or sits in the `__` block, makes the branch no candidate.
+- The stack replayed with the branch, and any branches it needs, moved to just above the PR branches and the `__` block. That is the todo a `preview` of the move would run.
+
+It ends with the `git branch -m` renames that mark the candidates. A clean replay only shows that the text applies, not that the code still builds: a branch can still call something a branch below it adds.
 
 The `__` branches go in one block directly above the branches that have PRs. Getting them there is an ordinary plan edit: rename the branch, move its `update-ref` line into the block, then `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
 

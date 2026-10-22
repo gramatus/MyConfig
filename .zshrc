@@ -171,6 +171,7 @@ _stack_plan() {
         'cut:check that cutting the stack at a branch loses no work'
         'sync:check putting the stack on its origin copies, with local work on top'
         'extract:check copying each __ branch off the stack, onto its name without the prefix'
+        'extractable:list the branches that could become __ branches'
         'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
