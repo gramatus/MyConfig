@@ -16,6 +16,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
+| `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -88,6 +89,8 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order saved but not yet rebased. Export marks them the way the apply todo does: `>>> [moved]` after the hash of a pick whose note moves it into a branch, and a `# >>> [new branch]` or `# >>> [moved branch]` line above a branch the saved order adds or moves. The markers show what was saved at export, not your edits since, and `save` ignores them.
 
 Export also asks `gh` for the open pull requests and writes `# --- PRs stop here ---` above the first branch that has none. A pick placed above that line lands in a branch already under review. Export warns about a PR that sits above a branch with no PR, and about one whose base is not the branch below it. When `gh` cannot list the PRs, export warns and leaves the marker out.
+
+Branches named with a `__` prefix are extract sources, which step 8 describes. Export writes a `# mirror:` line above each one, giving the state of its extracted copy, and `# --- Other stacks stop here ---` below the last one. It warns about a PR branch above a `__` branch, because pushing it would carry that branch's commits, and about `__` branches that do not form one block.
 
 #### Full mode
 
@@ -230,6 +233,30 @@ When the replay is clean, two checks stand in for the tree check, which cannot m
 `--apply` runs `git rebase -i --update-refs --empty=drop --onto <onto> <fork>`. `<onto>` is where origin's lowest branch leaves the base, and `<fork>` is where the local stack does. Git's todo then holds exactly the local commits. The planned todo picks origin's commits, which git reuses unchanged where their parent matches, so a branch with nothing kept local ends up identical to origin. Each commit giving way is a `drop` line, which `rebase.missingCommitsCheck error` requires. Local commits kept in an origin branch carry `>>> [local]` after their hash.
 
 It records a `# sync:` line, which works like the `# cut:` line. After a sync, `verify` compares the old stack with the new one from where each leaves the base. It counts commits only origin had as `from origin`, and a dropped commit whose change origin holds as already there. It then runs the two checks the preview ran, on the real result. Cut branches are then removed from `stackplan.order` as after a cut.
+
+### 8. Extract branches that need not be stacked
+
+```shell
+stack-plan extract
+```
+
+```shell
+stack-plan extract --apply
+```
+
+Some branches in a stack do not depend on the branches below them, and could be pull requests of their own on the base. `extract` lets such a branch leave the stack while wip keeps its commits. Inside the stack the branch keeps a `__` prefix, as in `__skills/foo`, and is called an extract source. Its extracted copy is the branch named without the prefix, `skills/foo`, and it sits on the base rather than in the stack. The prefix is reserved for this, so every `__` branch in the stack is an extract source.
+
+The `__` branches go in one block directly above the branches that have PRs. Getting them there is an ordinary plan edit: rename the branch, move its `update-ref` line into the block, then `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
+
+`extract` changes nothing without `--apply`. It works through the `__` branches from the bottom up:
+
+- An extracted copy that does not exist yet is made by replaying the source's own commits onto `--base`. If that conflicts, it replays them onto the extracted copy of the `__` branch below instead, so a small stack moved out together stays a stack. If that conflicts too, the branch needs something outside the block, and that is a finding.
+- An extracted copy that exists gets the source's commits that it lacks, matched by `git patch-id`, replayed on top. That only ever moves it forward, so its PR needs no force push. If the copy holds commits the source lacks, such as a review fix pushed on GitHub, that is a finding, and the branch is left alone until those commits are in the source too.
+- A `__` branch whose unprefixed name is also a stack branch is a finding.
+
+The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
+
+A merged extracted copy does not yet take its `__` branch out of the stack, because neither `cut` nor `sync` drops a branch from the middle of it. Until they do, drop the `__` branch's commits and delete the branch by hand once its copy has merged.
 
 ## Where things live
 

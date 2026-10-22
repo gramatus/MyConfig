@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -27,6 +27,9 @@ const LOCAL_MARKER = '>>> [local]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
 const PRS_STOP_MARKER = '# --- PRs stop here ---';
+const OTHER_STACKS_STOP_MARKER = '# --- Other stacks stop here ---';
+const MIRROR_STATUS_PREFIX = '# mirror: ';
+const EXTRACT_SOURCE_PREFIX = '__';
 const ORDER_KEY = 'stackplan.order';
 const NEW_KEY = 'stackplan.new';
 const MODE_KEY = 'stackplan.mode';
@@ -98,6 +101,8 @@ const USAGE = [
   '  sync         check putting each stack branch on its origin copy, with what origin lacks replayed on top',
   '               and merged branches cut; --apply then does it, and -f does it despite a finding;',
   '               it fetches and prunes origin first, unless --no-fetch',
+  '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
+  '               --apply then moves those branches, and -f moves the clean ones despite a finding',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -121,6 +126,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   verify: ['--base', '--dry-run'],
   cut: ['--base', '--apply', '--anyway'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
+  extract: ['--base', '--apply', '--anyway'],
   mode: ['full', 'short'],
 };
 
@@ -202,6 +208,10 @@ const isAncestor = (ancestor: string, descendant: string) =>
   gitSucceeds('merge-base', '--is-ancestor', ancestor, descendant);
 const branchExists = (branch: string) =>
   gitSucceeds('show-ref', '--verify', '--quiet', `refs/heads/${branch}`);
+const isExtractSource = (branch: string) =>
+  branch.startsWith(EXTRACT_SOURCE_PREFIX);
+const extractedNameOf = (source: string) =>
+  source.slice(EXTRACT_SOURCE_PREFIX.length);
 
 const words = (value: string) => value.split(/\s+/).filter(Boolean);
 const readConfig = (key: string) => {
@@ -1311,6 +1321,221 @@ const syncStack = (apply: boolean) => {
   );
 };
 
+// Matches by patch-id; a commit with none, such as an empty one, counts as already there.
+const compareWithExtracted = (
+  sourceCommits: Commit[],
+  extracted: string,
+  extractedFork: string,
+) => {
+  const sourceIdOfSha = sourceCommits.length
+    ? patchIdsIn(`${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`)
+    : new Map<string, string>();
+  const sourceIds = new Set(sourceIdOfSha.values());
+  const extractedIds = new Set(
+    patchIdsIn(`${extractedFork}..${extracted}`).values(),
+  );
+  const missing = sourceCommits.filter((commit) => {
+    const id = sourceIdOfSha.get(commit.sha);
+    return id !== undefined && !extractedIds.has(id);
+  });
+  const extraCount = [...extractedIds].filter(
+    (id) => !sourceIds.has(id),
+  ).length;
+  return { missing, extraCount };
+};
+
+// Where an extracted branch's own commits start: where it leaves the extracted copy below it, or else the base.
+const extractedForkOf = (extracted: string, extractedBelow?: string) => {
+  const forkOnBase = git('merge-base', base, extracted).trim();
+  if (!extractedBelow || !branchExists(extractedBelow)) return forkOnBase;
+  const forkOnBelow = git('merge-base', extractedBelow, extracted).trim();
+  return forkOnBelow !== forkOnBase && isAncestor(forkOnBase, forkOnBelow)
+    ? forkOnBelow
+    : forkOnBase;
+};
+
+const copyCommit = (sha: string, tree: string, parent: string) => {
+  const [name, email, date, message] = gitQuiet(
+    'show',
+    '-s',
+    '--format=%an%x00%ae%x00%aI%x00%B',
+    sha,
+  ).split('\0');
+  return execFileSync('git', ['commit-tree', tree, '-p', parent, '-F', '-'], {
+    input: `${message.trimEnd()}\n`,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'inherit'],
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: name,
+      GIT_AUTHOR_EMAIL: email,
+      GIT_AUTHOR_DATE: date,
+    },
+  }).trim();
+};
+
+type ExtractReplay =
+  | { ok: true; tip: string }
+  | { ok: false; commit: Commit; files: string[] };
+
+// Writes real commits, and stops at the first conflict rather than guessing past it.
+const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
+  let tip = start;
+  for (const commit of commits) {
+    const merged = mergeTree(`${commit.sha}^`, tip, commit.sha);
+    if (!merged.ok) return { ok: false, commit, files: merged.files };
+    tip = copyCommit(commit.sha, merged.tree, tip);
+  }
+  return { ok: true, tip };
+};
+
+/** Returns the comment line export writes above a __ branch, giving the state of its extracted copy. */
+const mirrorStatus = (
+  source: string,
+  sourceBelow: string | undefined,
+  sourceCommits: Commit[],
+  pulls?: Map<string, PullRequest>,
+) => {
+  const extracted = extractedNameOf(source);
+  if (!branchExists(extracted))
+    return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted`;
+  const { missing, extraCount } = compareWithExtracted(
+    sourceCommits,
+    extracted,
+    extractedForkOf(extracted, sourceBelow && extractedNameOf(sourceBelow)),
+  );
+  const pull = pulls?.get(extracted);
+  const parts = [
+    extracted,
+    ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
+    missing.length
+      ? `${countOf(missing.length, 'commit')} behind`
+      : 'up to date',
+    ...(extraCount
+      ? [`${countOf(extraCount, 'commit')} only on ${extracted}`]
+      : []),
+  ];
+  return `${MIRROR_STATUS_PREFIX}${parts.join(' · ')}`;
+};
+
+// Copies each __ branch's commits onto the branch named without the prefix, off the stack; --apply moves those refs.
+const extractBranches = (apply: boolean) => {
+  const wip = currentBranch();
+  const { branches, own } = readStack(wip);
+  const sources = branches.filter(isExtractSource);
+  heading(`Extract onto ${base}`);
+  if (!sources.length) {
+    good(`no ${EXTRACT_SOURCE_PREFIX} branch in the stack; nothing to extract`);
+    return;
+  }
+  const moves: { extracted: string; tip: string; oldTip: string }[] = [];
+  const plannedTip = new Map<string, string>();
+  let findings = 0;
+  const reportConflict = (
+    label: string,
+    onto: string,
+    replay: ExtractReplay,
+  ) => {
+    if (replay.ok) return;
+    findings++;
+    bad(`${label}  conflicts on ${onto}, at`);
+    console.log(commitLine(replay.commit));
+    for (const file of replay.files) console.log(`    ${file}`);
+  };
+
+  subheading('Branches');
+  sources.forEach((source, i) => {
+    const extracted = extractedNameOf(source);
+    const extractedBelow = i ? extractedNameOf(sources[i - 1]) : undefined;
+    const commits = own.get(source) ?? [];
+    const label = `${cyan(source)} → ${cyan(extracted)}`;
+    if (branches.includes(extracted)) {
+      findings++;
+      bad(`${label}  ${extracted} is a stack branch too; rename one of them`);
+      return;
+    }
+    if (!commits.length) {
+      attention(`${label}  no commits of its own; nothing to extract`);
+      return;
+    }
+    if (branchExists(extracted)) {
+      const oldTip = tipOf(extracted);
+      plannedTip.set(extracted, oldTip);
+      const { missing, extraCount } = compareWithExtracted(
+        commits,
+        extracted,
+        extractedForkOf(extracted, extractedBelow),
+      );
+      if (extraCount) {
+        findings++;
+        attention(
+          `${label}  has ${countOf(extraCount, 'commit')} ${source} lacks, such as a review fix; bring them into ${source} first`,
+        );
+        return;
+      }
+      if (!missing.length) {
+        good(`${label}  up to date`);
+        return;
+      }
+      const replay = replayOnto(missing, oldTip);
+      if (!replay.ok) return reportConflict(label, extracted, replay);
+      good(`${label}  +${countOf(missing.length, 'commit')}`);
+      moves.push({ extracted, tip: replay.tip, oldTip });
+      plannedTip.set(extracted, replay.tip);
+      return;
+    }
+    const onBase = replayOnto(commits, tipOf(base));
+    if (onBase.ok) {
+      good(`${label}  new on ${base}`);
+      moves.push({ extracted, tip: onBase.tip, oldTip: '' });
+      plannedTip.set(extracted, onBase.tip);
+      return;
+    }
+    const belowTip = extractedBelow
+      ? plannedTip.get(extractedBelow)
+      : undefined;
+    if (!extractedBelow || !belowTip)
+      return reportConflict(label, base, onBase);
+    const onBelow = replayOnto(commits, belowTip);
+    if (!onBelow.ok) return reportConflict(label, extractedBelow, onBelow);
+    good(`${label}  new on ${extractedBelow}, since it conflicts on ${base}`);
+    moves.push({ extracted, tip: onBelow.tip, oldTip: '' });
+    plannedTip.set(extracted, onBelow.tip);
+  });
+
+  subheading('Conclusion');
+  const branchCount = `${moves.length} branch${moves.length === 1 ? '' : 'es'}`;
+  if (findings) attention('some of it needs a look by hand; see above');
+  else if (moves.length) good(`${branchCount} to create or move forward`);
+  else good('every extracted branch is up to date');
+  if (!apply) {
+    if (moves.length)
+      console.log(
+        `To do it: stack-plan extract --apply${findings ? ' -f' : ''}`,
+      );
+    if (findings) process.exit(1);
+    return;
+  }
+  if (findings && !rest.includes('--anyway')) {
+    console.log(
+      '\nNo branch moved. To move the clean ones anyway: stack-plan extract --apply -f',
+    );
+    process.exit(1);
+  }
+  // An empty old value makes update-ref refuse a branch created since the check, and a SHA one moved since.
+  for (const move of moves) {
+    git(
+      'update-ref',
+      '-m',
+      'stack-plan extract',
+      `refs/heads/${move.extracted}`,
+      move.tip,
+      move.oldTip,
+    );
+    good(`${cyan(move.extracted)}  now at ${yellow(move.tip.slice(0, 10))}`);
+  }
+};
+
 // Prints commits under their branch, in stack order.
 const printByBranch = (
   order: string[],
@@ -1424,7 +1649,12 @@ const exportPlan = () => {
       stopAt = Math.min(stopAt, i);
       return;
     }
-    if (stopAt < i)
+    const sourceBelow = branches.slice(0, i).find(isExtractSource);
+    if (sourceBelow)
+      prWarnings.push(
+        `#${pull.number} (${branch}) sits above ${sourceBelow}, so pushing it carries that branch's commits`,
+      );
+    else if (stopAt < i)
       prWarnings.push(
         `#${pull.number} (${branch}) sits above a branch with no PR`,
       );
@@ -1435,9 +1665,23 @@ const exportPlan = () => {
       );
   });
 
+  const sources = branches.filter(isExtractSource);
+  const firstSourceAt = branches.findIndex(isExtractSource);
+  const sourcesSplit = branches
+    .slice(firstSourceAt, firstSourceAt + sources.length)
+    .some((branch) => !isExtractSource(branch));
+
   // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
   branches.forEach((branch, i) => {
     const marker = branchMarker(branch, current, branches);
+    const status = isExtractSource(branch)
+      ? mirrorStatus(
+          branch,
+          sources[sources.indexOf(branch) - 1],
+          own.get(branch) ?? [],
+          pulls,
+        )
+      : undefined;
     const inBranch = full ? (own.get(branch) ?? []) : [];
     const moving = sections
       .get(branch)!
@@ -1445,9 +1689,11 @@ const exportPlan = () => {
     if (pulls && i === stopAt) out.push(PRS_STOP_MARKER);
     out.push(
       ...(marker ? [marker] : []),
+      ...(status ? [status] : []),
       ...inBranch.map((commit) => pickLine(commit)),
       ...moving,
       `update-ref refs/heads/${branch}\n`,
+      ...(branch === sources.at(-1) ? [OTHER_STACKS_STOP_MARKER] : []),
     );
   });
   if (pulls && stopAt === branches.length) out.push(PRS_STOP_MARKER);
@@ -1480,6 +1726,10 @@ const exportPlan = () => {
     );
   if (!pulls) attention('could not list PRs with gh; no PR marker in the file');
   for (const warning of prWarnings) attention(warning);
+  if (sourcesSplit)
+    attention(
+      `the ${EXTRACT_SOURCE_PREFIX} branches are not one block; the other-stacks marker follows the last one`,
+    );
 };
 
 const savePlan = () => {
@@ -2289,6 +2539,7 @@ try {
   else if (command === 'prepare') prepareRebase();
   else if (command === 'cut') cutStack(cutAt!, rest.includes('--apply'));
   else if (command === 'sync') syncStack(rest.includes('--apply'));
+  else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));
