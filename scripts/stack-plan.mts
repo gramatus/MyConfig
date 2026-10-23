@@ -1375,16 +1375,21 @@ const standaloneGroup = (
   wip: string,
   branch: string,
   mayJoin: (branch: string) => boolean,
-): { group: string[]; blocker?: string } => {
+): { group: string[]; directNeeds: string[]; blocker?: string } => {
   const { branches, own } = stack;
   let group = [branch];
+  const directNeeds: string[] = [];
   for (;;) {
     const [conflict] = simulateRebase(
       replaysOf(commitsOfBranches(stack, group)),
       tipOf(base),
       wip,
     ).conflicts;
-    if (!conflict) return { group: branches.filter((b) => group.includes(b)) };
+    if (!conflict)
+      return {
+        group: branches.filter((b) => group.includes(b)),
+        directNeeds: branches.filter((b) => directNeeds.includes(b)),
+      };
     const files = conflict.files.join(', ');
     const conflictAt = branches.findIndex((b) =>
       (own.get(b) ?? []).some((commit) => commit.sha === conflict.commit.sha),
@@ -1399,10 +1404,19 @@ const standaloneGroup = (
           ),
       );
     if (!needs.length)
-      return { group, blocker: `conflicts with ${base} itself (${files})` };
+      return {
+        group,
+        directNeeds,
+        blocker: `conflicts with ${base} itself (${files})`,
+      };
     const barred = needs.filter((need) => !mayJoin(need));
     if (barred.length)
-      return { group, blocker: `needs ${barred.join(', ')} (${files})` };
+      return {
+        group,
+        directNeeds,
+        blocker: `needs ${barred.join(', ')} (${files})`,
+      };
+    if (branches[conflictAt] === branch) directNeeds.push(...needs);
     group = [...group, ...needs];
   }
 };
@@ -1669,11 +1683,20 @@ const extractableBranches = () => {
 
   const tested = branches.filter(movable);
   const needsOf = new Map<string, string[]>();
+  const directNeedsOf = new Map<string, string[]>();
   const blockerOf = new Map<string, string>();
   for (const branch of tested.filter((name) => own.get(name)?.length)) {
-    const { group, blocker } = standaloneGroup(stack, wip, branch, movable);
+    const { group, directNeeds, blocker } = standaloneGroup(
+      stack,
+      wip,
+      branch,
+      movable,
+    );
     if (blocker) blockerOf.set(branch, blocker);
-    else needsOf.set(branch, group);
+    else {
+      needsOf.set(branch, group);
+      directNeedsOf.set(branch, directNeeds);
+    }
   }
   for (const branch of tested.filter((name) => !own.get(name)?.length))
     blockerOf.set(branch, 'no commits of its own');
@@ -1697,7 +1720,7 @@ const extractableBranches = () => {
         moveConflict: moveConflict(chain) ?? null,
         members: chain.map((name, at) => ({
           name,
-          needs: (needsOf.get(name) ?? []).filter((other) => other !== name),
+          needs: directNeedsOf.get(name) ?? [],
           start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
           replay: tips.get(name) ?? null,
         })),
