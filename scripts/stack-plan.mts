@@ -268,6 +268,10 @@ const gitSucceeds = (...args: string[]) => {
 };
 const isAncestor = (ancestor: string, descendant: string) =>
   gitSucceeds('merge-base', '--is-ancestor', ancestor, descendant);
+// Where the stack leaves the base, so a rebase of the bottom branch keeps the stack off newer base commits.
+const forkOf = (wip: string) => git('merge-base', base, wip).trim();
+const forkLabel = (fork: string) =>
+  `${cyan(base)} at ${yellow(fork.slice(0, 10))}, where the stack leaves it`;
 const branchExists = (branch: string) =>
   gitSucceeds('show-ref', '--verify', '--quiet', `refs/heads/${branch}`);
 const isExtractSource = (branch: string) =>
@@ -2675,12 +2679,14 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
     return;
   }
   // Everything below the first changed branch stays as it is.
-  const rebaseBase = first === 0 ? base : order[first - 1];
+  const rebaseBase = first === 0 ? forkOf(wip) : order[first - 1];
   printByBranch(order, (commit) => commit.note, moves);
   for (const [sha, { into }] of folding)
     printFold(line.find((commit) => commit.sha === sha)!, into);
   printOrderChanges(branches, order);
-  console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
+  console.log(
+    `${bold('base')}  ${first === 0 ? forkLabel(rebaseBase) : cyan(rebaseBase)}`,
+  );
 
   const { todo, sequence, pick } = newTodo();
   const pickWithFolds = (commit: Commit, marker = '') => {
@@ -2731,7 +2737,7 @@ const fullRebase = (
   }
   const lastKept = steps.slice(0, kept).findLast((step) => 'pick' in step);
   const lastCommit = lastKept && 'pick' in lastKept ? lastKept.pick : undefined;
-  const rebaseBase = lastCommit?.sha ?? base;
+  const rebaseBase = lastCommit?.sha ?? forkOf(wip);
 
   const branchOf = new Map(
     [...own].flatMap(([branch, commits]) =>
@@ -2757,7 +2763,7 @@ const fullRebase = (
   warnUnmatched(foldsBySubject(line).unmatched);
   printOrderChanges(branches, order);
   console.log(
-    `${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : cyan(base)}`,
+    `${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : forkLabel(rebaseBase)}`,
   );
 
   const { todo, sequence, pick } = newTodo();
