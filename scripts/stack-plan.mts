@@ -103,7 +103,8 @@ const USAGE = [
   '               it fetches and prunes origin first, unless --no-fetch',
   '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
   '               --apply then moves those branches, and -f moves the clean ones despite a finding',
-  '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows',
+  '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows;',
+  "               --json prints each chain with every member's start and replay commits",
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -128,7 +129,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   cut: ['--base', '--apply', '--anyway'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
   extract: ['--base', '--apply', '--anyway'],
-  extractable: ['--base'],
+  extractable: ['--base', '--json'],
   mode: ['full', 'short'],
 };
 
@@ -170,6 +171,7 @@ const optionValue = (name: string) => {
 };
 const base = optionValue('--base') ?? 'origin/main';
 const dryRun = rest.includes('--dry-run');
+const asJson = rest.includes('--json');
 
 type Commit = {
   sha: string;
@@ -1346,14 +1348,79 @@ const compareWithExtracted = (
   return { missing, extraCount };
 };
 
-// Where an extracted branch's own commits start: where it leaves the extracted copy below it, or else the base.
-const extractedForkOf = (extracted: string, extractedBelow?: string) => {
-  const forkOnBase = git('merge-base', base, extracted).trim();
-  if (!extractedBelow || !branchExists(extractedBelow)) return forkOnBase;
-  const forkOnBelow = git('merge-base', extractedBelow, extracted).trim();
-  return forkOnBelow !== forkOnBase && isAncestor(forkOnBase, forkOnBelow)
-    ? forkOnBelow
-    : forkOnBase;
+// Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
+const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
+  let fork = git('merge-base', base, extracted).trim();
+  for (const below of extractedBelow.filter(branchExists)) {
+    const forkOnBelow = git('merge-base', below, extracted).trim();
+    if (forkOnBelow !== fork && isAncestor(fork, forkOnBelow))
+      fork = forkOnBelow;
+  }
+  return fork;
+};
+
+const replaysOf = (commits: Commit[]): Replay[] =>
+  commits.map((commit) => ({ commit, fold: false }));
+
+type Stack = ReturnType<typeof readStack>;
+
+const commitsOfBranches = (stack: Stack, group: string[]) =>
+  stack.branches
+    .filter((branch) => group.includes(branch))
+    .flatMap((branch) => stack.own.get(branch) ?? []);
+
+// Grows the group by the branches each conflict needs, until it applies onto the base or needs one that may not join.
+const standaloneGroup = (
+  stack: Stack,
+  wip: string,
+  branch: string,
+  mayJoin: (branch: string) => boolean,
+): { group: string[]; blocker?: string } => {
+  const { branches, own } = stack;
+  let group = [branch];
+  for (;;) {
+    const [conflict] = simulateRebase(
+      replaysOf(commitsOfBranches(stack, group)),
+      tipOf(base),
+      wip,
+    ).conflicts;
+    if (!conflict) return { group: branches.filter((b) => group.includes(b)) };
+    const files = conflict.files.join(', ');
+    const conflictAt = branches.findIndex((b) =>
+      (own.get(b) ?? []).some((commit) => commit.sha === conflict.commit.sha),
+    );
+    const needs = branches
+      .slice(0, conflictAt)
+      .filter(
+        (below) =>
+          !group.includes(below) &&
+          (own.get(below) ?? []).some((commit) =>
+            changesAny(commit.sha, conflict.files),
+          ),
+      );
+    if (!needs.length)
+      return { group, blocker: `conflicts with ${base} itself (${files})` };
+    const barred = needs.filter((need) => !mayJoin(need));
+    if (barred.length)
+      return { group, blocker: `needs ${barred.join(', ')} (${files})` };
+    group = [...group, ...needs];
+  }
+};
+
+// Merges groups that share a branch, each in stack order, lowest group first.
+const mergeGroups = (groups: string[][], branches: string[]) => {
+  let merged: string[][] = [];
+  for (const group of groups) {
+    const overlapping = merged.filter((other) =>
+      other.some((branch) => group.includes(branch)),
+    );
+    const union = new Set([...group, ...overlapping.flat()]);
+    merged = [
+      ...merged.filter((other) => !overlapping.includes(other)),
+      branches.filter((branch) => union.has(branch)),
+    ];
+  }
+  return merged.sort((a, b) => branches.indexOf(a[0]) - branches.indexOf(b[0]));
 };
 
 const copyCommit = (sha: string, tree: string, parent: string) => {
@@ -1394,7 +1461,7 @@ const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
 /** Returns the comment line export writes above a __ branch, giving the state of its extracted copy. */
 const mirrorStatus = (
   source: string,
-  sourceBelow: string | undefined,
+  sourcesBelow: string[],
   sourceCommits: Commit[],
   pulls?: Map<string, PullRequest>,
 ) => {
@@ -1404,7 +1471,7 @@ const mirrorStatus = (
   const { missing, extraCount } = compareWithExtracted(
     sourceCommits,
     extracted,
-    extractedForkOf(extracted, sourceBelow && extractedNameOf(sourceBelow)),
+    extractedForkOf(extracted, sourcesBelow.map(extractedNameOf)),
   );
   const pull = pulls?.get(extracted);
   const parts = [
@@ -1423,13 +1490,27 @@ const mirrorStatus = (
 // Copies each __ branch's commits onto the branch named without the prefix, off the stack; --apply moves those refs.
 const extractBranches = (apply: boolean) => {
   const wip = currentBranch();
-  const { branches, own } = readStack(wip);
+  const stack = readStack(wip);
+  const { branches, own } = stack;
   const sources = branches.filter(isExtractSource);
   heading(`Extract onto ${base}`);
   if (!sources.length) {
     good(`no ${EXTRACT_SOURCE_PREFIX} branch in the stack; nothing to extract`);
     return;
   }
+  const blockerOf = new Map<string, string>();
+  const groups: string[][] = [];
+  for (const source of sources.filter((name) => own.get(name)?.length)) {
+    const { group, blocker } = standaloneGroup(
+      stack,
+      wip,
+      source,
+      isExtractSource,
+    );
+    if (blocker) blockerOf.set(source, blocker);
+    else groups.push(group);
+  }
+  const chains = mergeGroups(groups, branches);
   const moves: { extracted: string; tip: string; oldTip: string }[] = [];
   const plannedTip = new Map<string, string>();
   let findings = 0;
@@ -1448,7 +1529,6 @@ const extractBranches = (apply: boolean) => {
   subheading('Branches');
   sources.forEach((source, i) => {
     const extracted = extractedNameOf(source);
-    const extractedBelow = i ? extractedNameOf(sources[i - 1]) : undefined;
     const commits = own.get(source) ?? [];
     const label = `${cyan(source)} → ${cyan(extracted)}`;
     if (branches.includes(extracted)) {
@@ -1466,7 +1546,7 @@ const extractBranches = (apply: boolean) => {
       const { missing, extraCount } = compareWithExtracted(
         commits,
         extracted,
-        extractedForkOf(extracted, extractedBelow),
+        extractedForkOf(extracted, sources.slice(0, i).map(extractedNameOf)),
       );
       if (extraCount) {
         findings++;
@@ -1486,23 +1566,27 @@ const extractBranches = (apply: boolean) => {
       plannedTip.set(extracted, replay.tip);
       return;
     }
-    const onBase = replayOnto(commits, tipOf(base));
-    if (onBase.ok) {
-      good(`${label}  new on ${base}`);
-      moves.push({ extracted, tip: onBase.tip, oldTip: '' });
-      plannedTip.set(extracted, onBase.tip);
+    const blocker = blockerOf.get(source);
+    if (blocker) {
+      findings++;
+      bad(`${label}  ${blocker}`);
       return;
     }
-    const belowTip = extractedBelow
-      ? plannedTip.get(extractedBelow)
-      : undefined;
-    if (!extractedBelow || !belowTip)
-      return reportConflict(label, base, onBase);
-    const onBelow = replayOnto(commits, belowTip);
-    if (!onBelow.ok) return reportConflict(label, extractedBelow, onBelow);
-    good(`${label}  new on ${extractedBelow}, since it conflicts on ${base}`);
-    moves.push({ extracted, tip: onBelow.tip, oldTip: '' });
-    plannedTip.set(extracted, onBelow.tip);
+    // A branch in a chain goes on the copy of the one below it there, so each copy holds all it needs.
+    const chain = chains.find((members) => members.includes(source)) ?? [];
+    const chainedOn = chain[chain.indexOf(source) - 1];
+    const onto = chainedOn ? extractedNameOf(chainedOn) : base;
+    const start = chainedOn ? plannedTip.get(onto) : tipOf(base);
+    if (!start) {
+      findings++;
+      bad(`${label}  goes on ${onto}, which could not be made; see above`);
+      return;
+    }
+    const replay = replayOnto(commits, start);
+    if (!replay.ok) return reportConflict(label, onto, replay);
+    good(`${label}  new on ${onto}`);
+    moves.push({ extracted, tip: replay.tip, oldTip: '' });
+    plannedTip.set(extracted, replay.tip);
   });
 
   subheading('Conclusion');
@@ -1538,16 +1622,14 @@ const extractBranches = (apply: boolean) => {
   }
 };
 
-const replaysOf = (commits: Commit[]): Replay[] =>
-  commits.map((commit) => ({ commit, fold: false }));
-
 // Tries each branch above the PRs and the __ block onto the base alone, and moved down to just above them.
 const extractableBranches = () => {
   const wip = currentBranch();
-  const { branches, own, pending } = readStack(wip);
+  const stack = readStack(wip);
+  const { branches, own, pending } = stack;
   const pulls = openPullRequests();
-  heading(`Extractable onto ${base}`);
-  if (!pulls)
+  if (!asJson) heading(`Extractable onto ${base}`);
+  if (!pulls && !asJson)
     attention(
       `could not list PRs with gh, so only the ${EXTRACT_SOURCE_PREFIX} block holds branches back`,
     );
@@ -1560,42 +1642,7 @@ const extractableBranches = () => {
       (own.get(branch) ?? []).map((commit) => [commit.sha, branch] as const),
     ),
   );
-  const commitsOf = (group: string[]) =>
-    branches
-      .filter((branch) => group.includes(branch))
-      .flatMap((branch) => own.get(branch) ?? []);
-
-  // Grows the group by the branches each conflict needs, until it applies onto the base or needs an unmovable one.
-  const standaloneGroup = (branch: string) => {
-    let group = [branch];
-    for (;;) {
-      const [conflict] = simulateRebase(
-        replaysOf(commitsOf(group)),
-        tipOf(base),
-        wip,
-      ).conflicts;
-      if (!conflict) return { group };
-      const files = conflict.files.join(', ');
-      const conflictAt = branches.indexOf(
-        branchOfSha.get(conflict.commit.sha) ?? branch,
-      );
-      const needs = branches
-        .slice(0, conflictAt)
-        .filter(
-          (below) =>
-            !group.includes(below) &&
-            (own.get(below) ?? []).some((commit) =>
-              changesAny(commit.sha, conflict.files),
-            ),
-        );
-      if (!needs.length)
-        return { group, blocker: `conflicts with ${base} itself (${files})` };
-      const unmovable = needs.filter((need) => !movable(need));
-      if (unmovable.length)
-        return { group, blocker: `needs ${unmovable.join(', ')} (${files})` };
-      group = [...group, ...needs];
-    }
-  };
+  const commitsOf = (group: string[]) => commitsOfBranches(stack, group);
 
   const moveConflict = (group: string[]) => {
     const start =
@@ -1620,36 +1667,94 @@ const extractableBranches = () => {
     return `${where} conflicts after the move (${conflict.files.join(', ')})`;
   };
 
-  subheading('Branches');
-  const extractable = new Set<string>();
   const tested = branches.filter(movable);
-  if (!tested.length)
-    good(
-      `no branch above the PRs and the ${EXTRACT_SOURCE_PREFIX} block to test`,
+  const needsOf = new Map<string, string[]>();
+  const blockerOf = new Map<string, string>();
+  for (const branch of tested.filter((name) => own.get(name)?.length)) {
+    const { group, blocker } = standaloneGroup(stack, wip, branch, movable);
+    if (blocker) blockerOf.set(branch, blocker);
+    else needsOf.set(branch, group);
+  }
+  for (const branch of tested.filter((name) => !own.get(name)?.length))
+    blockerOf.set(branch, 'no commits of its own');
+  const baseSha = tipOf(base);
+  // The commit each member's replay onto the base ends at, for checking that it builds there.
+  const replayTipsOf = (chain: string[]) => {
+    const commits = commitsOf(chain);
+    const replay = simulateRebase(replaysOf(commits), baseSha, wip);
+    const tips = new Map<string, string>();
+    if (replay.conflicts.length) return tips;
+    for (const branch of chain) {
+      const last = own.get(branch)?.at(-1);
+      if (last) tips.set(branch, replay.tipAfterPick[commits.indexOf(last)]);
+    }
+    return tips;
+  };
+  const chainReports = mergeGroups([...needsOf.values()], branches).map(
+    (chain) => {
+      const tips = replayTipsOf(chain);
+      return {
+        moveConflict: moveConflict(chain) ?? null,
+        members: chain.map((name, at) => ({
+          name,
+          needs: (needsOf.get(name) ?? []).filter((other) => other !== name),
+          start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
+          replay: tips.get(name) ?? null,
+        })),
+      };
+    },
+  );
+  const extractable = new Set(
+    chainReports
+      .filter((report) => !report.moveConflict)
+      .flatMap((report) => report.members.map((member) => member.name)),
+  );
+
+  if (asJson) {
+    const blocked = [...blockerOf].map(([name, reason]) => ({ name, reason }));
+    const report = { base, baseSha, wip, prsListed: Boolean(pulls) };
+    console.log(
+      JSON.stringify({ ...report, chains: chainReports, blocked }, null, 2),
     );
-  for (const branch of tested) {
-    if (!own.get(branch)?.length) {
-      attention(`${cyan(branch)}  no commits of its own`);
-      continue;
+    return;
+  }
+
+  type ChainReport = (typeof chainReports)[number];
+  const reportChain = ({ moveConflict, members }: ChainReport) => {
+    const replaysTo = (replay: string | null) =>
+      replay ? ` · replays to ${yellow(replay.slice(0, 10))}` : '';
+    const name = members.map((member) => cyan(member.name)).join(' → ');
+    const singleTip = members.length === 1 ? replaysTo(members[0].replay) : '';
+    if (moveConflict) attention(`${name}  but ${moveConflict}${singleTip}`);
+    else good(`${name}  moves down cleanly${singleTip}`);
+    if (!members[0].replay)
+      attention(`  the chain conflicts on ${base} when replayed as one`);
+    if (members.length === 1) return;
+    for (const member of members) {
+      const needsText = member.needs.length
+        ? `needs ${member.needs.join(', ')}`
+        : 'stands alone';
+      console.log(
+        `    ${member.name}  ${needsText}${replaysTo(member.replay)}`,
+      );
     }
-    const { group, blocker } = standaloneGroup(branch);
-    if (blocker) {
-      bad(`${cyan(branch)}  ${blocker}`);
-      continue;
-    }
-    const others = group.filter((member) => member !== branch);
-    const together = others.length
-      ? `, together with ${others.join(', ')}`
-      : '';
-    const blockedMove = moveConflict(group);
-    if (blockedMove) {
-      attention(`${cyan(branch)}  stands alone${together}, but ${blockedMove}`);
-      continue;
-    }
-    good(
-      `${cyan(branch)}  stands alone on ${base}${together} · moves down cleanly`,
-    );
-    for (const member of group) extractable.add(member);
+  };
+
+  subheading(`Stand alone on ${base}`);
+  const singles = chainReports.filter((report) => report.members.length === 1);
+  if (!singles.length) console.log('none');
+  for (const report of singles) reportChain(report);
+
+  subheading('Chains, each extracted as one stack in this order');
+  const stacked = chainReports.filter((report) => report.members.length > 1);
+  if (!stacked.length) console.log('none');
+  for (const report of stacked) reportChain(report);
+
+  subheading('Cannot leave');
+  if (!blockerOf.size) console.log('none');
+  for (const [branch, blocker] of blockerOf) {
+    if (own.get(branch)?.length) bad(`${cyan(branch)}  ${blocker}`);
+    else attention(`${cyan(branch)}  ${blocker}`);
   }
 
   subheading('Conclusion');
@@ -1661,7 +1766,7 @@ const extractableBranches = () => {
     `${extractable.size} branch${extractable.size === 1 ? '' : 'es'} can leave the stack as far as the text shows; nothing checked that they build`,
   );
   console.log(
-    `To mark them, rename each, then move its update-ref line into the ${EXTRACT_SOURCE_PREFIX} block and apply:`,
+    `To mark them, rename each, move its update-ref line into the ${EXTRACT_SOURCE_PREFIX} block with each chain in its order, and apply:`,
   );
   for (const branch of branches.filter((name) => extractable.has(name)))
     console.log(`  git branch -m ${branch} ${EXTRACT_SOURCE_PREFIX}${branch}`);
@@ -1808,7 +1913,7 @@ const exportPlan = () => {
     const status = isExtractSource(branch)
       ? mirrorStatus(
           branch,
-          sources[sources.indexOf(branch) - 1],
+          sources.slice(0, sources.indexOf(branch)),
           own.get(branch) ?? [],
           pulls,
         )
