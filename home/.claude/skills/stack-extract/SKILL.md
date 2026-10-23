@@ -51,6 +51,8 @@ For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<pa
 2. Read the repository's testing guide, such as `agent-project/testing-ops.md`, for failures it says happen in a worktree. Report those as known, never as red.
 3. Run `worktree.mts open`, then `checks.mts` with the npm script names, then `worktree.mts close`. Run `close` also when you stop early.
 
+**Report each result as it lands, because a run can take an hour and shows the user nothing until it ends.** Start `checks.mts` with `run_in_background`, its output sent to `.agent-context/.tmp/stack-extract-results/checks-progress.txt` with `> <file> 2>&1`. Then watch that file with the Monitor tool, `tail -n +1 -F <file>` and `timeout_ms` at its 30-minute cap. For each line that arrives, tell the user in one sentence which commit and script finished, its verdict, and how many commits are left. When the monitor expires before the run ends, re-arm it with `tail -n 0 -F <file>`, so lines already reported do not come again. Never re-arm by starting `checks.mts` again. Once the background run's completion notice arrives, stop the monitor with TaskStop.
+
 `checks.mts` prints one line per commit and script, saves it to `checks/summary.txt`, and saves each script's output beside it. It compares error lines, leaving out line and column, and each line carries one verdict:
 
 | Verdict | Means |
