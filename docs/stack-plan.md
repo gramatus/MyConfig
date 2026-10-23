@@ -99,9 +99,29 @@ Branches named with a `__` prefix are extract sources, which step 8 describes. E
 
 The export marks the file with a `# mode: full` line, and `save` refuses a file exported in the other mode, so export again after switching. Every commit has to stay in the file exactly once.
 
-Full mode also takes `fixup` (`f`) and `squash` (`s`) in place of `pick`, as in a rebase todo. Either one folds the commit into the pick above it, so it has to follow a pick in the same branch rather than an `update-ref` line. A squash stops the rebase for the combined message. `save` removes the note from a folded commit, because that commit stops existing. `apply` records each fold in the file's `# folded:` line. `verify` then lists the range-diff entries those folds account for under "from folds", rather than as dropped or added, and the tree check still covers them.
+Full mode also takes `fixup` (`f`), `fixup -C` and `squash` (`s`) in place of `pick`, as in a rebase todo. Either one folds the commit into the pick above it, so it has to follow a pick in the same branch rather than an `update-ref` line. A squash stops the rebase for the combined message. `save` removes the note from a folded commit, because that commit stops existing. `apply` records each fold in the file's `# folded:` line. `verify` then lists the range-diff entries those folds account for under "from folds", rather than as dropped or added, and the tree check still covers them.
 
 Notes record which branch a commit goes to, but not its order within the branch. So in full mode `preview` and `apply` take the todo from the file itself, rather than from the notes. `save` still writes notes for the waiting commits and stores the order, so switching back to short mode loses no placement. A re-export before `apply` does lose any reordering within a branch, except in `stackplan.txt.bak`.
+
+#### Folding by subject
+
+A commit whose subject starts with `fixup!`, `squash!` or `amend!` folds into the commit its subject names, as `git rebase --autosquash` would fold it. The subject is the whole instruction: `preview` and `apply` fold it in either mode, with no edit to the plan.
+
+The text after the prefix names the target. Like git, stack-plan looks for it among the earlier commits since the base, in this order:
+
+1. A commit with exactly that subject.
+2. A commit whose SHA starts with that text.
+3. A commit whose subject starts with that text.
+
+Nested prefixes, as in `fixup! fixup! feat: x`, fold into the commit at the root. A subject that matches no earlier commit stays an ordinary commit, and `export` and `preview` warn about it. A subject naming a commit the base already holds is the usual case.
+
+The outer prefix gives the verb. `fixup!` becomes `fixup`, which keeps the target's message. `squash!` becomes `squash`, which stops the rebase for the combined message. `amend!` becomes `fixup -C`, which replaces the target's message with the amend commit's message. Git leaves out the `amend!` line itself.
+
+The fold goes straight after its target, and after any earlier folds into it. It follows the target wherever the target lands: in its own branch, or in the branch a waiting target moves to. The target's branch then counts as changed, so the rebase starts at the branch below it. `save` removes the note from a folding commit, and the rebase ignores it.
+
+In short mode the plan file shows a folding commit only as a comment under its target's branch, such as `# fold fixup 56f119bbf5 fixup! feat(hooks): … → into 3a1c9e0b2d`. `save` ignores that comment. In full mode export writes the real `fixup`, `squash` or `fixup -C` line after the target. In either mode `save` refuses a folding commit listed as `pick`, and exporting again replaces that line.
+
+Only `preview` and `apply` fold. `cut`, `sync` and `extract` replay a folding commit as it is.
 
 ### 3. Save
 

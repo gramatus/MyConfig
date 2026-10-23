@@ -179,7 +179,7 @@ type Commit = {
   branches: string[];
   note: string;
 };
-type Verb = 'pick' | 'fixup' | 'squash';
+type Verb = 'pick' | 'fixup' | 'squash' | 'amend';
 type Step = { pick: Commit; verb: Verb } | { updateRef: string };
 type Replay = { commit: Commit; fold: boolean };
 const VERBS: Record<string, Verb> = {
@@ -190,8 +190,66 @@ const VERBS: Record<string, Verb> = {
   squash: 'squash',
   s: 'squash',
 };
+const todoVerb = (verb: Verb) => (verb === 'amend' ? 'fixup -C' : verb);
 const folds = (step?: Step) =>
   step !== undefined && 'pick' in step && step.verb !== 'pick';
+
+const FOLD_PREFIXES: [string, Verb][] = [
+  ['fixup!', 'fixup'],
+  ['squash!', 'squash'],
+  ['amend!', 'amend'],
+];
+type Fold = { verb: Verb; into: Commit };
+
+// As git rebase --autosquash: the outer prefix gives the verb, and the subject under every prefix names an earlier commit.
+const foldsBySubject = (line: Commit[]) => {
+  const folding = new Map<string, Fold>();
+  const unmatched: Commit[] = [];
+  const prefixOf = (text: string) =>
+    FOLD_PREFIXES.find(([prefix]) => text.startsWith(prefix));
+  line.forEach((commit, index) => {
+    const outer = prefixOf(commit.subject);
+    if (!outer) return;
+    let named = commit.subject;
+    let found: typeof outer | undefined = outer;
+    while (found) {
+      named = named.slice(found[0].length).trimStart();
+      found = prefixOf(named);
+    }
+    const earlier = line.slice(0, index);
+    const target = !named
+      ? undefined
+      : (earlier.find(
+          (candidate) =>
+            !folding.has(candidate.sha) && candidate.subject === named,
+        ) ??
+        (/^[0-9a-f]{4,40}$/.test(named)
+          ? earlier.find((candidate) => candidate.sha.startsWith(named))
+          : undefined) ??
+        earlier.find((candidate) => candidate.subject.startsWith(named)));
+    if (target)
+      folding.set(commit.sha, {
+        verb: outer[1],
+        into: folding.get(target.sha)?.into ?? target,
+      });
+    else unmatched.push(commit);
+  });
+  const foldsInto = (target: Commit) =>
+    line.filter((commit) => folding.get(commit.sha)?.into.sha === target.sha);
+  return { folding, unmatched, foldsInto };
+};
+
+const printFold = (commit: Commit, into: Commit) =>
+  console.log(
+    `${yellow('fold')}${commitLine(commit)}\n  into${commitLine(into)}`,
+  );
+
+const warnUnmatched = (unmatched: Commit[]) => {
+  for (const commit of unmatched)
+    attention(
+      `the subject asks for a fold, but no earlier commit since ${base} matches it, so it stays a commit:\n${commitLine(commit)}`,
+    );
+};
 
 let root: string | undefined;
 const repoRoot = () => (root ??= git('rev-parse', '--show-toplevel').trim());
@@ -677,8 +735,12 @@ const landingBranches = (todo: string[], wip: string): Landing => {
   for (const line of [...todo].reverse()) {
     const ref = /^update-ref refs\/heads\/(.+)$/.exec(line)?.[1];
     if (ref) order.unshift(ref);
-    else if (/^(?:pick|fixup|squash) /.test(line))
-      landsOn.set(line.split(' ')[1], order[0]);
+    else {
+      const sha = /^(?:pick|fixup|squash)\s+(?:-C\s+)?([0-9a-f]+)/.exec(
+        line,
+      )?.[1];
+      if (sha) landsOn.set(sha, order[0]);
+    }
   }
   return { landsOn, order };
 };
@@ -1858,6 +1920,7 @@ const exportPlan = () => {
   const wip = currentBranch();
   const full = fullMode();
   const { line, branches: current, pending, own } = readStack(wip);
+  const { folding, unmatched, foldsInto } = foldsBySubject(line);
   // An order saved but not yet rebased is exported as planned, like the notes are.
   const branches = desiredOrder(current);
   const sections = new Map<string, Commit[]>(
@@ -1865,7 +1928,21 @@ const exportPlan = () => {
   );
   const untagged: Commit[] = [];
   const strayNotes: Commit[] = [];
-  for (const commit of pending) {
+  const waiting = pending.filter((commit) => !folding.has(commit.sha));
+  // Short mode lists no fold, since the subject decides it; the comment only shows where it goes.
+  const foldLines = (target: Commit) =>
+    foldsInto(target).map((commit) => {
+      const verb = todoVerb(folding.get(commit.sha)!.verb);
+      const listed = `${verb} ${commit.sha.slice(0, 10)} ${commit.subject}`;
+      return full
+        ? listed
+        : `# fold ${listed} → into ${target.sha.slice(0, 10)}`;
+    });
+  const linesOf = (commits: Commit[], marker = '') =>
+    commits
+      .filter((commit) => !folding.has(commit.sha))
+      .flatMap((commit) => [pickLine(commit, marker), ...foldLines(commit)]);
+  for (const commit of waiting) {
     const section = sections.get(commit.note);
     if (section) section.push(commit);
     else {
@@ -1894,7 +1971,13 @@ const exportPlan = () => {
     ...(full
       ? [
           `# Full mode: every commit since ${base} is listed, and the rebase follows this order.`,
-          '# fixup or squash in place of pick folds that commit into the pick above it.',
+          '# fixup, squash or fixup -C in place of pick folds that commit into the pick above it.',
+        ]
+      : []),
+    ...(folding.size
+      ? [
+          '# A fixup!, squash! or amend! commit folds into the commit its subject names, after that',
+          `# commit, wherever it goes${full ? '' : '; its # fold line shows where, and save ignores it'}.`,
         ]
       : []),
     '',
@@ -1941,15 +2024,16 @@ const exportPlan = () => {
           pulls,
         )
       : undefined;
-    const inBranch = full ? (own.get(branch) ?? []) : [];
-    const moving = sections
-      .get(branch)!
-      .map((commit) => pickLine(commit, `${MOVED_MARKER} `));
+    const ownCommits = own.get(branch) ?? [];
+    const inBranch = full
+      ? linesOf(ownCommits)
+      : ownCommits.flatMap((commit) => foldLines(commit));
+    const moving = linesOf(sections.get(branch)!, `${MOVED_MARKER} `);
     if (pulls && i === stopAt) out.push(PRS_STOP_MARKER);
     out.push(
       ...(marker ? [marker] : []),
       ...(status ? [status] : []),
-      ...inBranch.map((commit) => pickLine(commit)),
+      ...inBranch,
       ...moving,
       `update-ref refs/heads/${branch}\n`,
       ...(branch === sources.at(-1) ? [OTHER_STACKS_STOP_MARKER] : []),
@@ -1957,9 +2041,9 @@ const exportPlan = () => {
   });
   if (pulls && stopAt === branches.length) out.push(PRS_STOP_MARKER);
   out.push(
-    ...sections.get(wip)!.map((commit) => pickLine(commit)),
+    ...linesOf(sections.get(wip)!),
     UNTAGGED_MARKER,
-    ...untagged.map((commit) => pickLine(commit)),
+    ...linesOf(untagged),
     '',
   );
 
@@ -1973,9 +2057,11 @@ const exportPlan = () => {
   const inBranches = full
     ? ` · ${line.length - pending.length} in branches`
     : '';
+  const folded = folding.size ? ` · ${folding.size} fold by subject` : '';
   console.log(
-    `${pending.length} waiting · ${pending.length - untagged.length} placed${inBranches} · ${branches.length} stack branches`,
+    `${waiting.length} waiting · ${waiting.length - untagged.length} placed${inBranches}${folded} · ${branches.length} stack branches`,
   );
+  warnUnmatched(unmatched);
   if (untagged.length)
     attention(`${untagged.length} untagged, below the marker`);
   else good('every waiting commit is placed');
@@ -1994,8 +2080,11 @@ const exportPlan = () => {
 const savePlan = () => {
   const wip = currentBranch();
   const { line: history, branches, pending } = readStack(wip);
+  const { folding } = foldsBySubject(history);
   const full = readHeader(MODE_PREFIX) === 'full';
-  const listable = full ? history : pending;
+  const listable = full
+    ? history
+    : pending.filter((commit) => !folding.has(commit.sha));
   const errors: string[] = [];
   const targets = new Map<string, string | undefined>();
   const listed = new Set<string>();
@@ -2017,7 +2106,9 @@ const savePlan = () => {
         return;
       }
       if (!line || line.startsWith('#')) return;
-      const [verb, arg = ''] = line.split(/\s+/);
+      const fields = line.split(/\s+/);
+      const amends = /^(?:fixup|f)$/.test(fields[0]) && fields[1] === '-C';
+      const [verb, arg = ''] = amends ? [fields[0], fields[2]] : fields;
       if (verb === 'update-ref') {
         if (pastMarker)
           errors.push(`${where}: update-ref below the untagged marker`);
@@ -2027,14 +2118,20 @@ const savePlan = () => {
         for (const sha of held) targets.set(sha, branch);
         held = [];
       } else if (Object.hasOwn(VERBS, verb)) {
-        const kind = VERBS[verb];
+        const kind = amends ? 'amend' : VERBS[verb];
         const commit = listable.find((candidate) =>
           candidate.sha.startsWith(arg),
         );
+        const foldBySubject = arg
+          ? history.find(
+              (candidate) =>
+                candidate.sha.startsWith(arg) && folding.has(candidate.sha),
+            )
+          : undefined;
         const scope = full ? `in ${base}..${wip}` : `waiting on ${wip}`;
         if (kind !== 'pick' && !full)
           errors.push(
-            `${where}: ${kind} needs full mode (stack-plan mode full)`,
+            `${where}: ${todoVerb(kind)} needs full mode (stack-plan mode full)`,
           );
         // Folding across an update-ref would leave the branch on the commit before the fold.
         else if (
@@ -2042,7 +2139,12 @@ const savePlan = () => {
           !(steps.at(-1) && 'pick' in steps.at(-1)!)
         ) {
           errors.push(
-            `${where}: ${kind} must follow a pick in the same branch`,
+            `${where}: ${todoVerb(kind)} must follow a pick in the same branch`,
+          );
+        } else if (kind === 'pick' && foldBySubject) {
+          const { verb: folds, into } = folding.get(foldBySubject.sha)!;
+          errors.push(
+            `${where}: ${arg} folds into ${into.sha.slice(0, 10)} by its subject, so it cannot be a pick; ${full ? `make it ${todoVerb(folds)}` : 'leave it out, or export again'}`,
           );
         } else if (!commit)
           errors.push(`${where}: ${arg} is not ${scope}; export again`);
@@ -2057,13 +2159,13 @@ const savePlan = () => {
         }
       } else
         errors.push(
-          `${where}: expected pick, fixup, squash or update-ref, got "${verb}"`,
+          `${where}: expected pick, fixup, fixup -C, squash or update-ref, got "${verb}"`,
         );
     });
 
   if (!pastMarker) errors.push('the untagged marker line is missing');
   // A folded commit stops existing, so its note goes rather than piling onto the commit it folds into.
-  for (const sha of folded) targets.set(sha, undefined);
+  for (const sha of [...folded, ...folding.keys()]) targets.set(sha, undefined);
   if (full !== fullMode()) {
     errors.push(
       `the plan was exported in ${full ? 'full' : 'short'} mode, and the mode is now ${full ? 'short' : 'full'}; export again`,
@@ -2130,7 +2232,8 @@ const savePlan = () => {
 
   const toTag = pending.filter(
     (commit) =>
-      listed.has(commit.sha) && (targets.get(commit.sha) ?? '') !== commit.note,
+      (listed.has(commit.sha) || folding.has(commit.sha)) &&
+      (targets.get(commit.sha) ?? '') !== commit.note,
   );
   const tagged = toTag.filter((commit) => targets.get(commit.sha));
   const untagged = toTag.filter((commit) => !targets.get(commit.sha));
@@ -2180,9 +2283,10 @@ const savePlan = () => {
   const unplaced = pending.filter(
     (commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha),
   );
-  if (unplaced.length) {
+  const leftUntagged = unplaced.filter((commit) => !folding.has(commit.sha));
+  if (leftUntagged.length) {
     attention('left untagged, committed after export:');
-    for (const commit of unplaced) console.log(commitLine(commit));
+    for (const commit of leftUntagged) console.log(commitLine(commit));
   }
   if (current !== recorded) {
     if (!dryRun) writeHeader(EXPORTED_AT_PREFIX, current);
@@ -2190,7 +2294,18 @@ const savePlan = () => {
       `${dryRun ? 'would move' : 'moved'} the plan's exported-at to ${yellow(current.slice(0, 10))}`,
     );
   }
-  steps.push(...unplaced.map((pick) => ({ pick, verb: 'pick' as const })));
+  for (const pick of unplaced) {
+    const fold = folding.get(pick.sha);
+    if (!fold) {
+      steps.push({ pick, verb: 'pick' });
+      continue;
+    }
+    let at = steps.findIndex(
+      (step) => 'pick' in step && step.pick.sha === fold.into.sha,
+    );
+    while (folds(steps[at + 1])) at++;
+    steps.splice(at + 1, 0, { pick, verb: fold.verb });
+  }
   return { targets, order: updateRefs, steps: full ? steps : undefined };
 };
 
@@ -2239,9 +2354,17 @@ const verifyRebase = () => {
   );
   const foldShas = foldGroups.flat();
   const foldSubjects = new Set(
-    foldGroups.map(([, target]) =>
-      gitQuiet('log', '-1', '--format=%s', target).trim(),
-    ),
+    foldGroups.flatMap(([folded, target]) => {
+      const subject = gitQuiet('log', '-1', '--format=%s', target).trim();
+      // fixup -C keeps an amend! commit's message without its first line.
+      const [first, ...body] = gitQuiet('log', '-1', '--format=%B', folded)
+        .trim()
+        .split('\n');
+      const amended = first.startsWith('amend!')
+        ? body.find((line) => line.trim())?.trim()
+        : undefined;
+      return amended ? [subject, amended] : [subject];
+    }),
   );
   for (const entry of entries) {
     const fromOld =
@@ -2495,7 +2618,7 @@ const newTodo = () => {
   const todo: string[] = [];
   const sequence: Replay[] = [];
   const pick = (commit: Commit, marker = '', verb: Verb = 'pick') => {
-    todo.push(`${verb} ${commit.sha} ${marker}${commit.subject}`);
+    todo.push(`${todoVerb(verb)} ${commit.sha} ${marker}${commit.subject}`);
     sequence.push({ commit, fold: verb !== 'pick' });
   };
   return { todo, sequence, pick };
@@ -2511,17 +2634,32 @@ const branchMarker = (branch: string, branches: string[], order: string[]) => {
 
 // Short mode: each branch keeps its own commits as a block, and waiting commits join the branch their note names.
 const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
-  const { branches, pending, own } = readStack(wip);
+  const { line, branches, pending, own } = readStack(wip);
+  const { folding, unmatched, foldsInto } = foldsBySubject(line);
   // A dry-run save writes no notes or config, so its plan stands in for them.
   for (const commit of pending)
     if (planned?.targets.has(commit.sha))
       commit.note = planned.targets.get(commit.sha) ?? '';
   const order = planned?.order ?? desiredOrder(branches);
+  // A folding commit goes with its target, whatever its note says.
   const moves = pending.filter(
-    (commit) => commit.note !== wip && order.includes(commit.note),
+    (commit) =>
+      !folding.has(commit.sha) &&
+      commit.note !== wip &&
+      order.includes(commit.note),
+  );
+  const moved = new Set(moves.map((commit) => commit.sha));
+  const branchOf = new Map(
+    [...own].flatMap(([branch, commits]) =>
+      commits.map((commit) => [commit.sha, branch] as const),
+    ),
+  );
+  const foldsLandIn = [...folding.values()].map(({ into }) =>
+    moved.has(into.sha) ? into.note : (branchOf.get(into.sha) ?? wip),
   );
   const receives = (branch: string) =>
-    moves.some((commit) => commit.note === branch);
+    moves.some((commit) => commit.note === branch) ||
+    foldsLandIn.includes(branch);
   let first = 0;
   while (
     first < order.length &&
@@ -2529,7 +2667,8 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
     !receives(order[first])
   )
     first++;
-  if (first === order.length) {
+  warnUnmatched(unmatched);
+  if (first === order.length && !foldsLandIn.includes(wip)) {
     good(
       `no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`,
     );
@@ -2538,21 +2677,31 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   // Everything below the first changed branch stays as it is.
   const rebaseBase = first === 0 ? base : order[first - 1];
   printByBranch(order, (commit) => commit.note, moves);
+  for (const [sha, { into }] of folding)
+    printFold(line.find((commit) => commit.sha === sha)!, into);
   printOrderChanges(branches, order);
   console.log(`${bold('base')}  ${cyan(rebaseBase)}`);
 
-  const moved = new Set(moves.map((commit) => commit.sha));
   const { todo, sequence, pick } = newTodo();
+  const pickWithFolds = (commit: Commit, marker = '') => {
+    pick(commit, marker);
+    for (const fold of foldsInto(commit))
+      pick(fold, '', folding.get(fold.sha)!.verb);
+  };
+  const unfolded = (commits: Commit[]) =>
+    commits.filter((commit) => !folding.has(commit.sha));
   for (const branch of order.slice(first)) {
     const marker = branchMarker(branch, branches, order);
     if (marker) todo.push(marker);
-    for (const commit of own.get(branch) ?? []) pick(commit);
+    for (const commit of unfolded(own.get(branch) ?? [])) pickWithFolds(commit);
     for (const commit of moves.filter((move) => move.note === branch))
-      pick(commit, `${MOVED_MARKER} `);
+      pickWithFolds(commit, `${MOVED_MARKER} `);
     todo.push(`update-ref refs/heads/${branch}`, '');
   }
-  for (const commit of pending.filter((commit) => !moved.has(commit.sha)))
-    pick(commit);
+  for (const commit of unfolded(pending).filter(
+    (commit) => !moved.has(commit.sha),
+  ))
+    pickWithFolds(commit);
   return { todo, sequence, rebaseBase };
 };
 
@@ -2603,11 +2752,9 @@ const fullRebase = (
     (commit) => !foldedInto.has(commit.sha) && was(commit) !== goes(commit),
   );
   printByBranch([...order, wip], goes, moved);
-  for (const [sha, target] of foldedInto) {
-    console.log(
-      `${yellow('fold')}${commitLine(line.find((commit) => commit.sha === sha)!)}\n  into${commitLine(target)}`,
-    );
-  }
+  for (const [sha, target] of foldedInto)
+    printFold(line.find((commit) => commit.sha === sha)!, target);
+  warnUnmatched(foldsBySubject(line).unmatched);
   printOrderChanges(branches, order);
   console.log(
     `${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : cyan(base)}`,
@@ -2718,7 +2865,9 @@ const picksIn = (todo: string) =>
     .split('\n')
     .flatMap(
       (line) =>
-        /^(?:pick|p|fixup|f|squash|s)\s+([0-9a-f]+)/.exec(line)?.[1] ?? [],
+        /^(?:pick|p|fixup|f|squash|s)\s+(?:-C\s+)?([0-9a-f]+)/.exec(
+          line,
+        )?.[1] ?? [],
     );
 const dropsIn = (todo: string) =>
   todo
