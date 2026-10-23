@@ -14,6 +14,12 @@ Take a stack-plan reorder from preview to a verified result without handing git 
 
 **Name every commit by its subject, or a recognisable part of it, in anything the user reads.** A sha may follow as a second handle, never stand alone, because the user does not keep shas in their head. This binds the asks above all, which the user must be able to answer without looking anything up.
 
+## Where you come in
+
+**The usual case is a rebase the user has already started.** Their own `sp preview` showed a few minor conflicts, they ran `sp apply -f`, and they typed this command at the first stop. Check `git status` first. Where it shows a rebase in progress, skip "Before the rebase starts" and begin at "At each stop". The user has read the preview and chosen the placements, and they started the rebase, so whether other sessions are idle is already settled. The feasibility check that step 7 of "At each stop" points back to still applies.
+
+Where no rebase is in progress, run the whole skill from "Before the rebase starts".
+
 ## What typing this command approves
 
 **The user typing `/rebase-resolve` approves the git operations `scripts/rebase.mts` performs, and nothing else.** This is a declared exception to two rules that otherwise bind you: the system prompt's "commit or push only when the user asks", and a harness guide's "a blocked operation is never wrapped". The exception covers this script and this rebase, so:
