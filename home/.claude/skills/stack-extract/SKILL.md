@@ -47,7 +47,8 @@ For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<pa
 
 ## 3. Check that each candidate builds
 
-1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck and build. Add lint where it is quick. Leave tests out unless the user asked for them, and list them under "Not covered".
+1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck. Add lint where it is quick. Leave tests out unless the user asked for them, and list them under "Not covered".
+   - **Leave out every check that writes into `node_modules`, and list it under "Not covered".** The worktree's `node_modules` are links to the main checkout's installs, so such a check overwrites them, or fails with `EACCES`. Backstage's build is one: `backstage-cli repo build` writes generated files into `packages/app/node_modules`.
 2. Read the repository's testing guide, such as `agent-project/testing-ops.md`, for failures it says happen in a worktree. Report those as known, never as red.
 3. Run `worktree.mts open`, then `checks.mts` with the npm script names, then `worktree.mts close`. Run `close` also when you stop early.
 
