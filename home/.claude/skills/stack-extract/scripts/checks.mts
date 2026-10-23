@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // Runs npm scripts at the base and at each candidate's replay commit, and sorts each failure.
-// Usage: checks.mts <script>...; run candidates.mts and worktree.mts open first, per ../SKILL.md.
+// Usage: checks.mts <script>... [--changed <script>...]; run candidates.mts and worktree.mts open first, per ../SKILL.md.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type Member = { name: string; replay: string | null };
+type Member = { name: string; start: string | null; replay: string | null };
 type ExtractableReport = {
   baseSha: string;
   chains: { moveConflict: string | null; members: Member[] }[];
 };
-type CheckedRef = { name: string; ref: string; below?: string };
+type CheckedRef = { name: string; ref: string; start?: string; below?: string };
+
+const CHANGED_PATHS_FLAG = '--changed';
 
 const WORKTREE_SCRIPT = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -71,12 +73,27 @@ const isErrorLine = (line: string) =>
   !/^npm (error|ERR!)/.test(line) &&
   !/^Found \d+ errors?\b/.test(line);
 
-const errorLinesOf = (output: string) =>
-  stripAnsi(output).split('\n').filter(isErrorLine);
+/** Returns the error lines, each indented one prefixed with the file heading above it, as ESLint prints them. */
+const errorLinesOf = (output: string) => {
+  let heading = '';
+  const errorLines: string[] = [];
+  for (const line of stripAnsi(output).split('\n')) {
+    if (/^\S/.test(line)) {
+      heading = line;
+    }
+    if (isErrorLine(line)) {
+      errorLines.push(/^\s/.test(line) ? `${heading} ${line.trim()}` : line);
+    }
+  }
+  return errorLines;
+};
 
 // Line and column shift between commits, so the comparison leaves them out.
 const withoutPosition = (line: string) =>
-  line.replace(/\(\d+,\d+\)|:\d+:\d+/g, '').trim();
+  line
+    .replace(/\(\d+,\d+\)|:\d+:\d+/g, '')
+    .replace(/\s\d+:\d+\s/g, ' ')
+    .trim();
 
 const MISSING_MODULE =
   /^(?<file>[^\s(:]+)(?:\(\d+,\d+\)|:\d+:\d+).*Cannot find module '(?<spec>[^']+)'/;
@@ -161,9 +178,14 @@ const verdictOf = (
   return { verdict: 'fails', detail: unexplained[0].trim() };
 };
 
-const scripts = process.argv.slice(2);
-if (!scripts.length) {
-  fail('usage: checks.mts <script>...');
+const scriptArgs = process.argv.slice(2);
+const changedFlagAt = scriptArgs.indexOf(CHANGED_PATHS_FLAG);
+const wholeTreeScripts =
+  changedFlagAt < 0 ? scriptArgs : scriptArgs.slice(0, changedFlagAt);
+const changedPathScripts =
+  changedFlagAt < 0 ? [] : scriptArgs.slice(changedFlagAt + 1);
+if (!wholeTreeScripts.length && !changedPathScripts.length) {
+  fail(`usage: checks.mts <script>... [${CHANGED_PATHS_FLAG} <script>...]`);
 }
 const candidatesPath = join(resultsPath, 'candidates.json');
 if (!existsSync(candidatesPath)) {
@@ -178,12 +200,13 @@ const checkedRefs: CheckedRef[] = [
   ...report.chains
     .filter((chain) => !chain.moveConflict)
     .flatMap(({ members }) =>
-      members.flatMap(({ name, replay }, at) =>
-        replay
+      members.flatMap(({ name, start, replay }, at) =>
+        replay && start
           ? [
               {
                 name,
                 ref: replay,
+                start,
                 below: members[at - 1]?.name ?? BASELINE_NAME,
               },
             ]
@@ -202,7 +225,7 @@ const record = (line: string) => {
   writeFileSync(join(checksPath, 'summary.txt'), `${summary.join('\n')}\n`);
 };
 
-for (const { name, ref, below } of checkedRefs) {
+for (const { name, ref, start, below } of checkedRefs) {
   const moved = run('node', [WORKTREE_SCRIPT, 'goto', ref]);
   writeFileSync(join(checksPath, `${fileNameOf(name)}.goto.txt`), moved.output);
   if (moved.status !== 0) {
@@ -218,8 +241,32 @@ for (const { name, ref, below } of checkedRefs) {
     }
   }
   const errorsHere = new Set<string>();
-  for (const script of scripts) {
-    const result = run('npm', ['--prefix', worktreePath, 'run', script]);
+  const changedPaths = start
+    ? readGit(
+        mainCheckout,
+        'diff',
+        '--name-only',
+        '--diff-filter=d',
+        start,
+        ref,
+      )
+        .split('\n')
+        .filter(Boolean)
+    : [];
+  for (const script of [...wholeTreeScripts, ...changedPathScripts]) {
+    const takesPaths = changedPathScripts.includes(script);
+    if (takesPaths && !changedPaths.length) {
+      record(`${name}  ${script}  skipped  no changed file to check`);
+      continue;
+    }
+    const pathArgs = takesPaths ? ['--', ...changedPaths] : [];
+    const result = run('npm', [
+      '--prefix',
+      worktreePath,
+      'run',
+      script,
+      ...pathArgs,
+    ]);
     const outputName = `${fileNameOf(name)}.${script.replaceAll(':', '-')}.txt`;
     writeFileSync(join(checksPath, outputName), result.output);
     for (const line of errorLinesOf(result.output)) {

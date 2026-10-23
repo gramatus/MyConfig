@@ -24,7 +24,7 @@ This command reports only. **Never rename a branch, edit the plan, or run `stack
 | `worktree.mts open` | Adds the worktree at `.agent-context/.tmp/stack-extract` and links every `node_modules` |
 | `worktree.mts goto <ref>` | Discards what the last checks left, sparing the `node_modules` links, and checks out the ref detached |
 | `worktree.mts close` | Removes the links, then the worktree |
-| `checks.mts <script>...` | Runs each npm script at the base, then at each candidate's replay commit, chains bottom first, and sorts each result |
+| `checks.mts <script>... [--changed <script>...]` | Runs each npm script at the base, then at each candidate's replay commit, chains bottom first, and sorts each result. Scripts after `--changed` get the candidate's changed files |
 
 ## 1. Find the candidates
 
@@ -47,10 +47,11 @@ For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<pa
 
 ## 3. Check that each candidate builds
 
-1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck. Add lint where it is quick. Leave tests out unless the user asked for them, and list them under "Not covered".
+1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck and lint. Leave tests out unless the user asked for them, and list them under "Not covered".
+   - **Lint only the files each candidate changes, through an npm script that takes paths.** A lint of the whole tree at every commit can use up the machine's memory. For ESLint 9 the script needs `--no-warn-ignored` beside `--max-warnings 0`, because it warns about every ignored path it is given, such as a Markdown file. **Where the repository has no such script, stop and ask the user before running any check.** They may want to add one.
    - **Leave out every check that writes into `node_modules`, and list it under "Not covered".** The worktree's `node_modules` are links to the main checkout's installs, so such a check overwrites them, or fails with `EACCES`. Backstage's build is one: `backstage-cli repo build` writes generated files into `packages/app/node_modules`.
 2. Read the repository's testing guide, such as `agent-project/testing-ops.md`, for failures it says happen in a worktree. Report those as known, never as red.
-3. Run `worktree.mts open`, then `checks.mts` with the npm script names, then `worktree.mts close`. Run `close` also when you stop early.
+3. Run `worktree.mts open`, then `checks.mts` with the npm script names, then `worktree.mts close`. Run `close` also when you stop early. Name the scripts that take paths after `--changed`, as in `checks.mts tsc format:check --changed lint:changed`. `checks.mts` gives each of them the files the candidate's own change adds or modifies, and skips them at the base.
 
 **Report each result as it lands, because a run can take an hour and shows the user nothing until it ends.** Start `checks.mts` with `run_in_background`, its output sent to `.agent-context/.tmp/stack-extract-results/checks-progress.txt` with `> <file> 2>&1`. Then watch that file with the Monitor tool, `tail -n +1 -F <file>` and `timeout_ms` at its 30-minute cap. For each line that arrives, tell the user in one sentence which commit and script finished, its verdict, and how many commits are left. When the monitor expires before the run ends, re-arm it with `tail -n 0 -F <file>`, so lines already reported do not come again. Never re-arm by starting `checks.mts` again. Once the background run's completion notice arrives, stop the monitor with TaskStop.
 
@@ -59,6 +60,7 @@ For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<pa
 | Verdict | Means |
 | --- | --- |
 | `pass` | The script exits 0 |
+| `skipped` | A script after `--changed` at the base, or at a candidate that only deletes files |
 | `absent` | The script does not exist at that commit, so the check starts on a later branch. Not red |
 | `inherited` | Every error line also appears at the base or at the chain member below. Not this candidate's |
 | `setup gap` | Every new error is in a file that imports a path git ignores or a package missing from the linked `node_modules`. A fresh worktree lacks those, so list it under "Not covered", never as red |
