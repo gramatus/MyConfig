@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mark|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -105,6 +105,8 @@ const USAGE = [
   '               --apply then moves those branches, and -f moves the clean ones despite a finding',
   '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows;',
   "               --json prints each chain with every member's start and replay commits",
+  '  mark <branch>...  rename each to its __ name, carrying its notes and the saved order along, and export the plan',
+  '               with them as one block above the PRs; -n only shows what it would do',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -130,6 +132,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
   extract: ['--base', '--apply', '--anyway'],
   extractable: ['--base', '--json'],
+  mark: ['--base', '--dry-run'],
   mode: ['full', 'short'],
 };
 
@@ -149,6 +152,7 @@ const usageError = (message?: string): never => {
   process.exit(2);
 };
 let cutAt: string | undefined;
+const branchesToMark: string[] = [];
 if (command !== '_todo') {
   const allowed =
     ALLOWED_FLAGS[command] ??
@@ -157,12 +161,16 @@ if (command !== '_todo') {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
     else if (command === 'cut' && !cutAt && !rest[i].startsWith('-'))
       cutAt = rest[i];
+    else if (command === 'mark' && !rest[i].startsWith('-'))
+      branchesToMark.push(rest[i]);
     else if (!allowed.includes(rest[i]))
       usageError(`${rest[i]} does not apply to ${given}`);
   }
   if (command === 'mode' && rest.length > 1)
     usageError('mode takes one of full or short');
   if (command === 'cut' && !cutAt) usageError('cut needs the branch to cut at');
+  if (command === 'mark' && !branchesToMark.length)
+    usageError('mark needs the branches to mark');
 }
 
 const optionValue = (name: string) => {
@@ -1854,11 +1862,88 @@ const extractableBranches = () => {
   good(
     `${extractable.size} branch${extractable.size === 1 ? '' : 'es'} can leave the stack as far as the text shows; nothing checked that they build`,
   );
-  console.log(
-    `To mark them, rename each, move its update-ref line into the ${EXTRACT_SOURCE_PREFIX} block with each chain in its order, and apply:`,
+  const toMark = branches.filter((name) => extractable.has(name));
+  console.log(`To mark them: stack-plan mark ${toMark.join(' ')}`);
+};
+
+// Renames each branch to its __ name, carries its notes and the saved order along, and exports the plan with the __ block in place.
+const markBranches = (names: string[]) => {
+  const wip = currentBranch();
+  const { branches, pending } = readStack(wip);
+  const pulls = openPullRequests();
+  heading(`Mark${dryRun ? ' (dry run)' : ''}`);
+  if (!pulls)
+    attention('could not list PRs with gh, so a branch with a PR is not caught');
+  const sourceOf = new Map(
+    names.map((name) => [name, `${EXTRACT_SOURCE_PREFIX}${name}`]),
   );
-  for (const branch of branches.filter((name) => extractable.has(name)))
-    console.log(`  git branch -m ${branch} ${EXTRACT_SOURCE_PREFIX}${branch}`);
+  const problems = names.flatMap((name) => {
+    const pull = pulls?.get(name);
+    if (!branches.includes(name)) return [`${name} is not a stack branch`];
+    if (isExtractSource(name)) return [`${name} is an extract source already`];
+    if (pull) return [`${name} has PR #${pull.number}`];
+    if (branchExists(sourceOf.get(name)!))
+      return [`${sourceOf.get(name)} exists already`];
+    return [];
+  });
+  if (problems.length) throw new Error(problems.join('; '));
+
+  const renamed = (branch: string) => sourceOf.get(branch) ?? branch;
+  const order = desiredOrder(branches);
+  const anchorAt = order.findLastIndex(
+    (branch) => isExtractSource(branch) || pulls?.has(branch),
+  );
+  const unmarked = (branch: string) => !sourceOf.has(branch);
+  // Stack order inside the block keeps each chain's members in their order.
+  const markedOrder = [
+    ...order.slice(0, anchorAt + 1).filter(unmarked),
+    ...order.filter((branch) => sourceOf.has(branch)),
+    ...order.slice(anchorAt + 1).filter(unmarked),
+  ].map(renamed);
+  const notesToMove = pending.filter((commit) => sourceOf.has(commit.note));
+
+  for (const [name, source] of sourceOf)
+    console.log(`${cyan(name)} → ${cyan(source)}`);
+  if (notesToMove.length)
+    console.log(
+      `placed in them: ${countOf(notesToMove.length, 'waiting commit')}, whose notes follow the rename`,
+    );
+  printOrderChanges(branches.map(renamed), markedOrder);
+  if (dryRun) {
+    console.log(`To do it: stack-plan mark ${names.join(' ')}`);
+    return;
+  }
+
+  const done: string[] = [];
+  try {
+    for (const [name, source] of sourceOf) {
+      git('branch', '-m', name, source);
+      done.push(name);
+    }
+  } catch (error) {
+    const undo = done.map((name) => `git branch -m ${renamed(name)} ${name}`);
+    throw new Error(
+      `${(error as Error).message}${undo.length ? `\nTo undo the renames so far: ${undo.join('; ')}` : ''}`,
+    );
+  }
+  for (const commit of notesToMove)
+    git(
+      'notes',
+      `--ref=${NOTES_REF}`,
+      'add',
+      '-f',
+      '-m',
+      renamed(commit.note),
+      commit.sha,
+    );
+  git('config', ORDER_KEY, markedOrder.join(' '));
+  const waiting = words(readConfig(NEW_KEY));
+  if (waiting.length) git('config', NEW_KEY, waiting.map(renamed).join(' '));
+  good(`${names.length} branch${names.length === 1 ? '' : 'es'} renamed`);
+  exportPlan();
+  console.log(
+    'Next: stack-plan preview, then stack-plan apply and stack-plan verify',
+  );
 };
 
 // Prints commits under their branch, in stack order.
@@ -2955,6 +3040,7 @@ try {
   else if (command === 'sync') syncStack(rest.includes('--apply'));
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === 'extractable') extractableBranches();
+  else if (command === 'mark') markBranches(branchesToMark);
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));

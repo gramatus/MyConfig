@@ -94,6 +94,36 @@ if $pr_found; then
   done
 fi
 
+# A __ branch is an extract source: it stays local, and the branch named without the prefix gets its PR.
+is_source() { [[ "$1" == __* ]]; }
+
+# The note printed for a stack branch whose PR cannot exist while it sits on a local __ branch.
+waits_on_source() {
+  echo "# ${lines[$1]} sits on ${lines[$1 - 1]}, which stays local; its PR waits until the extracted chains merge"
+}
+
+# Each extracted copy, bottom first, with its PR base: the nearest copy below that it contains, else main.
+copies=()
+declare -A copy_base
+for branch in "${lines[@]:1}"; do
+  is_source "$branch" || continue
+  copy="${branch#__}"
+  copies+=("$copy")
+  git show-ref --verify --quiet "refs/heads/$copy" || continue
+  copy_base[$copy]=main
+  for below in "${copies[@]}"; do
+    [[ "$below" == "$copy" || -z "${copy_base[$below]:-}" ]] && continue
+    if git merge-base --is-ancestor "$below" "$copy"; then copy_base[$copy]="$below"; fi
+  done
+  if [[ -n "${pr_number[$copy]:-}" && "${pr_base[$copy]}" != "${copy_base[$copy]}" ]]; then
+    echo "Warning: #${pr_number[$copy]} ($copy) targets ${pr_base[$copy]}, not ${copy_base[$copy]}." >&2
+  fi
+done
+extracted=()
+for copy in "${copies[@]}"; do
+  if [[ -n "${copy_base[$copy]:-}" ]]; then extracted+=("$copy"); fi
+done
+
 # Pass "blank" as the second argument to follow the marker with an empty line.
 marker_before() {
   if $pr_found && (( $1 == stop_at )); then
@@ -151,6 +181,8 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
+    is_source "${lines[i]}" && continue
+    if is_source "${lines[i-1]}"; then waits_on_source "$i"; continue; fi
     echo "${COMPARE_BASE}/${lines[i-1]}...${lines[i]}?expand=1"
   done
   marker_before "${#lines[@]}"
@@ -161,6 +193,7 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
+    is_source "${lines[i]}" && continue
     echo "/pr-review ${lines[i]} ${lines[i-1]}"
     echo ""
   done
@@ -171,6 +204,7 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
+    is_source "${lines[i]}" && continue
     echo "/pr-summary ${lines[i]} ${lines[i-1]} body-only "
     echo ""
   done
@@ -181,6 +215,7 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
+    is_source "${lines[i]}" && continue
     echo "git fetch origin +${lines[i]}:${lines[i]}"
   done
   marker_before "${#lines[@]}"
@@ -191,6 +226,7 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
+    is_source "${lines[i]}" && continue
     echo "git push -u origin ${lines[i]} --force"
   done
   marker_before "${#lines[@]}"
@@ -201,6 +237,8 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
+    is_source "${lines[i]}" && continue
+    if is_source "${lines[i-1]}"; then waits_on_source "$i"; continue; fi
     echo "pr-create ${lines[i]} ${lines[i-1]}"
   done
   marker_before "${#lines[@]}"
@@ -211,9 +249,60 @@ fi
 
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i"
+    is_source "${lines[i]}" && continue
     echo "git branch ${lines[i]} origin/${lines[i]}"
   done
   marker_before "${#lines[@]}"
+
+  if (( ${#copies[@]} )); then
+    echo ""
+    echo "## Extracted chains"
+    echo ""
+    echo "Each copy's PR targets the copy below it in its chain, or main. Push and create them bottom first."
+    echo ""
+    echo '```text'
+    for copy in "${copies[@]}"; do
+      if [[ -z "${copy_base[$copy]:-}" ]]; then
+        echo "__$copy  not extracted yet: stack-plan extract --apply"
+      else
+        echo "$copy → ${copy_base[$copy]}${pr_number[$copy]:+ #${pr_number[$copy]}}"
+      fi
+    done
+    echo '```'
+  fi
+  if (( ${#extracted[@]} )); then
+    echo ""
+    echo "### Compare links"
+    echo ""
+    for copy in "${extracted[@]}"; do
+      echo "${COMPARE_BASE}/${copy_base[$copy]}...${copy}?expand=1"
+    done
+    echo ""
+    echo "### PR review"
+    echo ""
+    for copy in "${extracted[@]}"; do
+      echo "/pr-review ${copy} ${copy_base[$copy]}"
+      echo ""
+    done
+    echo "### PR summary"
+    echo ""
+    for copy in "${extracted[@]}"; do
+      echo "/pr-summary ${copy} ${copy_base[$copy]} body-only "
+      echo ""
+    done
+    echo "### Push to origin"
+    echo ""
+    for copy in "${extracted[@]}"; do
+      echo "git push -u origin ${copy}"
+    done
+    echo ""
+    echo "### Create PR"
+    echo ""
+    for copy in "${extracted[@]}"; do
+      [[ -n "${pr_number[$copy]:-}" ]] && continue
+      echo "pr-create ${copy} ${copy_base[$copy]}"
+    done
+  fi
 } > "$OUTPUT"
 
 echo "Generated $OUTPUT with ${#lines[@]} branches ($(( ${#lines[@]} - 1 )) pairs)"

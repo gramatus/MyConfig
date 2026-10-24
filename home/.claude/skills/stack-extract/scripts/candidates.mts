@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Saves each extract candidate's own change for the stack-extract skill to read.
-// Usage: candidates.mts [--base <ref>]; ../SKILL.md says when to run it.
+// Saves each extract candidate up to the last ready branch, with its own change, for the stack-extract skill to read.
+// Usage: candidates.mts <last-ready-branch> [--base <ref>]; ../SKILL.md says when to run it.
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -42,18 +42,51 @@ const resultsPath = join(
 
 const fileNameOf = (branch: string) => branch.replaceAll('/', '-');
 
-const reportJson = execFileSync(
-  'node',
-  [STACK_PLAN_SCRIPT, 'extractable', '--json', ...process.argv.slice(2)],
-  {
-    encoding: 'utf8',
-    maxBuffer: 1 << 28,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  },
+const [lastReady, ...extractableArgs] = process.argv.slice(2);
+if (!lastReady || lastReady.startsWith('-')) {
+  console.error('Usage: candidates.mts <last-ready-branch> [--base <ref>]');
+  process.exit(2);
+}
+readGit(mainCheckout, 'rev-parse', '--verify', `refs/heads/${lastReady}`);
+// Every branch below the last ready one in the stack is an ancestor of it.
+const isReady = (branch: string) => {
+  try {
+    readGit(mainCheckout, 'merge-base', '--is-ancestor', branch, lastReady);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const fullReport: ExtractableReport = JSON.parse(
+  execFileSync(
+    'node',
+    [STACK_PLAN_SCRIPT, 'extractable', '--json', ...extractableArgs],
+    {
+      encoding: 'utf8',
+      maxBuffer: 1 << 28,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    },
+  ),
 );
-const report: ExtractableReport = JSON.parse(reportJson);
+// A chain runs in stack order, so cutting it at the first unready member keeps the members that need nothing above the cut.
+const notReady: string[] = [];
+const chains = fullReport.chains.flatMap((chain) => {
+  const cutAt = chain.members.findIndex((member) => !isReady(member.name));
+  if (cutAt < 0) return [chain];
+  notReady.push(...chain.members.slice(cutAt).map((member) => member.name));
+  return cutAt ? [{ ...chain, members: chain.members.slice(0, cutAt) }] : [];
+});
+const blocked = fullReport.blocked.filter(({ name }) => isReady(name));
+notReady.push(
+  ...fullReport.blocked.filter(({ name }) => !isReady(name)).map(({ name }) => name),
+);
+const report = { ...fullReport, lastReady, chains, blocked, notReady };
 mkdirSync(resultsPath, { recursive: true });
-writeFileSync(join(resultsPath, 'candidates.json'), reportJson);
+writeFileSync(
+  join(resultsPath, 'candidates.json'),
+  JSON.stringify(report, null, 2),
+);
 
 for (const { moveConflict, members } of report.chains) {
   const names = members.map((member) => member.name).join(' → ');
@@ -76,4 +109,6 @@ for (const { moveConflict, members } of report.chains) {
 for (const { name, reason } of report.blocked) {
   console.log(`✗ ${name}: cannot leave, ${reason}`);
 }
+if (notReady.length)
+  console.log(`not ready, above ${lastReady}: ${notReady.join(', ')}`);
 console.log(`saved:  ${join(resultsPath, 'candidates.json')}`);

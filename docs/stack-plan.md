@@ -18,6 +18,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
+| `sp mark <b>...` | Renames each branch to its `__` name, carrying its notes and the saved order along, and exports the plan with them as one block. Add `-n` to see what it will do. |
 | `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -272,9 +273,16 @@ Some branches in a stack do not depend on the branches below them, and could be 
 - Its own commits replayed onto `--base`. When that conflicts, it adds the branches below that change the conflicting files and tries again, so a branch that needs another one is reported together with it. A needed branch that has a PR, or sits in the `__` block, makes the branch no candidate.
 - The stack replayed with the branch, and any branches it needs, moved to just above the PR branches and the `__` block. That is the todo a `preview` of the move would run.
 
-Candidates that need each other form a chain, and the output groups them that way. It lists the branches that stand alone first, then each chain in stack order with what each member needs, then the branches that cannot leave. A chain is extracted as one stack in that order, so keep its members in that order in the `__` block. A chain shaped like a tree is flattened: a member that needs only the bottom branch still sits on the member below it. It ends with the `git branch -m` renames that mark the candidates. A clean replay only shows that the text applies, not that the code still builds: a branch can still call something a branch below it adds. Each candidate's line ends with `replays to <sha>`, the in-memory commit its replay onto the base ends at. `--json` prints the same result as JSON, with each chain member's start and replay commits. The `/stack-extract` skill checks that commit out in a scratch worktree, runs the typecheck and build there, and reads the change for what it uses from below.
+Candidates that need each other form a chain, and the output groups them that way. It lists the branches that stand alone first, then each chain in stack order with what each member needs, then the branches that cannot leave. A chain is extracted as one stack in that order, so keep its members in that order in the `__` block. A chain shaped like a tree is flattened: a member that needs only the bottom branch still sits on the member below it. It ends with the `stack-plan mark` line that marks the candidates. A clean replay only shows that the text applies, not that the code still builds: a branch can still call something a branch below it adds. Each candidate's line ends with `replays to <sha>`, the in-memory commit its replay onto the base ends at. `--json` prints the same result as JSON, with each chain member's start and replay commits. The `/stack-extract` skill checks that commit out in a scratch worktree, runs the typecheck and build there, and reads the change for what it uses from below.
 
-The `__` branches go in one block directly above the branches that have PRs. Getting them there is an ordinary plan edit: rename the branch, move its `update-ref` line into the block, then `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
+The `__` branches go in one block directly above the branches that have PRs. `stack-plan mark <branch>...` gets them there:
+
+- It renames each branch to its `__` name.
+- It rewrites the note of each waiting commit placed in the branch, and the saved order in `stackplan.order` and `stackplan.new`, all of which name branches. A plain `git branch -m` leaves them naming the old one.
+- It saves the order with the marked branches as one block directly above the PR branches and any `__` block already there, in stack order, so each chain keeps its order.
+- It exports the plan, keeping the earlier file as `stackplan.txt.bak`.
+
+It refuses a branch that is not in the stack, already has the prefix, has a PR, or whose `__` name is taken. `-n` prints the renames and the moves without making them. Then run `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
 
 `extract` changes nothing without `--apply`. It works through the `__` branches from the bottom up:
 

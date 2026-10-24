@@ -172,6 +172,7 @@ _stack_plan() {
         'sync:check putting the stack on its origin copies, with local work on top'
         'extract:check copying each __ branch off the stack, onto its name without the prefix'
         'extractable:list the branches that could become __ branches'
+        'mark:rename branches to their __ names and export the plan with them as one block'
         'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
@@ -185,6 +186,14 @@ _stack_plan() {
         _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
             '--apply[do the cut once the check passes]' '(-f --anyway)'{-f,--anyway}'[cut despite a finding]' \
             ':branch:_stack_plan_refs'
+        return
+    fi
+    if [[ $words[2] == mark ]]; then
+        shift words
+        (( CURRENT-- ))
+        _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
+            '(-n --dry-run)'{-n,--dry-run}'[show the renames without making them]' \
+            '*:branch:_stack_plan_refs'
         return
     fi
     if [[ $words[2] == mode ]]; then
