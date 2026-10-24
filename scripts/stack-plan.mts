@@ -98,6 +98,7 @@ const USAGE = [
   '  verify (v)   compare the stack with the pre-rebase tip',
   '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work;',
   '               --apply then does it, and -f does it despite a finding',
+  '  cut <__branch>...  the same for only the named __ branches, wherever they sit, once their copies have merged',
   '  sync         check putting each stack branch on its origin copy, with what origin lacks replayed on top',
   '               and merged branches cut; --apply then does it, and -f does it despite a finding;',
   '               it fetches and prunes origin first, unless --no-fetch',
@@ -151,7 +152,7 @@ const usageError = (message?: string): never => {
   console.error(USAGE);
   process.exit(2);
 };
-let cutAt: string | undefined;
+const cutTargets: string[] = [];
 const branchesToMark: string[] = [];
 if (command !== '_todo') {
   const allowed =
@@ -159,8 +160,8 @@ if (command !== '_todo') {
     usageError(given ? `unknown command "${given}"` : undefined);
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
-    else if (command === 'cut' && !cutAt && !rest[i].startsWith('-'))
-      cutAt = rest[i];
+    else if (command === 'cut' && !rest[i].startsWith('-'))
+      cutTargets.push(rest[i]);
     else if (command === 'mark' && !rest[i].startsWith('-'))
       branchesToMark.push(rest[i]);
     else if (!allowed.includes(rest[i]))
@@ -168,7 +169,15 @@ if (command !== '_todo') {
   }
   if (command === 'mode' && rest.length > 1)
     usageError('mode takes one of full or short');
-  if (command === 'cut' && !cutAt) usageError('cut needs the branch to cut at');
+  if (command === 'cut' && !cutTargets.length)
+    usageError('cut needs the branch to cut at');
+  if (
+    cutTargets.length > 1 &&
+    !cutTargets.every((name) => name.startsWith(EXTRACT_SOURCE_PREFIX))
+  )
+    usageError(
+      `cut takes one branch to cut at, or one or more ${EXTRACT_SOURCE_PREFIX} branches`,
+    );
   if (command === 'mark' && !branchesToMark.length)
     usageError('mark needs the branches to mark');
 }
@@ -923,6 +932,28 @@ const exitUnlessRebaseFinished = (status: number | null) => {
   }
 };
 
+// Per branch, since a squash merge leaves only a branch's end state in the base.
+const checkContained = (branch: string, below: string) => {
+  const merged = mergeTree(below, base, branch);
+  if (!merged.ok) {
+    attention(
+      `${cyan(branch)}  can't tell: ${base} changed these again since, so compare by hand`,
+    );
+    for (const file of merged.files) console.log(`    ${file}`);
+    return 'unclear';
+  }
+  if (merged.tree === treeOf(base)) {
+    good(`${cyan(branch)}  contained in ${base}`);
+    return 'contained';
+  }
+  bad(`${cyan(branch)}  would be lost: ${base} lacks its changes to`);
+  for (const file of fileList(
+    gitQuiet('diff', '--name-only', base, merged.tree),
+  ))
+    console.log(`    ${file}`);
+  return 'lost';
+};
+
 // Checks whether cutting the stack at a branch and rebasing the rest onto the base would lose work; --apply then does it.
 const cutStack = (at: string, apply: boolean) => {
   const wip = currentBranch();
@@ -935,32 +966,16 @@ const cutStack = (at: string, apply: boolean) => {
   let lost = 0;
   let unclear = 0;
 
-  // Per branch, since a squash merge leaves only a branch's end state in the base.
   subheading(`Below the cut: already in ${base}?`);
   const below = branches.slice(0, branches.indexOf(at) + 1);
   const fork = git('merge-base', base, wip).trim();
   for (const [index, branch] of below.entries()) {
-    const merged = mergeTree(
-      index === 0 ? fork : tipOf(below[index - 1]),
-      base,
+    const verdict = checkContained(
       branch,
+      index === 0 ? fork : tipOf(below[index - 1]),
     );
-    if (!merged.ok) {
-      unclear++;
-      attention(
-        `${cyan(branch)}  can't tell: ${base} changed these again since, so compare by hand`,
-      );
-      for (const file of merged.files) console.log(`    ${file}`);
-    } else if (merged.tree === treeOf(base))
-      good(`${cyan(branch)}  contained in ${base}`);
-    else {
-      lost++;
-      bad(`${cyan(branch)}  would be lost: ${base} lacks its changes to`);
-      for (const file of fileList(
-        gitQuiet('diff', '--name-only', base, merged.tree),
-      ))
-        console.log(`    ${file}`);
-    }
+    if (verdict === 'lost') lost++;
+    if (verdict === 'unclear') unclear++;
   }
 
   subheading(`Above the cut: rebased onto ${base}`);
@@ -1031,6 +1046,110 @@ const cutStack = (at: string, apply: boolean) => {
   verifyRebase();
 };
 
+// Drops __ branches whose copies have landed, from wherever they sit, and rebases the rest onto the base without them.
+const dropExtractSources = (names: string[], apply: boolean) => {
+  const wip = currentBranch();
+  const { branches, pending, own } = readStack(wip);
+  const unknown = names.filter((name) => !branches.includes(name));
+  if (unknown.length)
+    throw new Error(
+      `${unknown.join(', ')} not a stack branch below ${wip}; the stack is: ${branches.join(' ')}`,
+    );
+  const dropping = branches.filter((branch) => names.includes(branch));
+  const fork = forkOf(wip);
+  heading(`Drop ${dropping.join(', ')}, onto ${base}`);
+  let lost = 0;
+  let unclear = 0;
+
+  // Only __ branches are never pushed, so only they may be rewritten by moving them onto the base.
+  subheading(`Below: only ${EXTRACT_SOURCE_PREFIX} branches?`);
+  const pushable = branches
+    .slice(0, branches.indexOf(dropping[0]))
+    .filter((branch) => !isExtractSource(branch));
+  for (const branch of pushable)
+    bad(
+      `${cyan(branch)}  sits below, and moving it onto ${base} would rewrite it; cut it first`,
+    );
+  if (pushable.length) lost++;
+  else
+    good(
+      `only ${EXTRACT_SOURCE_PREFIX} branches sit below, so no branch with a PR is rewritten`,
+    );
+
+  subheading(`Already in ${base}?`);
+  for (const branch of dropping) {
+    const below = branches[branches.indexOf(branch) - 1];
+    const verdict = checkContained(branch, below ? tipOf(below) : fork);
+    if (verdict === 'lost') lost++;
+    if (verdict === 'unclear') unclear++;
+  }
+
+  subheading(`The rest: rebased onto ${base}`);
+  const kept = branches.filter((branch) => !dropping.includes(branch));
+  const { todo, sequence, pick } = newTodo();
+  for (const branch of kept) {
+    for (const commit of own.get(branch) ?? []) pick(commit);
+    todo.push(`update-ref refs/heads/${branch}`, '');
+  }
+  for (const commit of pending) pick(commit);
+  const simulation = simulateRebase(sequence, tipOf(base), wip);
+  if (simulation.conflicts.length) {
+    unclear++;
+    reportConflicts(simulation, tipOf(base), '', landingBranches(todo, wip));
+  } else {
+    good(`all ${simulation.picks} picks apply cleanly in memory`);
+    const sameNet = sameNetChange(
+      'the stack',
+      fork,
+      wip,
+      tipOf(base),
+      simulation.tip,
+      base,
+    );
+    const sameTip = sameTipOutsideOrigin(
+      fork,
+      wip,
+      tipOf(base),
+      simulation.tip,
+      `${base} moved since the stack left it`,
+    );
+    if (!sameNet || !sameTip) lost++;
+  }
+
+  subheading('Conclusion');
+  const target = dropping.join(' ');
+  if (lost) bad(`dropping ${target} would lose work; see above`);
+  else if (unclear)
+    attention(`no loss found, but some of it needs a look by hand; see above`);
+  else good(`dropping ${target} and rebasing onto ${base} loses no work`);
+  if (!apply) {
+    if (!lost && !unclear)
+      console.log(`To do it: stack-plan cut ${target} --apply`);
+    if (lost || unclear) process.exit(1);
+    return;
+  }
+  if ((lost || unclear) && !rest.includes('--anyway')) {
+    console.log(
+      `\nNothing rewritten. To drop anyway: stack-plan cut ${target} --apply -f`,
+    );
+    process.exit(1);
+  }
+
+  ensurePlanFile(wip);
+  recordPreRebase(tipOf(wip), []);
+  // verify reads it as a cut whose old range starts at the fork.
+  writeHeader(CUT_PREFIX, [fork, tipOf(base), ...dropping].join(' '));
+  const drops = dropping.flatMap((branch) =>
+    (own.get(branch) ?? []).map(
+      (commit) => `drop ${commit.sha} ${commit.subject}`,
+    ),
+  );
+  runRebase(
+    [`# in ${base} through the extracted copies`, ...drops, '', ...todo],
+    ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', base, fork],
+  );
+};
+
 const commitsIn = (range: string): Commit[] =>
   fileList(
     gitQuiet('log', '--reverse', '--first-parent', '--format=%H%x1f%s', range),
@@ -1080,12 +1199,13 @@ const remoteOf = (branch: string) => {
 const countOf = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-// A sync may change a file at the tip only where origin's stack differs from the local one.
+// A sync may change a file at the tip only where origin's stack differs from the local one, a drop only where the base moved.
 const sameTipOutsideOrigin = (
   oldTop: string,
   oldTip: string,
   newTop: string,
   newTip: string,
+  where = "origin's stack differs from yours",
 ) => {
   const originDiffers = new Set(
     fileList(gitQuiet('diff', '--name-only', oldTop, newTop)),
@@ -1098,11 +1218,11 @@ const sameTipOutsideOrigin = (
   }
   if (!unexpected.length) {
     good(
-      `the tip tree is unchanged, except ${countOf(changed.length, 'file')} where origin's stack differs from yours`,
+      `the tip tree is unchanged, except ${countOf(changed.length, 'file')} where ${where}`,
     );
     return true;
   }
-  bad(`the tip tree changes outside origin's changes, in:`);
+  bad(`the tip tree changes in files other than where ${where}:`);
   for (const file of unexpected) console.log(`    ${file}`);
   return false;
 };
@@ -1628,6 +1748,15 @@ const extractBranches = (apply: boolean) => {
       attention(`${label}  no commits of its own; nothing to extract`);
       return;
     }
+    const below = branches[branches.indexOf(source) - 1];
+    const landed = mergeTree(below ? tipOf(below) : forkOf(wip), base, source);
+    if (landed.ok && landed.tree === treeOf(base)) {
+      if (branchExists(extracted)) plannedTip.set(extracted, tipOf(extracted));
+      attention(
+        `${label}  already in ${base}; to drop it from the stack: stack-plan cut ${source}`,
+      );
+      return;
+    }
     if (branchExists(extracted)) {
       const oldTip = tipOf(extracted);
       plannedTip.set(extracted, oldTip);
@@ -1873,7 +2002,9 @@ const markBranches = (names: string[]) => {
   const pulls = openPullRequests();
   heading(`Mark${dryRun ? ' (dry run)' : ''}`);
   if (!pulls)
-    attention('could not list PRs with gh, so a branch with a PR is not caught');
+    attention(
+      'could not list PRs with gh, so a branch with a PR is not caught',
+    );
   const sourceOf = new Map(
     names.map((name) => [name, `${EXTRACT_SOURCE_PREFIX}${name}`]),
   );
@@ -2464,9 +2595,8 @@ const verifyRebase = () => {
   // After a cut, a commit is dropped when the new base already holds its change, which loses nothing.
   // After a sync, origin's copy holds the change of a commit it replaced.
   const holdsDroppedChanges = syncOrigin ?? newBase;
-  // sync checked each cut branch whole, since a squash merge holds no single commit of it.
+  // sync and a drop checked each cut branch whole, since a squash merge holds no single commit of it.
   const onSyncCutBranch = (sha: string) =>
-    syncOnto !== undefined &&
     cutBranches.some((branch) => isAncestor(sha, branch));
   if (baseMoved) {
     for (const entry of entries.filter((candidate) => candidate.kind === '<')) {
@@ -2584,6 +2714,13 @@ const verifyRebase = () => {
           newBase,
           wip,
           newBase.slice(0, 10),
+        ) &&
+        sameTipOutsideOrigin(
+          cutTip,
+          recorded,
+          newBase,
+          wip,
+          `${newBase.slice(0, 10)} moved since the stack left it`,
         )
       : !stat;
   if (!baseMoved) traceGit(statArgs);
@@ -2613,10 +2750,14 @@ const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
       `cut branches ${dryRun ? 'would be removed' : 'removed'} from ${ORDER_KEY}: ${cutBranches.join(', ')}`,
     );
   }
-  const leftOver = cutBranches.filter(branchExists);
+  const copies = cutBranches
+    .filter(isExtractSource)
+    .map(extractedNameOf)
+    .filter(branchExists);
+  const leftOver = [...cutBranches.filter(branchExists), ...copies];
   if (leftOver.length)
     console.log(
-      `The cut branches are still there. To delete them:\n  git branch -D ${leftOver.join(' ')}`,
+      `The cut branches${copies.length ? ' and their extracted copies' : ''} are still there. To delete them:\n  git branch -D ${leftOver.join(' ')}`,
     );
 
   const waitingToCreate = words(readConfig(NEW_KEY));
@@ -3036,7 +3177,9 @@ try {
   } else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
-  else if (command === 'cut') cutStack(cutAt!, rest.includes('--apply'));
+  else if (command === 'cut' && cutTargets.every(isExtractSource))
+    dropExtractSources(cutTargets, rest.includes('--apply'));
+  else if (command === 'cut') cutStack(cutTargets[0], rest.includes('--apply'));
   else if (command === 'sync') syncStack(rest.includes('--apply'));
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === 'extractable') extractableBranches();

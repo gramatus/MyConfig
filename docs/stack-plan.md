@@ -15,6 +15,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp prepare` | Records the pre-rebase tip, so `verify` works after a rebase you run by hand. |
 | `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
+| `sp cut <__b>...` | The same for only the named `__` branches, wherever they sit, once their extracted copies have merged. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
@@ -225,7 +226,7 @@ Above the cut it replays the remaining commits onto the base, as `preview` does,
 
 `stack-plan cut <branch> --apply` runs the same check, then does the cut: `git rebase -i --update-refs --empty=drop --onto <base> <branch>`, with the todo opened in your editor as for `apply`. It refuses when the check finds lost work, something it cannot tell, or a conflict, and `-f` (`--anyway`) cuts regardless. `--empty=drop` drops a commit the base already holds, which would otherwise stop the rebase.
 
-Before rebasing, it records the pre-rebase tip as `apply` does, plus a `# cut:` line holding the old cut tip, the new base and the cut branches. `verify` reads that line, so after a cut it compares the commits above the old cut with those on the new base. In place of the tree check, which cannot match once the base has moved, it compares the net change as `cut` does. A commit the rebase dropped because the base already holds its change counts as `already in the base`, not dropped. Once that passes, `verify` removes the cut branches from `stackplan.order` and prints the `git branch -D` that deletes them. It never deletes them itself. `prepare` and `apply` clear the `# cut:` line, so it only ever describes the latest rebase.
+Before rebasing, it records the pre-rebase tip as `apply` does, plus a `# cut:` line holding the old cut tip, the new base and the cut branches. `verify` reads that line, so after a cut it compares the commits above the old cut with those on the new base. In place of the tree check, which cannot match once the base has moved, it compares the net change as `cut` does. It also checks that the tip tree changed only in files where the new base differs from the old cut tip. A commit the rebase dropped because the base already holds its change counts as `already in the base`, not dropped. Once that passes, `verify` removes the cut branches from `stackplan.order` and prints the `git branch -D` that deletes them. It never deletes them itself. `prepare` and `apply` clear the `# cut:` line, so it only ever describes the latest rebase.
 
 ### 7. Sync with origin after GitHub rebased the stack
 
@@ -292,7 +293,25 @@ It refuses a branch that is not in the stack, already has the prefix, has a PR, 
 
 The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
 
-A merged extracted copy does not yet take its `__` branch out of the stack, because neither `cut` nor `sync` drops a branch from the middle of it. Until they do, drop the `__` branch's commits and delete the branch by hand once its copy has merged.
+Once an extracted copy has been squash-merged, `extract` reports its `__` branch as already in the base and leaves it alone. Fetch, then take the branch out of the stack with `cut`:
+
+```shell
+stack-plan cut __skills/foo
+```
+
+```shell
+stack-plan cut __skills/foo --apply
+```
+
+Given `__` branches, `cut` drops only those, wherever they sit, rather than everything up to them. It refuses a name without the prefix among them. It checks three things:
+
+- Every branch below the lowest named one is a `__` branch. Those are never pushed, so moving them onto the base rewrites no branch with a PR. A branch without the prefix below is a finding, and cutting it first is the remedy.
+- The base contains each named branch, checked on its own as `cut` checks a branch below the cut.
+- The rest of the stack replays onto the base in memory without a conflict. Its net change is the same as before, apart from files that end as they did on wip. The tip tree changes only in files where the base moved since the stack left it.
+
+`--apply` then runs `git rebase -i --update-refs --empty=drop --onto <base> <fork>`, where `<fork>` is where the stack leaves the base. The todo has a `drop` line for each commit of the named branches and leaves out their `update-ref` lines, so those branches keep their old tips. It refuses on a finding, and `-f` (`--anyway`) drops regardless. It records a `# cut:` line whose old range starts at the fork. `verify` then counts the dropped commits as already in the base, and runs the same two checks on the real result. Once they pass, it removes the named branches from `stackplan.order` and prints the `git branch -D` that deletes them and their extracted copies.
+
+An extracted copy that sat on the copy of a merged chain member still sits on that old copy. Rebuilding it, and its PR, is not handled yet.
 
 ## Where things live
 

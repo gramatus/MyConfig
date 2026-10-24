@@ -79,7 +79,9 @@ const chains = fullReport.chains.flatMap((chain) => {
 });
 const blocked = fullReport.blocked.filter(({ name }) => isReady(name));
 notReady.push(
-  ...fullReport.blocked.filter(({ name }) => !isReady(name)).map(({ name }) => name),
+  ...fullReport.blocked
+    .filter(({ name }) => !isReady(name))
+    .map(({ name }) => name),
 );
 const report = { ...fullReport, lastReady, chains, blocked, notReady };
 mkdirSync(resultsPath, { recursive: true });
