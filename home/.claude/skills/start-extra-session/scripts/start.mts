@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Starts, lists or resumes remote-control Claude Code sessions on a folder under /repos, detached in tmux.
-// Usage: start.mts <folder> [list [count] | resume <session-id>]; ../SKILL.md says how the skill relays the result.
+// Usage: start.mts [audit [count] | <folder> [list [count] | resume <session-id>]]; ../SKILL.md says how the skill relays the result.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -15,6 +17,13 @@ import { dirname, join } from 'node:path';
 
 const REPOS_ROOT = '/repos';
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
+const START_LOG = join(
+  homedir(),
+  '.local',
+  'state',
+  'start-extra-session',
+  'sessions.jsonl',
+);
 const FOLDER_NAME = /^[A-Za-z0-9._-]+$/;
 const SESSION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -121,10 +130,29 @@ const sessionTitle = (file: string) => {
     : title;
 };
 
-const listSessions = (path: string, countArg: string | undefined) => {
+const parseCount = (countArg: string | undefined) => {
   const count = countArg === undefined ? DEFAULT_LIST_COUNT : Number(countArg);
   if (!Number.isInteger(count) || count < 1)
     fail(`"${countArg}" is not a positive whole number`);
+  return count;
+};
+
+type StartRecord = {
+  at: string;
+  folder: string;
+  resumedId?: string;
+  tmux: string;
+  outcome: 'started' | 'failed';
+  detail?: string;
+};
+
+const recordStart = (start: StartRecord) => {
+  mkdirSync(dirname(START_LOG), { recursive: true });
+  appendFileSync(START_LOG, `${JSON.stringify(start)}\n`);
+};
+
+const listSessions = (path: string, countArg: string | undefined) => {
+  const count = parseCount(countArg);
   const sessions = sessionsNewestFirst(path).slice(0, count);
   if (sessions.length === 0) fail(`no sessions recorded for ${path}`);
   sessions.forEach((session, index) => {
@@ -141,7 +169,22 @@ const startInTmux = (
   name: string,
   session: string,
   claudeArgs: string[],
+  resumedId?: string,
 ) => {
+  const record = (outcome: 'started' | 'failed', detail?: string) =>
+    recordStart({
+      at: new Date().toISOString(),
+      folder: name,
+      resumedId,
+      tmux: session,
+      outcome,
+      detail,
+    });
+  const failStart = (message: string): never => {
+    record('failed', message.split('\n')[0]);
+    return fail(message);
+  };
+
   const owner = githubOwner(path);
   if (!owner || !TRUSTED_GITHUB_OWNERS.includes(owner))
     console.log(
@@ -149,7 +192,7 @@ const startInTmux = (
     );
 
   if (tmux('has-session', '-t', `=${session}`).status === 0)
-    fail(
+    failStart(
       `tmux session ${session} is already running: tmux attach -t ${session}`,
     );
 
@@ -168,23 +211,24 @@ const startInTmux = (
     'default',
   );
   if (started.status !== 0)
-    fail(`tmux could not start: ${started.stderr.trim()}`);
+    failStart(`tmux could not start: ${started.stderr.trim()}`);
 
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, STARTUP_WAIT_MS);
 
   if (tmux('has-session', '-t', `=${session}`).status !== 0)
-    fail(
+    failStart(
       `claude exited within ${STARTUP_WAIT_MS / 1000}s; run it in a terminal in ${path} to see why`,
     );
 
   const screen = tmux('capture-pane', '-p', '-t', `=${session}:`).stdout;
   if (PENDING_PROMPT.test(screen))
-    fail(
+    failStart(
       `claude is waiting on a prompt only a terminal can answer: tmux attach -t ${session}\n${screen.trim()}`,
     );
 
-  console.log(`✓ ${name} is running in tmux session ${session}`);
   const url = SESSION_URL.exec(screen)?.[0];
+  record('started', url);
+  console.log(`✓ ${name} is running in tmux session ${session}`);
   console.log(
     url
       ? `  ${url}`
@@ -193,9 +237,50 @@ const startInTmux = (
   console.log(`  stop it with: tmux kill-session -t ${session}`);
 };
 
+const listFolders = () =>
+  readdirSync(REPOS_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && FOLDER_NAME.test(entry.name))
+    .filter((entry) => !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+    .forEach((folder) => console.log(folder));
+
+const printAudit = (countArg: string | undefined) => {
+  const count = parseCount(countArg);
+  const starts = existsSync(START_LOG)
+    ? readFileSync(START_LOG, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as StartRecord)
+    : [];
+  if (starts.length === 0) fail(`no starts recorded in ${START_LOG}`);
+  starts
+    .slice(-count)
+    .reverse()
+    .forEach((start, index) => {
+      const at = new Date(start.at).toLocaleString('sv-SE').slice(0, 16);
+      const kind = start.resumedId
+        ? `resume ${start.resumedId.slice(0, 8)}`
+        : 'new';
+      const running =
+        start.outcome === 'started' &&
+        tmux('has-session', '-t', `=${start.tmux}`).status === 0;
+      console.log(
+        `${index + 1}. ${at}  ${start.folder}  ${kind}  ${start.outcome}${running ? ', still running' : ''}`,
+      );
+      if (start.detail) console.log(`   ${start.detail}`);
+    });
+};
+
 const [name, mode, modeArg] = process.argv.slice(2);
-if (!name)
-  fail('usage: start.mts <folder> [list [count] | resume <session-id>]');
+if (!name) {
+  listFolders();
+  process.exit(0);
+}
+if (name === 'audit') {
+  printAudit(mode);
+  process.exit(0);
+}
 const path = resolveFolder(name);
 // tmux turns "." in a session name into "_", so the name it prints matches the one used here.
 const tmuxName = `cc-${name.replaceAll('.', '_')}`;
@@ -209,5 +294,11 @@ else if (mode === 'resume') {
     !existsSync(join(sessionsDir(path), `${id}.jsonl`))
   )
     fail(`${id} is not a session recorded for ${path}: run list first`);
-  startInTmux(path, name, `${tmuxName}-${id.slice(0, 8)}`, ['--resume', id]);
+  startInTmux(
+    path,
+    name,
+    `${tmuxName}-${id.slice(0, 8)}`,
+    ['--resume', id],
+    id,
+  );
 } else fail(`unknown mode "${mode}": use list or resume`);
