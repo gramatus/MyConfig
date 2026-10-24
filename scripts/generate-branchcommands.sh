@@ -99,7 +99,7 @@ is_source() { [[ "$1" == __* ]]; }
 
 # The note printed for a stack branch whose PR cannot exist while it sits on a local __ branch.
 waits_on_source() {
-  echo "# ${lines[$1]} sits on ${lines[$1 - 1]}, which stays local; its PR waits until the extracted chains merge"
+  echo "_Waits: \`${lines[$1]}\` sits on \`${lines[$1 - 1]}\`, which stays local; its PR waits until the extracted chains merge._"
 }
 
 # Each extracted copy, bottom first, with its PR base: the nearest copy below that it contains, else main.
