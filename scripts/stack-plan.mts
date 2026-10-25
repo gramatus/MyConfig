@@ -1069,6 +1069,7 @@ const dropExtractSources = (
   names: string[],
   apply: boolean,
   rerun = `cut ${names.join(' ')}`,
+  leftOut: string[] = [],
 ) => {
   const wip = currentBranch();
   const { branches, pending, own } = readStack(wip);
@@ -1105,6 +1106,11 @@ const dropExtractSources = (
     attention('could not list merged PRs with gh, so only the content decides');
   for (const branch of dropping) {
     const pull = mergedCopyPull(branch, merged);
+    if (pull && !pull.inBase) {
+      unclear++;
+      attention(`${cyan(branch)}  ${notFetched(pull)}`);
+      continue;
+    }
     if (pull) {
       good(
         `${cyan(branch)}  ${extractedNameOf(branch)} merged on GitHub as #${pull.number}`,
@@ -1162,6 +1168,7 @@ const dropExtractSources = (
   else if (unclear)
     attention(`no loss found, but some of it needs a look by hand; see above`);
   else good(`dropping ${target} and rebasing onto ${base} loses no work`);
+  for (const line of leftOut) attention(line);
   if (!apply) {
     if (!lost && !unclear) console.log(`To do it: stack-plan ${rerun} --apply`);
     if (lost || unclear) process.exit(1);
@@ -1199,8 +1206,14 @@ const dropMergedSources = (apply: boolean) => {
   if (!merged)
     attention('could not list merged PRs with gh, so only the content decides');
   const picked: string[] = [];
+  const leftOut: string[] = [];
   for (const source of branches.filter(isExtractSource)) {
     const pull = mergedCopyPull(source, merged);
+    if (pull && !pull.inBase) {
+      leftOut.push(`${cyan(source)}  left out: ${notFetched(pull)}`);
+      attention(leftOut.at(-1)!);
+      continue;
+    }
     if (pull) {
       picked.push(source);
       good(`${cyan(source)}  #${pull.number} merged on GitHub`);
@@ -1211,16 +1224,18 @@ const dropMergedSources = (apply: boolean) => {
     if (landed.ok && landed.tree === treeOf(base)) {
       picked.push(source);
       good(`${cyan(source)}  contained in ${base}`);
-    } else if (!landed.ok)
-      attention(
+    } else if (!landed.ok) {
+      leftOut.push(
         `${cyan(source)}  left out: can't tell, so compare by hand; to drop it anyway: stack-plan cut ${source}`,
       );
+      attention(leftOut.at(-1)!);
+    }
   }
   if (!picked.length) {
     good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed; nothing to drop`);
     return;
   }
-  dropExtractSources(picked, apply, 'cut --merged');
+  dropExtractSources(picked, apply, 'cut --merged', leftOut);
 };
 
 const commitsIn = (range: string): Commit[] =>
@@ -1841,7 +1856,9 @@ const extractBranches = (apply: boolean) => {
     }
     const below = branches[branches.indexOf(source) - 1];
     const landed = mergeTree(below ? tipOf(below) : forkOf(wip), base, source);
-    const pull = mergedCopyPull(source, merged);
+    const found = mergedCopyPull(source, merged);
+    const pull = found?.inBase ? found : undefined;
+    if (found && !found.inBase) attention(`${label}  ${notFetched(found)}`);
     if (pull || (landed.ok && landed.tree === treeOf(base))) {
       if (branchExists(extracted)) plannedTip.set(extracted, tipOf(extracted));
       const how = pull
@@ -2219,7 +2236,12 @@ const printByBranch = (
 const pickLine = (commit: Commit, marker = '') =>
   `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
 
-type PullRequest = { number: number; base: string; mergedAt: string };
+type PullRequest = {
+  number: number;
+  base: string;
+  mergedAt: string;
+  mergeCommit: string;
+};
 
 /** Pull requests in a state keyed by head branch, the newest per branch, or undefined when gh cannot list them. */
 const pullRequests = (
@@ -2232,7 +2254,10 @@ const pullRequests = (
     return undefined;
   }
   const slug = origin.replace(/\.git$/, '').replace(/^.*github\.com[:/]/, '');
-  const fields = ['--json', 'number,headRefName,baseRefName,mergedAt'];
+  const fields = [
+    '--json',
+    'number,headRefName,baseRefName,mergedAt,mergeCommit',
+  ];
   const result = spawnSync(
     'gh',
     [
@@ -2254,6 +2279,7 @@ const pullRequests = (
     headRefName: string;
     baseRefName: string;
     mergedAt: string;
+    mergeCommit: { oid: string } | null;
   }[];
   const pulls = new Map<string, PullRequest>();
   for (const row of rows)
@@ -2262,6 +2288,7 @@ const pullRequests = (
         number: row.number,
         base: row.baseRefName,
         mergedAt: row.mergedAt,
+        mergeCommit: row.mergeCommit?.oid ?? '',
       });
   return pulls;
 };
@@ -2280,8 +2307,15 @@ const mergedCopyPull = (
       Number,
     ),
   );
-  return Date.parse(pull.mergedAt) / 1000 > madeAt ? pull : undefined;
+  if (Date.parse(pull.mergedAt) / 1000 <= madeAt) return undefined;
+  // A merge the local base lacks is not landed for a rebase onto that base.
+  const inBase =
+    Boolean(pull.mergeCommit) && isAncestor(pull.mergeCommit, base);
+  return { ...pull, inBase };
 };
+
+const notFetched = (pull: { number: number }) =>
+  `#${pull.number} merged on GitHub, but ${base} lacks its merge commit; git fetch, then run again`;
 
 const exportPlan = () => {
   const wip = currentBranch();
