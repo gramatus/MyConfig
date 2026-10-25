@@ -1126,7 +1126,8 @@ const dropExtractSources = (
   }
   for (const commit of pending) pick(commit);
   const simulation = simulateRebase(sequence, tipOf(base), wip);
-  if (simulation.conflicts.length) {
+  const conflicted = simulation.conflicts.length > 0;
+  if (conflicted) {
     unclear++;
     reportConflicts(simulation, tipOf(base), '', landingBranches(todo, wip));
   } else {
@@ -1154,6 +1155,10 @@ const dropExtractSources = (
   subheading('Conclusion');
   const target = dropping.join(' ');
   if (lost) bad(`dropping ${target} would lose work; see above`);
+  else if (conflicted)
+    attention(
+      `the replay conflicts, so whether the stack keeps its changes is unchecked; resolve the conflicts above by hand, and verify checks it after`,
+    );
   else if (unclear)
     attention(`no loss found, but some of it needs a look by hand; see above`);
   else good(`dropping ${target} and rebasing onto ${base} loses no work`);
