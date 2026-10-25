@@ -185,6 +185,7 @@ _stack_plan() {
         (( CURRENT-- ))
         _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
             '--apply[do the cut once the check passes]' '(-f --anyway)'{-f,--anyway}'[cut despite a finding]' \
+            '--merged[drop every __ branch that has landed]' \
             '*:branch:_stack_plan_refs'
         return
     fi

@@ -99,6 +99,7 @@ const USAGE = [
   '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work;',
   '               --apply then does it, and -f does it despite a finding',
   '  cut <__branch>...  the same for only the named __ branches, wherever they sit, once their copies have merged',
+  '  cut --merged the same for every __ branch that has landed, found through gh or the content',
   '  sync         check putting each stack branch on its origin copy, with what origin lacks replayed on top',
   '               and merged branches cut; --apply then does it, and -f does it despite a finding;',
   '               it fetches and prunes origin first, unless --no-fetch',
@@ -129,7 +130,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   apply: ['--base', '--anyway'],
   prepare: [],
   verify: ['--base', '--dry-run'],
-  cut: ['--base', '--apply', '--anyway'],
+  cut: ['--base', '--apply', '--anyway', '--merged'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
   extract: ['--base', '--apply', '--anyway'],
   extractable: ['--base', '--json'],
@@ -169,8 +170,11 @@ if (command !== '_todo') {
   }
   if (command === 'mode' && rest.length > 1)
     usageError('mode takes one of full or short');
-  if (command === 'cut' && !cutTargets.length)
-    usageError('cut needs the branch to cut at');
+  const cutMerged = command === 'cut' && rest.includes('--merged');
+  if (cutMerged && cutTargets.length)
+    usageError('cut --merged picks the branches itself; name none');
+  if (command === 'cut' && !cutMerged && !cutTargets.length)
+    usageError('cut needs the branch to cut at, or --merged');
   if (
     cutTargets.length > 1 &&
     !cutTargets.every((name) => name.startsWith(EXTRACT_SOURCE_PREFIX))
@@ -1061,7 +1065,11 @@ const cutStack = (at: string, apply: boolean) => {
 };
 
 // Drops __ branches whose copies have landed, from wherever they sit, and rebases the rest onto the base without them.
-const dropExtractSources = (names: string[], apply: boolean) => {
+const dropExtractSources = (
+  names: string[],
+  apply: boolean,
+  rerun = `cut ${names.join(' ')}`,
+) => {
   const wip = currentBranch();
   const { branches, pending, own } = readStack(wip);
   const unknown = names.filter((name) => !branches.includes(name));
@@ -1150,14 +1158,13 @@ const dropExtractSources = (names: string[], apply: boolean) => {
     attention(`no loss found, but some of it needs a look by hand; see above`);
   else good(`dropping ${target} and rebasing onto ${base} loses no work`);
   if (!apply) {
-    if (!lost && !unclear)
-      console.log(`To do it: stack-plan cut ${target} --apply`);
+    if (!lost && !unclear) console.log(`To do it: stack-plan ${rerun} --apply`);
     if (lost || unclear) process.exit(1);
     return;
   }
   if ((lost || unclear) && !rest.includes('--anyway')) {
     console.log(
-      `\nNothing rewritten. To drop anyway: stack-plan cut ${target} --apply -f`,
+      `\nNothing rewritten. To drop anyway: stack-plan ${rerun} --apply -f`,
     );
     process.exit(1);
   }
@@ -1175,6 +1182,40 @@ const dropExtractSources = (names: string[], apply: boolean) => {
     [`# in ${base} through the extracted copies`, ...drops, '', ...todo],
     ['rebase', '-i', '--update-refs', '--empty=drop', '--onto', base, fork],
   );
+};
+
+// Picks every __ branch that has landed, then drops them as cut <__branch>... would.
+const dropMergedSources = (apply: boolean) => {
+  const wip = currentBranch();
+  const { branches } = readStack(wip);
+  const fork = forkOf(wip);
+  const merged = pullRequests('merged');
+  heading(`Landed ${EXTRACT_SOURCE_PREFIX} branches`);
+  if (!merged)
+    attention('could not list merged PRs with gh, so only the content decides');
+  const picked: string[] = [];
+  for (const source of branches.filter(isExtractSource)) {
+    const pull = mergedCopyPull(source, merged);
+    if (pull) {
+      picked.push(source);
+      good(`${cyan(source)}  #${pull.number} merged on GitHub`);
+      continue;
+    }
+    const below = branches[branches.indexOf(source) - 1];
+    const landed = mergeTree(below ? tipOf(below) : fork, base, source);
+    if (landed.ok && landed.tree === treeOf(base)) {
+      picked.push(source);
+      good(`${cyan(source)}  contained in ${base}`);
+    } else if (!landed.ok)
+      attention(
+        `${cyan(source)}  left out: can't tell, so compare by hand; to drop it anyway: stack-plan cut ${source}`,
+      );
+  }
+  if (!picked.length) {
+    good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed; nothing to drop`);
+    return;
+  }
+  dropExtractSources(picked, apply, 'cut --merged');
 };
 
 const commitsIn = (range: string): Commit[] =>
@@ -3279,6 +3320,8 @@ try {
   } else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
+  else if (command === 'cut' && rest.includes('--merged'))
+    dropMergedSources(rest.includes('--apply'));
   else if (command === 'cut' && cutTargets.every(isExtractSource))
     dropExtractSources(cutTargets, rest.includes('--apply'));
   else if (command === 'cut') cutStack(cutTargets[0], rest.includes('--apply'));

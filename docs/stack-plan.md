@@ -16,6 +16,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
 | `sp cut <__b>...` | The same for only the named `__` branches, wherever they sit, once their extracted copies have merged. |
+| `sp cut --merged` | The same for every `__` branch that has landed, without naming them. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
@@ -303,6 +304,8 @@ stack-plan cut __skills/foo
 ```shell
 stack-plan cut __skills/foo --apply
 ```
+
+`stack-plan cut --merged` names them for you. It picks every `__` branch that has landed by the first test below, and lists each one it leaves out because the content check can't tell. The rest goes as for named branches, and `stack-plan cut --merged --apply` does it. Merged branches of the main stack, the ones without the prefix, stay with `sync`, which also puts the branches above them back on GitHub's rebased copies.
 
 Given `__` branches, `cut` drops only those, wherever they sit, rather than everything up to them. It refuses a name without the prefix among them. It checks three things:
 
