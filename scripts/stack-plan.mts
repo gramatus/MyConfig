@@ -858,7 +858,7 @@ const patchId = (from: string, to: string, path?: string) => {
 
 const fileList = (output: string) => output.split('\n').filter(Boolean);
 
-// Whether from..to and onFrom..onTo make the same change; false when some file ends differently.
+// Whether from..to and onFrom..onTo make the same change; false when some file ends differently, 'unclear' when only files in baseChanged do.
 const sameNetChange = (
   label: string,
   from: string,
@@ -866,7 +866,8 @@ const sameNetChange = (
   onFrom: string,
   onTo: string,
   onName: string,
-) => {
+  baseChanged?: Set<string>,
+): boolean | 'unclear' => {
   if (patchId(from, to) === patchId(onFrom, onTo)) {
     good(`the net change of ${label} is the same on ${onName}`);
     return true;
@@ -897,10 +898,23 @@ const sameNetChange = (
     good(`the rest of the net change of ${label} is the same on ${onName}`);
     return true;
   }
+  // The base changed these too, so they may end differently with nothing lost.
+  const unclear = missing.filter((file) => baseChanged?.has(file));
+  const lost = missing.filter((file) => !unclear.includes(file));
+  if (unclear.length) {
+    attention(
+      `${onName} changed these too, so whether ${label} kept its change needs a look by hand:`,
+    );
+    for (const file of unclear)
+      console.log(
+        `    git diff ${tipOf(to).slice(0, 10)} ${tipOf(onTo).slice(0, 10)} -- ${file}`,
+      );
+  }
+  if (!lost.length) return 'unclear';
   bad(
     `the net change of ${label} differs on ${onName}, and these files end differently:`,
   );
-  for (const file of missing) console.log(`    ${file}`);
+  for (const file of lost) console.log(`    ${file}`);
   return false;
 };
 
@@ -1077,7 +1091,18 @@ const dropExtractSources = (names: string[], apply: boolean) => {
     );
 
   subheading(`Already in ${base}?`);
+  // GitHub's word settles it where later merges changed the same lines again, which the content check cannot see past.
+  const merged = pullRequests('merged');
+  if (!merged)
+    attention('could not list merged PRs with gh, so only the content decides');
   for (const branch of dropping) {
+    const pull = mergedCopyPull(branch, merged);
+    if (pull) {
+      good(
+        `${cyan(branch)}  ${extractedNameOf(branch)} merged on GitHub as #${pull.number}`,
+      );
+      continue;
+    }
     const below = branches[branches.indexOf(branch) - 1];
     const verdict = checkContained(branch, below ? tipOf(below) : fork);
     if (verdict === 'lost') lost++;
@@ -1105,6 +1130,7 @@ const dropExtractSources = (names: string[], apply: boolean) => {
       tipOf(base),
       simulation.tip,
       base,
+      new Set(fileList(gitQuiet('diff', '--name-only', fork, base))),
     );
     const sameTip = sameTipOutsideOrigin(
       fork,
@@ -1114,6 +1140,7 @@ const dropExtractSources = (names: string[], apply: boolean) => {
       `${base} moved since the stack left it`,
     );
     if (!sameNet || !sameTip) lost++;
+    else if (sameNet === 'unclear') unclear++;
   }
 
   subheading('Conclusion');
@@ -1545,12 +1572,15 @@ const compareWithExtracted = (
 // Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
 const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
   let fork = git('merge-base', base, extracted).trim();
+  let on: string | undefined;
   for (const below of extractedBelow.filter(branchExists)) {
     const forkOnBelow = git('merge-base', below, extracted).trim();
-    if (forkOnBelow !== fork && isAncestor(fork, forkOnBelow))
+    if (forkOnBelow !== fork && isAncestor(fork, forkOnBelow)) {
       fork = forkOnBelow;
+      on = below;
+    }
   }
-  return fork;
+  return { fork, on };
 };
 
 const replaysOf = (commits: Commit[]): Replay[] =>
@@ -1638,17 +1668,22 @@ const copyCommit = (sha: string, tree: string, parent: string) => {
     '--format=%an%x00%ae%x00%aI%x00%B',
     sha,
   ).split('\0');
-  return execFileSync('git', ['commit-tree', tree, '-p', parent, '-F', '-'], {
-    input: `${message.trimEnd()}\n`,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'inherit'],
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: name,
-      GIT_AUTHOR_EMAIL: email,
-      GIT_AUTHOR_DATE: date,
+  // commit-tree ignores commit.gpgSign, and -S fails without a signing key.
+  return execFileSync(
+    'git',
+    ['commit-tree', '-S', tree, '-p', parent, '-F', '-'],
+    {
+      input: `${message.trimEnd()}\n`,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'inherit'],
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: name,
+        GIT_AUTHOR_EMAIL: email,
+        GIT_AUTHOR_DATE: date,
+      },
     },
-  }).trim();
+  ).trim();
 };
 
 type ExtractReplay =
@@ -1676,18 +1711,26 @@ const mirrorStatus = (
   const extracted = extractedNameOf(source);
   if (!branchExists(extracted))
     return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted`;
+  const { fork, on } = extractedForkOf(
+    extracted,
+    sourcesBelow.map(extractedNameOf),
+  );
   const { missing, extraCount } = compareWithExtracted(
     sourceCommits,
     extracted,
-    extractedForkOf(extracted, sourcesBelow.map(extractedNameOf)),
+    fork,
   );
   const pull = pulls?.get(extracted);
+  const stale = on !== undefined && tipOf(on) !== fork;
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
+    ...(stale ? [`on an old ${on}`] : []),
     missing.length
       ? `${countOf(missing.length, 'commit')} behind`
-      : 'up to date',
+      : stale
+        ? 'own commits up to date'
+        : 'up to date',
     ...(extraCount
       ? [`${countOf(extraCount, 'commit')} only on ${extracted}`]
       : []),
@@ -1719,7 +1762,9 @@ const extractBranches = (apply: boolean) => {
     else groups.push(group);
   }
   const chains = mergeGroups(groups, branches);
+  const merged = pullRequests('merged');
   const moves: { extracted: string; tip: string; oldTip: string }[] = [];
+  const rebuilt: string[] = [];
   const plannedTip = new Map<string, string>();
   let findings = 0;
   const reportConflict = (
@@ -1750,20 +1795,28 @@ const extractBranches = (apply: boolean) => {
     }
     const below = branches[branches.indexOf(source) - 1];
     const landed = mergeTree(below ? tipOf(below) : forkOf(wip), base, source);
-    if (landed.ok && landed.tree === treeOf(base)) {
+    const pull = mergedCopyPull(source, merged);
+    if (pull || (landed.ok && landed.tree === treeOf(base))) {
       if (branchExists(extracted)) plannedTip.set(extracted, tipOf(extracted));
+      const how = pull
+        ? `#${pull.number} merged on GitHub`
+        : `already in ${base}`;
       attention(
-        `${label}  already in ${base}; to drop it from the stack: stack-plan cut ${source}`,
+        `${label}  ${how}; to drop it from the stack: stack-plan cut ${source}`,
       );
       return;
     }
     if (branchExists(extracted)) {
       const oldTip = tipOf(extracted);
       plannedTip.set(extracted, oldTip);
+      const { fork, on } = extractedForkOf(
+        extracted,
+        sources.slice(0, i).map(extractedNameOf),
+      );
       const { missing, extraCount } = compareWithExtracted(
         commits,
         extracted,
-        extractedForkOf(extracted, sources.slice(0, i).map(extractedNameOf)),
+        fork,
       );
       if (extraCount) {
         findings++;
@@ -1772,13 +1825,31 @@ const extractBranches = (apply: boolean) => {
         );
         return;
       }
-      if (!missing.length) {
+      // A copy whose lower copy moved is rebuilt on it, which rewrites the copy's history.
+      const onTip = on === undefined ? undefined : plannedTip.get(on);
+      const rebuildOn = onTip !== undefined && onTip !== fork ? on : undefined;
+      if (!missing.length && !rebuildOn) {
         good(`${label}  up to date`);
         return;
       }
-      const replay = replayOnto(missing, oldTip);
-      if (!replay.ok) return reportConflict(label, extracted, replay);
-      good(`${label}  +${countOf(missing.length, 'commit')}`);
+      const replay =
+        rebuildOn && onTip
+          ? replayOnto(
+              [...commitsIn(`${fork}..${extracted}`), ...missing],
+              onTip,
+            )
+          : replayOnto(missing, oldTip);
+      if (!replay.ok)
+        return reportConflict(label, rebuildOn ?? extracted, replay);
+      const added = missing.length
+        ? `+${countOf(missing.length, 'commit')}`
+        : '';
+      if (rebuildOn) {
+        good(
+          `${label}  rebuilt on ${rebuildOn}${added ? `, ${added}` : ''}; needs a force push`,
+        );
+        rebuilt.push(extracted);
+      } else good(`${label}  ${added}`);
       moves.push({ extracted, tip: replay.tip, oldTip });
       plannedTip.set(extracted, replay.tip);
       return;
@@ -1809,7 +1880,10 @@ const extractBranches = (apply: boolean) => {
   subheading('Conclusion');
   const branchCount = `${moves.length} branch${moves.length === 1 ? '' : 'es'}`;
   if (findings) attention('some of it needs a look by hand; see above');
-  else if (moves.length) good(`${branchCount} to create or move forward`);
+  else if (moves.length)
+    good(
+      `${branchCount} to create or move forward${rebuilt.length ? `, ${rebuilt.length} of them rebuilt` : ''}`,
+    );
   else good('every extracted branch is up to date');
   if (!apply) {
     if (moves.length)
@@ -1837,6 +1911,10 @@ const extractBranches = (apply: boolean) => {
     );
     good(`${cyan(move.extracted)}  now at ${yellow(move.tip.slice(0, 10))}`);
   }
+  if (rebuilt.length)
+    attention(
+      `rebuilt, so a plain push is refused: git push --force-with-lease origin ${rebuilt.join(' ')}`,
+    );
 };
 
 // Tries each branch above the PRs and the __ block onto the base alone, and moved down to just above them.
@@ -2095,10 +2173,12 @@ const printByBranch = (
 const pickLine = (commit: Commit, marker = '') =>
   `pick ${commit.sha.slice(0, 10)} ${marker}${commit.subject}`;
 
-type PullRequest = { number: number; base: string };
+type PullRequest = { number: number; base: string; mergedAt: string };
 
-/** Open pull requests keyed by head branch, or undefined when gh cannot list them. */
-const openPullRequests = (): Map<string, PullRequest> | undefined => {
+/** Pull requests in a state keyed by head branch, the newest per branch, or undefined when gh cannot list them. */
+const pullRequests = (
+  state: 'open' | 'merged',
+): Map<string, PullRequest> | undefined => {
   let origin: string;
   try {
     origin = git('remote', 'get-url', 'origin').trim();
@@ -2106,7 +2186,7 @@ const openPullRequests = (): Map<string, PullRequest> | undefined => {
     return undefined;
   }
   const slug = origin.replace(/\.git$/, '').replace(/^.*github\.com[:/]/, '');
-  const fields = ['--json', 'number,headRefName,baseRefName'];
+  const fields = ['--json', 'number,headRefName,baseRefName,mergedAt'];
   const result = spawnSync(
     'gh',
     [
@@ -2115,7 +2195,7 @@ const openPullRequests = (): Map<string, PullRequest> | undefined => {
       '--repo',
       slug,
       '--state',
-      'open',
+      state,
       '--limit',
       '500',
       ...fields,
@@ -2127,13 +2207,34 @@ const openPullRequests = (): Map<string, PullRequest> | undefined => {
     number: number;
     headRefName: string;
     baseRefName: string;
+    mergedAt: string;
   }[];
-  return new Map(
-    rows.map((row) => [
-      row.headRefName,
-      { number: row.number, base: row.baseRefName },
-    ]),
+  const pulls = new Map<string, PullRequest>();
+  for (const row of rows)
+    if (!pulls.has(row.headRefName))
+      pulls.set(row.headRefName, {
+        number: row.number,
+        base: row.baseRefName,
+        mergedAt: row.mergedAt,
+      });
+  return pulls;
+};
+const openPullRequests = () => pullRequests('open');
+
+/** The merged PR of a __ branch's copy, when it merged after the copy was made; review fixes and rebases change the head SHA. */
+const mergedCopyPull = (
+  source: string,
+  merged: Map<string, PullRequest> | undefined,
+) => {
+  const extracted = extractedNameOf(source);
+  const pull = merged?.get(extracted);
+  if (!pull || !branchExists(extracted)) return undefined;
+  const madeAt = Math.min(
+    ...fileList(gitQuiet('log', '--format=%ct', `${base}..${extracted}`)).map(
+      Number,
+    ),
   );
+  return Date.parse(pull.mergedAt) / 1000 > madeAt ? pull : undefined;
 };
 
 const exportPlan = () => {
@@ -2714,6 +2815,7 @@ const verifyRebase = () => {
           newBase,
           wip,
           newBase.slice(0, 10),
+          new Set(fileList(gitQuiet('diff', '--name-only', cutTip, newBase))),
         ) &&
         sameTipOutsideOrigin(
           cutTip,

@@ -19,11 +19,11 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 **Every branch up to and including `<last-ready-branch>` is ready for extraction, and nothing above it is.** The user runs this command only when that holds, so never ask about a single branch's readiness, and never offer a branch above the cut. Where the argument is missing, ask for it.
 
-**Never mark in the report's own turn.** The user reads the report first and decides. Between step 4 and step 5 the user runs `stack-plan preview`, `apply` and `verify` themselves, and they create the pull requests themselves from `branchcommands.md`.
+**Never mark in the report's own turn.** The user reads the report first and decides. Between step 4 and step 5 the user runs `stack-plan preview`, `apply` and `verify` themselves where the `__` block has to move, and they create the pull requests themselves from `branchcommands.md`.
 
 ## What typing this command approves
 
-**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, and, in the modes that name them, `stack-plan mark` and `stack-plan extract --apply`. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
+**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n` and `stack-plan extract --apply`. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
 
 - Run each script as `node <this skill's base directory>/scripts/<script> <arguments>`, with the absolute path printed when this skill loaded.
 - **Never install dependencies.** Where a lockfile differs from the main checkout's, results for that package may not match the commit: say so in the report, and do not install.
@@ -107,7 +107,8 @@ Run only on the user's word after the report, or on `/stack-extract mark`. Take 
 
 1. Run `stack-plan mark <branches> -n` and compare its renames with the mark line. Stop where they differ.
 2. Run `stack-plan mark <branches>`. It renames each branch to `__<name>`, moves the notes of waiting commits placed in it, rewrites the saved order with the `__` block directly above the PR branches, and exports the plan. The plan the user had is in `stackplan.txt.bak`.
-3. Reply with the renames and that the user's next step is `stack-plan preview`, then `stack-plan apply` and `stack-plan verify`, then `/stack-extract extract`.
+3. Run `stack-plan preview -n`, which writes no notes, to learn whether the `__` block has to move. Where the marked branches already sat at the bottom of the stack in chain order, it ends with `nothing to move`.
+4. Reply with the renames and the user's next step. Where nothing moves, that is `/stack-extract extract`, because `apply` and `verify` have nothing to do. Otherwise it is `stack-plan preview`, then `stack-plan apply` and `stack-plan verify`, then `/stack-extract extract`.
 
 ## 5. Extract
 

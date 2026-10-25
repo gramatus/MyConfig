@@ -288,12 +288,13 @@ It refuses a branch that is not in the stack, already has the prefix, has a PR, 
 `extract` changes nothing without `--apply`. It works through the `__` branches from the bottom up:
 
 - An extracted copy that does not exist yet is made by replaying the source's own commits. It first works out the chains among the `__` branches, the same way `extractable` does. A branch that stands alone goes on `--base`. A branch in a chain goes on the extracted copy of the member below it, so each copy holds everything it needs. A branch that needs something outside the block is a finding.
-- An extracted copy that exists gets the source's commits that it lacks, matched by `git patch-id`, replayed on top. That only ever moves it forward, so its PR needs no force push. If the copy holds commits the source lacks, such as a review fix pushed on GitHub, that is a finding, and the branch is left alone until those commits are in the source too.
+- An extracted copy that exists gets the source's commits that it lacks, matched by `git patch-id`, replayed on top. That only moves it forward, so its PR needs no force push. If the copy holds commits the source lacks, such as a review fix pushed on GitHub, that is a finding, and the branch is left alone until those commits are in the source too.
+- An extracted copy that sits on the copy of a lower `__` branch, where that lower copy has moved since, is rebuilt. Its own commits are replayed onto the lower copy's new tip, followed by any source commits it lacks. Rebuilding rewrites the branch, so `--apply` resets the local branch and ends by printing the `git push --force-with-lease` its PR needs. Export's `# mirror:` line shows such a copy as `on an old <branch>`.
 - A `__` branch whose unprefixed name is also a stack branch is a finding.
 
-The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
+The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. It signs every commit it writes, and fails when git has no signing key, because the org requires signed commits. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
 
-Once an extracted copy has been squash-merged, `extract` reports its `__` branch as already in the base and leaves it alone. Fetch, then take the branch out of the stack with `cut`:
+Once an extracted copy has been squash-merged, `extract` reports its `__` branch as already in the base, or as merged on GitHub, and leaves it alone. Fetch, then take the branch out of the stack with `cut`:
 
 ```shell
 stack-plan cut __skills/foo
@@ -306,12 +307,12 @@ stack-plan cut __skills/foo --apply
 Given `__` branches, `cut` drops only those, wherever they sit, rather than everything up to them. It refuses a name without the prefix among them. It checks three things:
 
 - Every branch below the lowest named one is a `__` branch. Those are never pushed, so moving them onto the base rewrites no branch with a PR. A branch without the prefix below is a finding, and cutting it first is the remedy.
-- The base contains each named branch, checked on its own as `cut` checks a branch below the cut.
-- The rest of the stack replays onto the base in memory without a conflict. Its net change is the same as before, apart from files that end as they did on wip. The tip tree changes only in files where the base moved since the stack left it.
+- Each named branch has landed. `gh` decides first: a copy whose PR merged after the copy was made counts as landed. The merge time ties the PR to the copy, because review fixes and GitHub's rebases change the PR's head, and an older PR may have used the same branch name. Otherwise the base must contain the branch, checked on its own as `cut` checks a branch below the cut. That content check says "can't tell" when later merges changed the same lines again, which is why GitHub's answer comes first.
+- The rest of the stack replays onto the base in memory without a conflict. Its net change is the same as before, apart from files that end as they did on wip. A file that ends differently and that the base also changed since the fork is "can't tell", not lost, because the two changes may simply sit side by side. `cut` prints a `git diff` for each such file, from the old wip to the replayed result. Read it, then drop with `-f`. The tip tree changes only in files where the base moved since the stack left it.
 
 `--apply` then runs `git rebase -i --update-refs --empty=drop --onto <base> <fork>`, where `<fork>` is where the stack leaves the base. The todo has a `drop` line for each commit of the named branches and leaves out their `update-ref` lines, so those branches keep their old tips. It refuses on a finding, and `-f` (`--anyway`) drops regardless. It records a `# cut:` line whose old range starts at the fork. `verify` then counts the dropped commits as already in the base, and runs the same two checks on the real result. Once they pass, it removes the named branches from `stackplan.order` and prints the `git branch -D` that deletes them and their extracted copies.
 
-An extracted copy that sat on the copy of a merged chain member still sits on that old copy. Rebuilding it, and its PR, is not handled yet.
+An extracted copy that sat on the copy of a merged chain member still sits on that old copy. Rebuilding it, and its PR, is not handled yet. That differs from a lower copy that moved forward, which `extract` rebuilds on, because a merged copy is no longer the base the PR should target.
 
 ## Where things live
 
