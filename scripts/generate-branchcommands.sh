@@ -118,11 +118,37 @@ for branch in "${lines[@]:1}"; do
   if [[ -n "${pr_number[$copy]:-}" && "${pr_base[$copy]}" != "${copy_base[$copy]}" ]]; then
     echo "Warning: #${pr_number[$copy]} ($copy) targets ${pr_base[$copy]}, not ${copy_base[$copy]}." >&2
   fi
+  base_of_copy="${copy_base[$copy]}"
+  if $pr_found && [[ -n "${pr_number[$copy]:-}" && "$base_of_copy" != main && -z "${pr_number[$base_of_copy]:-}" ]]; then
+    echo "Warning: #${pr_number[$copy]} ($copy) sits on $base_of_copy, which has no PR." >&2
+  fi
 done
+
+# Copies with a PR first, then the rest, each group bottom first, so one marker can go between them.
+with_pr_first() {
+  local copy
+  for copy in "$@"; do
+    if [[ -n "${pr_number[$copy]:-}" ]]; then echo "$copy"; fi
+  done
+  for copy in "$@"; do
+    if [[ -z "${pr_number[$copy]:-}" ]]; then echo "$copy"; fi
+  done
+}
+mapfile -t copies < <(with_pr_first "${copies[@]}")
 extracted=()
+copies_with_pr=0
 for copy in "${copies[@]}"; do
   if [[ -n "${copy_base[$copy]:-}" ]]; then extracted+=("$copy"); fi
+  if [[ -n "${pr_number[$copy]:-}" ]]; then (( ++copies_with_pr )); fi
 done
+
+# The marker for the copy lists, before the copy at index $1; "blank" as $2 adds an empty line.
+copy_marker_before() {
+  if $pr_found && (( $1 == copies_with_pr )); then
+    echo "$MARKER"
+    if [[ "${2:-}" == blank ]]; then echo ""; fi
+  fi
+}
 
 # Pass "blank" as the second argument to follow the marker with an empty line.
 marker_before() {
@@ -205,7 +231,7 @@ fi
   for ((i = 1; i < ${#lines[@]}; i++)); do
     marker_before "$i" blank
     is_source "${lines[i]}" && continue
-    echo "/pr-summary ${lines[i]} ${lines[i-1]} body-only "
+    echo "/pr-summary ${lines[i]} ${lines[i-1]} body-only"
     echo ""
   done
   marker_before "${#lines[@]}" blank
@@ -261,40 +287,55 @@ fi
     echo "Each copy's PR targets the copy below it in its chain, or main. Push and create them bottom first."
     echo ""
     echo '```text'
-    for copy in "${copies[@]}"; do
+    for i in "${!copies[@]}"; do
+      copy="${copies[i]}"
+      copy_marker_before "$i"
       if [[ -z "${copy_base[$copy]:-}" ]]; then
         echo "__$copy  not extracted yet: stack-plan extract --apply"
       else
         echo "$copy → ${copy_base[$copy]}${pr_number[$copy]:+ #${pr_number[$copy]}}"
       fi
     done
+    copy_marker_before "${#copies[@]}"
     echo '```'
   fi
   if (( ${#extracted[@]} )); then
     echo ""
     echo "### Compare links"
     echo ""
-    for copy in "${extracted[@]}"; do
+    for i in "${!extracted[@]}"; do
+      copy="${extracted[i]}"
+      copy_marker_before "$i"
       echo "${COMPARE_BASE}/${copy_base[$copy]}...${copy}?expand=1"
     done
+    copy_marker_before "${#extracted[@]}"
     echo ""
     echo "### PR review"
     echo ""
-    for copy in "${extracted[@]}"; do
+    for i in "${!extracted[@]}"; do
+      copy="${extracted[i]}"
+      copy_marker_before "$i" blank
       echo "/pr-review ${copy} ${copy_base[$copy]}"
       echo ""
     done
+    copy_marker_before "${#extracted[@]}" blank
     echo "### PR summary"
     echo ""
-    for copy in "${extracted[@]}"; do
-      echo "/pr-summary ${copy} ${copy_base[$copy]} body-only "
+    for i in "${!extracted[@]}"; do
+      copy="${extracted[i]}"
+      copy_marker_before "$i" blank
+      echo "/pr-summary ${copy} ${copy_base[$copy]} body-only"
       echo ""
     done
+    copy_marker_before "${#extracted[@]}" blank
     echo "### Push to origin"
     echo ""
-    for copy in "${extracted[@]}"; do
+    for i in "${!extracted[@]}"; do
+      copy="${extracted[i]}"
+      copy_marker_before "$i"
       echo "git push -u origin ${copy}"
     done
+    copy_marker_before "${#extracted[@]}"
     echo ""
     echo "### Create PR"
     echo ""
