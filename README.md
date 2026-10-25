@@ -46,11 +46,11 @@ cd /repos
 sudo chown $userid:$userid .
 ```
 
-For å kunne koble til GitHub og klone repo (dette baserer seg på å dele Git credentials med Windows, pass på å legge inn riktig brukernavn):
+For å kunne koble til GitHub og klone repo (dette baserer seg på å dele Git credentials med Windows):
 
 ```shell
 sudo apt-get install -y git curl wget jq
-git config --global credential.helper "/mnt/c/Users/TORGST/AppData/Local/Programs/Git/mingw64/bin/git-credential-manager.exe"
+git config --global credential.helper "/mnt/c/Program\ Files/Git/ucrt64/bin/git-credential-manager.exe"
 sudo mkdir /repos
 cd /repos
 userid=$(whoami)
