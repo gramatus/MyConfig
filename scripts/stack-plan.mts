@@ -851,7 +851,7 @@ const reportConflicts = (
 
 // Whitespace and line numbers do not count, so the same change on a moved base gets the same id.
 const patchId = (from: string, to: string, path?: string) => {
-  const diff = gitQuiet('diff', from, to, ...(path ? ['--', path] : []));
+  const diff = gitQuiet('diff', from, to, '--', ...(path ? [path] : []));
   if (!diff) return '';
   return execFileSync('git', ['patch-id', '--stable'], {
     input: diff,
@@ -877,8 +877,8 @@ const sameNetChange = (
     return true;
   }
   const files = new Set([
-    ...fileList(gitQuiet('diff', '--name-only', from, to)),
-    ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo)),
+    ...fileList(gitQuiet('diff', '--name-only', from, to, '--')),
+    ...fileList(gitQuiet('diff', '--name-only', onFrom, onTo, '--')),
   ]);
   const differing = [...files].filter(
     (file) => patchId(from, to, file) !== patchId(onFrom, onTo, file),
