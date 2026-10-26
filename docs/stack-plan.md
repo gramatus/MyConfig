@@ -21,6 +21,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
 | `sp mark <b>...` | Renames each branch to its `__` name, carrying its notes and the saved order along, and exports the plan with them as one block. Add `-n` to see what it will do. |
+| `sp unmark <__b>...` | Undoes `mark`: deletes each extracted copy once it holds the same commits, renames the branch back, and puts it just above the `__` block. Add `-n` to see what it will do. |
 | `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -287,6 +288,8 @@ The `__` branches go in one block directly above the branches that have PRs. `st
 - It exports the plan, keeping the earlier file as `stackplan.txt.bak`.
 
 It refuses a branch that is not in the stack, already has the prefix, has a PR, or whose `__` name is taken. `-n` prints the renames and the moves without making them. Then run `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
+
+`stack-plan unmark <__branch>...` takes a branch back into the main stack. It deletes the extracted copy, renames the branch to its name without the prefix, and saves the order with it directly above the `__` block, as the bottom of the main stack. It carries the notes and the saved order along as `mark` does, then exports the plan. The copy is deleted only when it holds exactly the source's commits, matched by `git patch-id`, so run `extract --apply` first when the copy is behind. It refuses a copy with an open PR, a copy holding commits the source lacks, and a copy that another `__` branch's copy sits on, unless that branch is unmarked too. A copy on origin is left there, and the output names it. `-n` shows the deletions, renames and moves without making them. Then run `preview`, `apply` and `verify`.
 
 `extract` changes nothing without `--apply`. It works through the `__` branches from the bottom up:
 

@@ -173,6 +173,7 @@ _stack_plan() {
         'extract:check copying each __ branch off the stack, onto its name without the prefix'
         'extractable:list the branches that could become __ branches'
         'mark:rename branches to their __ names and export the plan with them as one block'
+        'unmark:undo mark, deleting each extracted copy that matches its source'
         'mode:show or set what export lists'
     )
     if (( CURRENT == 2 )); then
@@ -189,7 +190,7 @@ _stack_plan() {
             '*:branch:_stack_plan_refs'
         return
     fi
-    if [[ $words[2] == mark ]]; then
+    if [[ $words[2] == mark || $words[2] == unmark ]]; then
         shift words
         (( CURRENT-- ))
         _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \

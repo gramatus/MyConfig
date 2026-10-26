@@ -109,6 +109,8 @@ const USAGE = [
   "               --json prints each chain with every member's start and replay commits",
   '  mark <branch>...  rename each to its __ name, carrying its notes and the saved order along, and export the plan',
   '               with them as one block above the PRs; -n only shows what it would do',
+  '  unmark <__branch>...  undo mark: delete each extracted copy once it matches its source, rename the source back,',
+  '               move it to just above the __ block and export the plan; -n only shows what it would do',
   '  needs <branch> <needed>...  record that the branch needs the others below it, which extractable and extract',
   '               then chain it with; --clear forgets what it recorded, and naming no others shows it',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
@@ -137,6 +139,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   extract: ['--base', '--apply', '--anyway'],
   extractable: ['--base', '--json'],
   mark: ['--base', '--dry-run'],
+  unmark: ['--base', '--dry-run'],
   needs: ['--base', '--clear'],
   mode: ['full', 'short'],
 };
@@ -167,7 +170,10 @@ if (command !== '_todo') {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
     else if (command === 'cut' && !rest[i].startsWith('-'))
       cutTargets.push(rest[i]);
-    else if (command === 'mark' && !rest[i].startsWith('-'))
+    else if (
+      (command === 'mark' || command === 'unmark') &&
+      !rest[i].startsWith('-')
+    )
       branchesToMark.push(rest[i]);
     else if (command === 'needs' && !rest[i].startsWith('-'))
       needsArgs.push(rest[i]);
@@ -190,6 +196,8 @@ if (command !== '_todo') {
     );
   if (command === 'mark' && !branchesToMark.length)
     usageError('mark needs the branches to mark');
+  if (command === 'unmark' && !branchesToMark.length)
+    usageError('unmark needs the __ branches to unmark');
   if (command === 'needs' && !needsArgs.length)
     usageError('needs takes the branch whose needs to record or show');
 }
@@ -2406,6 +2414,121 @@ const markBranches = (names: string[]) => {
   );
 };
 
+// Undoes mark: deletes each extracted copy that holds the same commits as its source, renames the source back, and moves it above the __ block.
+const unmarkBranches = (names: string[]) => {
+  const wip = currentBranch();
+  const { branches, pending, own } = readStack(wip);
+  const pulls = openPullRequests();
+  heading(`Unmark${dryRun ? ' (dry run)' : ''}`);
+  if (!pulls)
+    throw new Error(
+      'could not list PRs with gh, so an extracted copy with a PR is not caught',
+    );
+  const sources = branches.filter(isExtractSource);
+  const nameOf = new Map(names.map((name) => [name, extractedNameOf(name)]));
+  const toDelete: string[] = [];
+  const problems = names.flatMap((name) => {
+    if (!branches.includes(name)) return [`${name} is not a stack branch`];
+    if (!isExtractSource(name)) return [`${name} is not an extract source`];
+    const extracted = nameOf.get(name)!;
+    if (branches.includes(extracted))
+      return [`${extracted} is a stack branch too`];
+    if (!branchExists(extracted)) return [];
+    const pull = pulls.get(extracted);
+    if (pull) return [`${extracted} has PR #${pull.number}; close it first`];
+    const at = sources.indexOf(name);
+    const commits = own.get(name) ?? [];
+    const { fork, on } = extractedForkOf(
+      extracted,
+      sources.slice(0, at).map(extractedNameOf),
+    );
+    let compared = compareWithExtracted(commits, extracted, fork);
+    const landedTip =
+      on === undefined && compared.extraCount
+        ? landedForkOf(extracted, fork, commits)
+        : undefined;
+    if (landedTip)
+      compared = compareWithExtracted(commits, extracted, landedTip);
+    const found: string[] = [];
+    if (compared.missing.length || compared.extraCount)
+      found.push(
+        `${extracted} does not hold the same commits as ${name}: ${countOf(compared.missing.length, 'commit')} missing from it, ${countOf(compared.extraCount, 'commit')} only on it`,
+      );
+    // A copy chained on this one would lose its base with it.
+    for (const above of sources.slice(at + 1).filter((s) => !nameOf.has(s))) {
+      const aboveCopy = extractedNameOf(above);
+      if (!branchExists(aboveCopy)) continue;
+      if (extractedForkOf(aboveCopy, [extracted]).on === extracted)
+        found.push(`${aboveCopy} sits on ${extracted}; unmark ${above} too`);
+    }
+    if (!found.length) toDelete.push(extracted);
+    return found;
+  });
+  if (problems.length) throw new Error(problems.join('; '));
+
+  const renamed = (branch: string) => nameOf.get(branch) ?? branch;
+  const order = desiredOrder(branches).filter((branch) => !nameOf.has(branch));
+  const anchorAt = order.findLastIndex(
+    (branch) => isExtractSource(branch) || pulls.has(branch),
+  );
+  const unmarkedOrder = [
+    ...order.slice(0, anchorAt + 1),
+    ...branches.filter((branch) => nameOf.has(branch)).map(renamed),
+    ...order.slice(anchorAt + 1),
+  ];
+  const notesToMove = pending.filter((commit) => nameOf.has(commit.note));
+
+  for (const extracted of toDelete) {
+    const remote = remoteOf(extracted);
+    console.log(
+      `${cyan(extracted)}  ${dryRun ? 'would be deleted' : 'deleted'}, it holds the same commits as its source${remote ? `; ${remote} stays` : ''}`,
+    );
+  }
+  for (const [name, plain] of nameOf)
+    console.log(`${cyan(name)} → ${cyan(plain)}`);
+  if (notesToMove.length)
+    console.log(
+      `placed in them: ${countOf(notesToMove.length, 'waiting commit')}, whose notes follow the rename`,
+    );
+  printOrderChanges(branches.map(renamed), unmarkedOrder);
+  if (dryRun) {
+    console.log(`To do it: stack-plan unmark ${names.join(' ')}`);
+    return;
+  }
+
+  for (const extracted of toDelete) git('branch', '-D', extracted);
+  const done: string[] = [];
+  try {
+    for (const [name, plain] of nameOf) {
+      git('branch', '-m', name, plain);
+      done.push(name);
+    }
+  } catch (error) {
+    const undo = done.map((name) => `git branch -m ${renamed(name)} ${name}`);
+    throw new Error(
+      `${(error as Error).message}${undo.length ? `\nTo undo the renames so far: ${undo.join('; ')}` : ''}`,
+    );
+  }
+  for (const commit of notesToMove)
+    git(
+      'notes',
+      `--ref=${NOTES_REF}`,
+      'add',
+      '-f',
+      '-m',
+      renamed(commit.note),
+      commit.sha,
+    );
+  git('config', ORDER_KEY, unmarkedOrder.join(' '));
+  const waiting = words(readConfig(NEW_KEY));
+  if (waiting.length) git('config', NEW_KEY, waiting.map(renamed).join(' '));
+  good(`${names.length} branch${names.length === 1 ? '' : 'es'} renamed`);
+  exportPlan();
+  console.log(
+    'Next: stack-plan preview, then stack-plan apply and stack-plan verify',
+  );
+};
+
 // Prints commits under their branch, in stack order.
 const printByBranch = (
   order: string[],
@@ -3623,6 +3746,7 @@ try {
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === 'extractable') extractableBranches();
   else if (command === 'mark') markBranches(branchesToMark);
+  else if (command === 'unmark') unmarkBranches(branchesToMark);
   else if (command === 'needs') declareNeeds(needsArgs);
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
