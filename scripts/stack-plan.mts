@@ -1789,12 +1789,16 @@ const standaloneGroup = (
   }
 };
 
-// Merges groups that share a branch, each in stack order, lowest group first.
-const mergeGroups = (groups: string[][], branches: string[]) => {
+// Merges groups that share a branch other than a base, each in stack order, lowest group first.
+const mergeGroups = (
+  groups: string[][],
+  branches: string[],
+  isBase: (branch: string) => boolean = () => false,
+) => {
   let merged: string[][] = [];
   for (const group of groups) {
     const overlapping = merged.filter((other) =>
-      other.some((branch) => group.includes(branch)),
+      other.some((branch) => !isBase(branch) && group.includes(branch)),
     );
     const union = new Set([...group, ...overlapping.flat()]);
     merged = [
@@ -2145,7 +2149,7 @@ const extractableBranches = () => {
       .slice(anchorAt + 1)
       .filter((branch) => !group.includes(branch));
     const sequence = [
-      ...commitsOf(group),
+      ...commitsOf(group.filter(movable)),
       ...commitsOf(stayingAbove),
       ...pending,
     ];
@@ -2159,6 +2163,9 @@ const extractableBranches = () => {
     return `${where} conflicts after the move (${conflict.files.join(', ')})`;
   };
 
+  // A branch may stack on a __ branch, whose extracted copy then becomes its base, but never on a branch with a PR.
+  const mayJoin = (branch: string) =>
+    movable(branch) || isExtractSource(branch);
   const tested = branches.filter(movable);
   const needsOf = new Map<string, string[]>();
   const directNeedsOf = new Map<string, string[]>();
@@ -2169,7 +2176,7 @@ const extractableBranches = () => {
       stack,
       wip,
       branch,
-      movable,
+      mayJoin,
     );
     if (blocker) blockerOf.set(branch, blocker);
     else {
@@ -2193,13 +2200,19 @@ const extractableBranches = () => {
     }
     return tips;
   };
-  const chainReports = mergeGroups([...needsOf.values()], branches).map(
+  // Chains that only share a __ branch stay apart, as extract puts each on that branch's copy.
+  const chainReports = mergeGroups(
+    [...needsOf.values()],
+    branches,
+    isExtractSource,
+  ).map(
     (chain) => {
       const tips = replayTipsOf(chain);
       return {
         moveConflict: moveConflict(chain) ?? null,
         members: chain.map((name, at) => ({
           name,
+          marked: isExtractSource(name),
           needs: directNeedsOf.get(name) ?? [],
           declared: declaredOf.get(name) ?? [],
           start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
@@ -2211,7 +2224,11 @@ const extractableBranches = () => {
   const extractable = new Set(
     chainReports
       .filter((report) => !report.moveConflict)
-      .flatMap((report) => report.members.map((member) => member.name)),
+      .flatMap((report) =>
+        report.members
+          .filter((member) => !member.marked)
+          .map((member) => member.name),
+      ),
   );
 
   if (asJson) {
@@ -2235,6 +2252,10 @@ const extractableBranches = () => {
       attention(`  the chain conflicts on ${base} when replayed as one`);
     if (members.length === 1) return;
     for (const member of members) {
+      if (member.marked) {
+        console.log(`    ${member.name}  marked already; its copy is the base`);
+        continue;
+      }
       const needsText = member.needs.length
         ? `needs ${member.needs
             .map((need) =>

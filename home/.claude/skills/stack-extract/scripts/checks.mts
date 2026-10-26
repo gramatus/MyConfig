@@ -7,7 +7,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type Member = { name: string; start: string | null; replay: string | null };
+type Member = {
+  name: string;
+  marked: boolean;
+  start: string | null;
+  replay: string | null;
+};
 type ExtractableReport = {
   baseSha: string;
   chains: { moveConflict: string | null; members: Member[] }[];
@@ -195,19 +200,23 @@ const report: ExtractableReport = JSON.parse(
   readFileSync(candidatesPath, 'utf8'),
 );
 
+const labelOf = ({ name, marked }: Member) =>
+  marked ? `${name} (marked)` : name;
+
 const checkedRefs: CheckedRef[] = [
   { name: BASELINE_NAME, ref: report.baseSha },
   ...report.chains
     .filter((chain) => !chain.moveConflict)
     .flatMap(({ members }) =>
-      members.flatMap(({ name, start, replay }, at) =>
+      // A __ member is checked so its errors count as inherited, and labelled so it is not read as a candidate.
+      members.flatMap(({ start, replay }, at) =>
         replay && start
           ? [
               {
-                name,
+                name: labelOf(members[at]),
                 ref: replay,
                 start,
-                below: members[at - 1]?.name ?? BASELINE_NAME,
+                below: at ? labelOf(members[at - 1]) : BASELINE_NAME,
               },
             ]
           : [],

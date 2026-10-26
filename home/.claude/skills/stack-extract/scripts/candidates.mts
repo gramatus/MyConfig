@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 
 type Member = {
   name: string;
+  marked: boolean;
   needs: string[];
   start: string | null;
   replay: string | null;
@@ -73,9 +74,11 @@ const fullReport: ExtractableReport = JSON.parse(
 const notReady: string[] = [];
 const chains = fullReport.chains.flatMap((chain) => {
   const cutAt = chain.members.findIndex((member) => !isReady(member.name));
-  if (cutAt < 0) return [chain];
-  notReady.push(...chain.members.slice(cutAt).map((member) => member.name));
-  return cutAt ? [{ ...chain, members: chain.members.slice(0, cutAt) }] : [];
+  const members = cutAt < 0 ? chain.members : chain.members.slice(0, cutAt);
+  if (cutAt >= 0)
+    notReady.push(...chain.members.slice(cutAt).map((member) => member.name));
+  // A chain left with only __ members has no candidate in it.
+  return members.some((member) => !member.marked) ? [{ ...chain, members }] : [];
 });
 const blocked = fullReport.blocked.filter(({ name }) => isReady(name));
 notReady.push(
@@ -96,7 +99,11 @@ for (const { moveConflict, members } of report.chains) {
     console.log(`! ${names}: not a candidate, ${moveConflict}`);
     continue;
   }
-  for (const { name, start, replay } of members) {
+  for (const { name, marked, start, replay } of members) {
+    if (marked) {
+      console.log(`--- ${name}  marked already, so its extracted copy is the chain's base`);
+      continue;
+    }
     if (!start || !replay) {
       console.log(`! ${name}: its chain conflicts on ${report.base} as one`);
       continue;

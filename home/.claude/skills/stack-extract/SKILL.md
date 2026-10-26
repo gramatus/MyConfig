@@ -39,7 +39,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## 1. Find the candidates
 
-Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs, and under `declared` which of those `stack-plan needs` recorded.
+Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs, and under `declared` which of those `stack-plan needs` recorded. A chain may open with a `__` branch, printed as a `---` line and flagged `marked` in `candidates.json`. It is not a candidate: it is the base the chain's first candidate stacks on.
 
 It prints a line marked `!` for a chain that conflicts when moved down, which is not a candidate, and a line marked `✗` for each branch that cannot leave. Carry both into the report as they are. A last `not ready` line names the branches above the cut, which the report leaves out. Say in one line how many candidates there are, then go on without waiting.
 
@@ -65,6 +65,8 @@ Sort each dependency by where it points, because that decides what the report do
 | A member above it in its own chain | A finding that heals once the chain merges. It holds nothing back |
 | A branch above the cut | A finding. The document is ahead of the code until that branch merges, and it holds nothing back |
 | A member of another chain, below it in the stack | **The candidate joins that chain.** Run `stack-plan needs <candidate> <member>`, then run step 1 again, so the chains, ranges and checks all come from the joined chain. Each change stays the same text, so this step's findings still hold |
+| A `__` branch | **The candidate stacks on it.** Run `stack-plan needs <candidate> <__branch>`, then run step 1 again. The chain then opens with the `__` branch, and the candidate's pull request goes on that branch's extracted copy |
+| A branch with a PR | **Hold the candidate back.** It can leave once that pull request has merged |
 | A member of another chain, above it in the stack | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, and the needed branch would have to sit below it. It can leave once the other chain has merged |
 
 ## 3. Check that each candidate builds
@@ -75,7 +77,7 @@ Sort each dependency by where it points, because that decides what the report do
 2. Read the repository's testing guide, such as `agent-project/testing-ops.md`, for failures it says happen in a worktree. Report those as known, never as red.
 3. Run `worktree.mts open`, then `checks.mts` with the npm script names, then `worktree.mts close`. Run `close` also when you stop early. Name the scripts that take paths after `--changed`, as in `checks.mts tsc format:check --changed lint:changed`. `checks.mts` gives each of them the files the candidate's own change adds or modifies, and skips them at the base.
 
-**Report each result as it lands, because a run can take an hour and shows the user nothing until it ends.** Start `checks.mts` with `run_in_background`, its output sent to `.agent-context/.tmp/stack-extract-results/checks-progress.txt` with `> <file> 2>&1`. Then watch that file with the Monitor tool, `tail -n +1 -F <file>` and `timeout_ms` at its 30-minute cap. For each line that arrives, tell the user in one sentence which branch and script finished, its verdict, and progress as branches done out of the candidate count, such as "branch 5 of 17". Leave out the `baseline` lines from the count, and report them as the base's result. When the monitor expires before the run ends, re-arm it with `tail -n 0 -F <file>`, so lines already reported do not come again. Never re-arm by starting `checks.mts` again. Once the background run's completion notice arrives, stop the monitor with TaskStop.
+**Report each result as it lands, because a run can take an hour and shows the user nothing until it ends.** Start `checks.mts` with `run_in_background`, its output sent to `.agent-context/.tmp/stack-extract-results/checks-progress.txt` with `> <file> 2>&1`. Then watch that file with the Monitor tool, `tail -n +1 -F <file>` and `timeout_ms` at its 30-minute cap. For each line that arrives, tell the user in one sentence which branch and script finished, its verdict, and progress as branches done out of the candidate count, such as "branch 5 of 17". Leave out the `baseline` lines from the count, and report them as the base's result. Leave out the `(marked)` lines too. They check a `__` branch only so that its errors count as inherited for the candidate above it. When the monitor expires before the run ends, re-arm it with `tail -n 0 -F <file>`, so lines already reported do not come again. Never re-arm by starting `checks.mts` again. Once the background run's completion notice arrives, stop the monitor with TaskStop.
 
 `checks.mts` prints one line per commit and script, saves it to `checks/summary.txt`, and saves each script's output beside it. It compares error lines, leaving out line and column, and each line carries one verdict:
 
@@ -94,12 +96,12 @@ Sort each dependency by where it points, because that decides what the report do
 
 The report answers three questions, in this order, in its header:
 
-1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain whose build fails or that step 2 holds back is not among them.
+1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with a `__` branch is posted on that branch's extracted copy, so name the copy as its base. A chain whose build fails or that step 2 holds back is not among them.
 2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line.
 3. **What happens next**: the `stack-plan mark` line below, and that the user's word or `/stack-extract mark` runs it.
 
 - **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at and how the table above sorted it. Name each need `candidates.json` lists under `declared`, with what it rests on, because the text does not show it and the user did not watch it being declared. A clean chain gets one line.
-- **The mark line:** `stack-plan mark` followed by every branch of the chains in answer 1, in stack order. Step 4 runs exactly this line.
+- **The mark line:** `stack-plan mark` followed by every branch of the chains in answer 1, in stack order, leaving out the `__` branches. Step 4 runs exactly this line.
 - **Not covered:** skipped checks, setup gaps, known worktree failures, lockfile warnings, and anything step 2 could not settle.
 
 ## 4. Mark
