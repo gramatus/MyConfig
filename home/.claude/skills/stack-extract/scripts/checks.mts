@@ -70,6 +70,23 @@ const run = (command: string, args: string[]) => {
   };
 };
 
+// npm hands the script to sh -c as one argument, which Linux caps at 128 KiB.
+const BATCH_BYTES = 100_000;
+
+const batchesOf = (paths: string[]) => {
+  const batches: string[][] = [[]];
+  let bytes = 0;
+  for (const path of paths) {
+    if (bytes + path.length + 1 > BATCH_BYTES && batches.at(-1)!.length) {
+      batches.push([]);
+      bytes = 0;
+    }
+    batches.at(-1)!.push(path);
+    bytes += path.length + 1;
+  }
+  return batches;
+};
+
 const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
 // npm's own failure lines and tsc's totals repeat in every failing run, so they say nothing.
@@ -268,14 +285,20 @@ for (const { name, ref, start, below } of checkedRefs) {
       record(`${name}  ${script}  skipped  no changed file to check`);
       continue;
     }
-    const pathArgs = takesPaths ? ['--', ...changedPaths] : [];
-    const result = run('npm', [
-      '--prefix',
-      worktreePath,
-      'run',
-      script,
-      ...pathArgs,
-    ]);
+    const batches = takesPaths ? batchesOf(changedPaths) : [[]];
+    const results = batches.map((paths) =>
+      run('npm', [
+        '--prefix',
+        worktreePath,
+        'run',
+        script,
+        ...(paths.length ? ['--', ...paths] : []),
+      ]),
+    );
+    const result = {
+      status: results.find(({ status }) => status !== 0)?.status ?? 0,
+      output: results.map(({ output }) => output).join('\n'),
+    };
     const outputName = `${fileNameOf(name)}.${script.replaceAll(':', '-')}.txt`;
     writeFileSync(join(checksPath, outputName), result.output);
     for (const line of errorLinesOf(result.output)) {
