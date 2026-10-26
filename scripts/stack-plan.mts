@@ -1672,6 +1672,29 @@ const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
   return { fork, on };
 };
 
+// Where a copy's own commits start when they sit on commits the base holds, as when a lower copy in its chain landed.
+const landedForkOf = (
+  extracted: string,
+  fork: string,
+  sourceCommits: Commit[],
+) => {
+  if (!sourceCommits.length) return undefined;
+  const sourceIds = new Set(
+    patchIdsIn(
+      `${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`,
+    ).values(),
+  );
+  const idOfSha = patchIdsIn(`${fork}..${extracted}`);
+  const line = commitsIn(`${fork}..${extracted}`);
+  let start = line.length;
+  while (start > 0 && sourceIds.has(idOfSha.get(line[start - 1].sha) ?? ''))
+    start--;
+  if (start === 0 || start === line.length) return undefined;
+  const landedTip = line[start - 1].sha;
+  const merged = mergeTree(fork, base, landedTip);
+  return merged.ok && merged.tree === treeOf(base) ? landedTip : undefined;
+};
+
 const replaysOf = (commits: Commit[]): Replay[] =>
   commits.map((commit) => ({ commit, fold: false }));
 
@@ -1832,21 +1855,33 @@ const mirrorStatus = (
   const extracted = extractedNameOf(source);
   if (!branchExists(extracted))
     return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted`;
-  const { fork, on } = extractedForkOf(
-    extracted,
-    sourcesBelow.map(extractedNameOf),
-  );
-  const { missing, extraCount } = compareWithExtracted(
+  const found = extractedForkOf(extracted, sourcesBelow.map(extractedNameOf));
+  const { on } = found;
+  let { fork } = found;
+  let { missing, extraCount } = compareWithExtracted(
     sourceCommits,
     extracted,
     fork,
   );
+  const landedTip =
+    on === undefined && extraCount
+      ? landedForkOf(extracted, fork, sourceCommits)
+      : undefined;
+  if (landedTip) {
+    fork = landedTip;
+    ({ missing, extraCount } = compareWithExtracted(
+      sourceCommits,
+      extracted,
+      fork,
+    ));
+  }
   const pull = pulls?.get(extracted);
-  const stale = on !== undefined && tipOf(on) !== fork;
+  const stale = landedTip !== undefined || (on !== undefined && tipOf(on) !== fork);
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
-    ...(stale ? [`on an old ${on}`] : []),
+    ...(landedTip ? [`on landed commits`] : []),
+    ...(on !== undefined && tipOf(on) !== fork ? [`on an old ${on}`] : []),
     missing.length
       ? `${countOf(missing.length, 'commit')} behind`
       : stale
@@ -1860,12 +1895,12 @@ const mirrorStatus = (
 };
 
 // Copies each __ branch's commits onto the branch named without the prefix, off the stack; --apply moves those refs.
-const extractBranches = (apply: boolean) => {
+const extractBranches = (apply: boolean, landedOnly = false) => {
   const wip = currentBranch();
   const stack = readStack(wip);
   const { branches, own } = stack;
   const sources = branches.filter(isExtractSource);
-  heading(`Extract onto ${base}`);
+  heading(landedOnly ? 'Rebuild extracted copies on landed commits' : `Extract onto ${base}`);
   if (!sources.length) {
     good(`no ${EXTRACT_SOURCE_PREFIX} branch in the stack; nothing to extract`);
     return;
@@ -1898,6 +1933,13 @@ const extractBranches = (apply: boolean) => {
     bad(`${label}  conflicts on ${onto}, at`);
     console.log(commitLine(replay.commit));
     for (const file of replay.files) console.log(`    ${file}`);
+  };
+  // A branch in a chain goes on the copy of the one below it there, so each copy holds all it needs.
+  const targetOf = (source: string) => {
+    const chain = chains.find((members) => members.includes(source)) ?? [];
+    const chainedOn = chain[chain.indexOf(source) - 1];
+    const onto = chainedOn ? extractedNameOf(chainedOn) : base;
+    return { onto, start: chainedOn ? plannedTip.get(onto) : tipOf(base) };
   };
 
   subheading('Branches');
@@ -1932,15 +1974,29 @@ const extractBranches = (apply: boolean) => {
     if (branchExists(extracted)) {
       const oldTip = tipOf(extracted);
       plannedTip.set(extracted, oldTip);
-      const { fork, on } = extractedForkOf(
+      const found = extractedForkOf(
         extracted,
         sources.slice(0, i).map(extractedNameOf),
       );
-      const { missing, extraCount } = compareWithExtracted(
+      const { on } = found;
+      let { fork } = found;
+      let { missing, extraCount } = compareWithExtracted(
         commits,
         extracted,
         fork,
       );
+      const landedTip =
+        on === undefined && extraCount
+          ? landedForkOf(extracted, fork, commits)
+          : undefined;
+      if (landedTip) {
+        fork = landedTip;
+        ({ missing, extraCount } = compareWithExtracted(
+          commits,
+          extracted,
+          fork,
+        ));
+      }
       if (extraCount) {
         findings++;
         attention(
@@ -1950,16 +2006,33 @@ const extractBranches = (apply: boolean) => {
       }
       // A copy whose lower copy moved is rebuilt on it, which rewrites the copy's history.
       const onTip = on === undefined ? undefined : plannedTip.get(on);
-      const rebuildOn = onTip !== undefined && onTip !== fork ? on : undefined;
-      if (!missing.length && !rebuildOn) {
+      const movedOn = onTip !== undefined && onTip !== fork ? on : undefined;
+      if (landedOnly && !landedTip && !movedOn) return;
+      if (!missing.length && !landedTip && !movedOn) {
         good(`${label}  up to date`);
         return;
       }
+      let rebuildOn = movedOn;
+      let start = onTip;
+      if (landedTip) {
+        const blocker = blockerOf.get(source);
+        if (blocker) {
+          findings++;
+          bad(`${label}  sits on landed commits, but ${blocker}`);
+          return;
+        }
+        ({ onto: rebuildOn, start } = targetOf(source));
+        if (!start) {
+          findings++;
+          bad(`${label}  goes on ${rebuildOn}, which could not be made; see above`);
+          return;
+        }
+      }
       const replay =
-        rebuildOn && onTip
+        rebuildOn && start
           ? replayOnto(
               [...commitsIn(`${fork}..${extracted}`), ...missing],
-              onTip,
+              start,
             )
           : replayOnto(missing, oldTip);
       if (!replay.ok)
@@ -1968,8 +2041,9 @@ const extractBranches = (apply: boolean) => {
         ? `+${countOf(missing.length, 'commit')}`
         : '';
       if (rebuildOn) {
+        const off = landedTip ? ', off landed commits' : '';
         good(
-          `${label}  rebuilt on ${rebuildOn}${added ? `, ${added}` : ''}; needs a force push`,
+          `${label}  rebuilt on ${rebuildOn}${off}${added ? `, ${added}` : ''}; needs a force push`,
         );
         rebuilt.push(extracted);
       } else good(`${label}  ${added}`);
@@ -1977,17 +2051,14 @@ const extractBranches = (apply: boolean) => {
       plannedTip.set(extracted, replay.tip);
       return;
     }
+    if (landedOnly) return;
     const blocker = blockerOf.get(source);
     if (blocker) {
       findings++;
       bad(`${label}  ${blocker}`);
       return;
     }
-    // A branch in a chain goes on the copy of the one below it there, so each copy holds all it needs.
-    const chain = chains.find((members) => members.includes(source)) ?? [];
-    const chainedOn = chain[chain.indexOf(source) - 1];
-    const onto = chainedOn ? extractedNameOf(chainedOn) : base;
-    const start = chainedOn ? plannedTip.get(onto) : tipOf(base);
+    const { onto, start } = targetOf(source);
     if (!start) {
       findings++;
       bad(`${label}  goes on ${onto}, which could not be made; see above`);
@@ -2007,20 +2078,23 @@ const extractBranches = (apply: boolean) => {
     good(
       `${branchCount} to create or move forward${rebuilt.length ? `, ${rebuilt.length} of them rebuilt` : ''}`,
     );
+  else if (landedOnly) good('no extracted copy sits on landed commits');
   else good('every extracted branch is up to date');
+  // verify goes on to tidy after this, so a finding must not end the process there.
   if (!apply) {
     if (moves.length)
       console.log(
         `To do it: stack-plan extract --apply${findings ? ' -f' : ''}`,
       );
-    if (findings) process.exit(1);
+    if (findings && !landedOnly) process.exit(1);
     return;
   }
   if (findings && !rest.includes('--anyway')) {
     console.log(
       '\nNo branch moved. To move the clean ones anyway: stack-plan extract --apply -f',
     );
-    process.exit(1);
+    if (!landedOnly) process.exit(1);
+    return;
   }
   // An empty old value makes update-ref refuse a branch created since the check, and a SHA one moved since.
   for (const move of moves) {
@@ -3003,6 +3077,7 @@ const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
     .filter(isExtractSource)
     .map(extractedNameOf)
     .filter(branchExists);
+  if (cutBranches.some(isExtractSource)) extractBranches(!dryRun, true);
   const leftOver = [...cutBranches.filter(branchExists), ...copies];
   if (leftOver.length)
     console.log(
