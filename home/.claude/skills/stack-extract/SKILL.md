@@ -39,7 +39,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## 1. Find the candidates
 
-Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs, and under `declared` which of those `stack-plan needs` recorded. A chain may open with a `__` branch, printed as a `---` line and flagged `marked` in `candidates.json`. It is not a candidate: it is the base the chain's first candidate stacks on.
+Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs, and under `declared` which of those `stack-plan needs` recorded. A chain may open with `__` branches, each printed as a `---` line and flagged `marked` in `candidates.json`. They are not candidates: the last of them is the base the chain's first candidate stacks on.
 
 It prints a line marked `!` for a chain that conflicts when moved down, which is not a candidate, and a line marked `✗` for each branch that cannot leave. Carry both into the report as they are. A last `not ready` line names the branches above the cut, which the report leaves out. Say in one line how many candidates there are, then go on without waiting.
 
@@ -65,7 +65,7 @@ Sort each dependency by where it points, because that decides what the report do
 | A member above it in its own chain | A finding that heals once the chain merges. It holds nothing back |
 | A branch above the cut | A finding. The document is ahead of the code until that branch merges, and it holds nothing back |
 | A member of another chain, below it in the stack | **The candidate joins that chain.** Run `stack-plan needs <candidate> <member>`, then run step 1 again, so the chains, ranges and checks all come from the joined chain. Each change stays the same text, so this step's findings still hold |
-| A `__` branch | **The candidate stacks on it.** Run `stack-plan needs <candidate> <__branch>`, then run step 1 again. The chain then opens with the `__` branch, and the candidate's pull request goes on that branch's extracted copy |
+| A `__` branch | **The candidate stacks on it.** Run `stack-plan needs <candidate> <__branch>`, then run step 1 again. The chain then opens with the whole `__` chain that branch sits in, and the candidate's pull request goes on the extracted copy of that chain's top member |
 | A branch with a PR | **Hold the candidate back.** It can leave once that pull request has merged |
 | A member of another chain, above it in the stack | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, and the needed branch would have to sit below it. It can leave once the other chain has merged |
 
@@ -96,7 +96,7 @@ Sort each dependency by where it points, because that decides what the report do
 
 The report answers three questions, in this order, in its header:
 
-1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with a `__` branch is posted on that branch's extracted copy, so name the copy as its base. A chain whose build fails or that step 2 holds back is not among them.
+1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with `__` branches is posted on the extracted copy of the last of them, so name that copy as its base. A chain whose build fails or that step 2 holds back is not among them.
 2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line.
 3. **What happens next**: the `stack-plan mark` line below, and that the user's word or `/stack-extract mark` runs it.
 

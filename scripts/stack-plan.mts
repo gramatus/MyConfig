@@ -1793,16 +1793,12 @@ const standaloneGroup = (
   }
 };
 
-// Merges groups that share a branch other than a base, each in stack order, lowest group first.
-const mergeGroups = (
-  groups: string[][],
-  branches: string[],
-  isBase: (branch: string) => boolean = () => false,
-) => {
+// Merges groups that share a branch, each in stack order, lowest group first.
+const mergeGroups = (groups: string[][], branches: string[]) => {
   let merged: string[][] = [];
   for (const group of groups) {
     const overlapping = merged.filter((other) =>
-      other.some((branch) => !isBase(branch) && group.includes(branch)),
+      other.some((branch) => group.includes(branch)),
     );
     const union = new Set([...group, ...overlapping.flat()]);
     merged = [
@@ -2226,25 +2222,31 @@ const extractableBranches = () => {
     }
     return tips;
   };
-  // Chains that only share a __ branch stay apart, as extract puts each on that branch's copy.
+  // The __ chains as extract works them out, so a candidate that joins one goes on its top, as extract puts it.
+  const extractGroups = branches
+    .filter((name) => isExtractSource(name) && own.get(name)?.length)
+    .map((name) => standaloneGroup(stack, wip, name, isExtractSource))
+    .filter(({ blocker }) => !blocker)
+    .map(({ group }) => group);
   const chainReports = mergeGroups(
-    [...needsOf.values()],
+    [...extractGroups, ...needsOf.values()],
     branches,
-    isExtractSource,
-  ).map((chain) => {
-    const tips = replayTipsOf(chain);
-    return {
-      moveConflict: moveConflict(chain) ?? null,
-      members: chain.map((name, at) => ({
-        name,
-        marked: isExtractSource(name),
-        needs: directNeedsOf.get(name) ?? [],
-        declared: declaredOf.get(name) ?? [],
-        start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
-        replay: tips.get(name) ?? null,
-      })),
-    };
-  });
+  )
+    .filter((chain) => chain.some(movable))
+    .map((chain) => {
+      const tips = replayTipsOf(chain);
+      return {
+        moveConflict: moveConflict(chain) ?? null,
+        members: chain.map((name, at) => ({
+          name,
+          marked: isExtractSource(name),
+          needs: directNeedsOf.get(name) ?? [],
+          declared: declaredOf.get(name) ?? [],
+          start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
+          replay: tips.get(name) ?? null,
+        })),
+      };
+    });
   const extractable = new Set(
     chainReports
       .filter((report) => !report.moveConflict)
@@ -2277,7 +2279,7 @@ const extractableBranches = () => {
     if (members.length === 1) return;
     for (const member of members) {
       if (member.marked) {
-        console.log(`    ${member.name}  marked already; its copy is the base`);
+        console.log(`    ${member.name}  marked already`);
         continue;
       }
       const needsText = member.needs.length

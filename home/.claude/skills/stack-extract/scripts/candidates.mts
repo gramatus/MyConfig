@@ -103,9 +103,7 @@ for (const { moveConflict, members } of report.chains) {
   }
   for (const { name, marked, start, replay } of members) {
     if (marked) {
-      console.log(
-        `--- ${name}  marked already, so its extracted copy is the chain's base`,
-      );
+      console.log(`--- ${name}  marked already`);
       continue;
     }
     if (!start || !replay) {
