@@ -23,7 +23,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## What typing this command approves
 
-**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n` and `stack-plan extract --apply`. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
+**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, `stack-plan needs` as step 2 gives it, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n` and `stack-plan extract --apply`. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
 
 - Run each script as `node <this skill's base directory>/scripts/<script> <arguments>`, with the absolute path printed when this skill loaded.
 - **Never install dependencies.** Where a lockfile differs from the main checkout's, results for that package may not match the commit: say so in the report, and do not install.
@@ -39,7 +39,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## 1. Find the candidates
 
-Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs.
+Run `candidates.mts <last-ready-branch>` from the repository, with the wip branch checked out. It prints one block per candidate: the branch, its own change as a `<start>..<replay>` range, the path of the saved diff, and the diff's stat. A chain's members follow each other in the order they would be extracted as one stack, and each member's range starts at the replay commit of the member below it. `candidates.json` also gives what each member needs, and under `declared` which of those `stack-plan needs` recorded.
 
 It prints a line marked `!` for a chain that conflicts when moved down, which is not a candidate, and a line marked `✗` for each branch that cannot leave. Carry both into the report as they are. A last `not ready` line names the branches above the cut, which the report leaves out. Say in one line how many candidates there are, then go on without waiting.
 
@@ -64,7 +64,8 @@ Sort each dependency by where it points, because that decides what the report do
 | A member below it in its own chain | Nothing. The chain carries it |
 | A member above it in its own chain | A finding that heals once the chain merges. It holds nothing back |
 | A branch above the cut | A finding. The document is ahead of the code until that branch merges, and it holds nothing back |
-| A member of another chain | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, so it cannot sit on two chains. It can leave once the other chain has merged |
+| A member of another chain, below it in the stack | **The candidate joins that chain.** Run `stack-plan needs <candidate> <member>`, then run step 1 again, so the chains, ranges and checks all come from the joined chain. Each change stays the same text, so this step's findings still hold |
+| A member of another chain, above it in the stack | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, and the needed branch would have to sit below it. It can leave once the other chain has merged |
 
 ## 3. Check that each candidate builds
 
@@ -94,10 +95,10 @@ Sort each dependency by where it points, because that decides what the report do
 The report answers three questions, in this order, in its header:
 
 1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain whose build fails or that step 2 holds back is not among them.
-2. **Which candidates wait, and for what**: each one held back for depending on another chain, with the chain it waits for, and each red build with its first error line.
+2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line.
 3. **What happens next**: the `stack-plan mark` line below, and that the user's word or `/stack-extract mark` runs it.
 
-- **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at and how the table above sorted it. A clean chain gets one line.
+- **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at and how the table above sorted it. Name each need `candidates.json` lists under `declared`, with what it rests on, because the text does not show it and the user did not watch it being declared. A clean chain gets one line.
 - **The mark line:** `stack-plan mark` followed by every branch of the chains in answer 1, in stack order. Step 4 runs exactly this line.
 - **Not covered:** skipped checks, setup gaps, known worktree failures, lockfile warnings, and anything step 2 could not settle.
 

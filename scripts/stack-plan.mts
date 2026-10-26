@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mark|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mark|needs|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -109,6 +109,8 @@ const USAGE = [
   "               --json prints each chain with every member's start and replay commits",
   '  mark <branch>...  rename each to its __ name, carrying its notes and the saved order along, and export the plan',
   '               with them as one block above the PRs; -n only shows what it would do',
+  '  needs <branch> <needed>...  record that the branch needs the others below it, which extractable and extract',
+  '               then chain it with; --clear forgets what it recorded, and naming no others shows it',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
 ].join('\n');
 
@@ -135,6 +137,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   extract: ['--base', '--apply', '--anyway'],
   extractable: ['--base', '--json'],
   mark: ['--base', '--dry-run'],
+  needs: ['--base', '--clear'],
   mode: ['full', 'short'],
 };
 
@@ -155,6 +158,7 @@ const usageError = (message?: string): never => {
 };
 const cutTargets: string[] = [];
 const branchesToMark: string[] = [];
+const needsArgs: string[] = [];
 if (command !== '_todo') {
   const allowed =
     ALLOWED_FLAGS[command] ??
@@ -165,6 +169,8 @@ if (command !== '_todo') {
       cutTargets.push(rest[i]);
     else if (command === 'mark' && !rest[i].startsWith('-'))
       branchesToMark.push(rest[i]);
+    else if (command === 'needs' && !rest[i].startsWith('-'))
+      needsArgs.push(rest[i]);
     else if (!allowed.includes(rest[i]))
       usageError(`${rest[i]} does not apply to ${given}`);
   }
@@ -184,6 +190,8 @@ if (command !== '_todo') {
     );
   if (command === 'mark' && !branchesToMark.length)
     usageError('mark needs the branches to mark');
+  if (command === 'needs' && !needsArgs.length)
+    usageError('needs takes the branch whose needs to record or show');
 }
 
 const optionValue = (name: string) => {
@@ -309,7 +317,27 @@ const readConfig = (key: string) => {
   }
 };
 
+const readConfigAll = (key: string) => {
+  try {
+    return words(git('config', '--get-all', key));
+  } catch {
+    return [];
+  }
+};
+
 const fullMode = () => readConfig(MODE_KEY) === 'full';
+
+// git branch -m moves branch.<name>.* along, so a declaration follows mark's rename.
+const needsKey = (branch: string) => `branch.${branch}.stackNeeds`;
+const unprefixed = (branch: string) =>
+  isExtractSource(branch) ? extractedNameOf(branch) : branch;
+const stackBranchNamed = (name: string, branches: string[]) =>
+  branches.find((branch) => unprefixed(branch) === unprefixed(name));
+// A declared need no longer in the stack has landed, so it needs nothing more.
+const declaredNeeds = (branch: string, branches: string[]) =>
+  readConfigAll(needsKey(branch)).flatMap(
+    (need) => stackBranchNamed(need, branches) ?? [],
+  );
 
 // The order save stored, while it still covers the stack; a missing branch counts only while it waits to be created.
 const desiredOrder = (current: string[]) => {
@@ -1660,10 +1688,39 @@ const standaloneGroup = (
   wip: string,
   branch: string,
   mayJoin: (branch: string) => boolean,
-): { group: string[]; directNeeds: string[]; blocker?: string } => {
+): {
+  group: string[];
+  directNeeds: string[];
+  declared: string[];
+  blocker?: string;
+} => {
   const { branches, own } = stack;
+  const declared = declaredNeeds(branch, branches);
+  // A declared need brings its own declared needs along, since a text conflict would not show those either.
   let group = [branch];
-  const directNeeds: string[] = [];
+  for (let i = 0; i < group.length; i++) {
+    const needs = declaredNeeds(group[i], branches);
+    const above = needs.filter(
+      (need) => branches.indexOf(need) > branches.indexOf(group[i]),
+    );
+    if (above.length)
+      return {
+        group: [branch],
+        directNeeds: [],
+        declared,
+        blocker: `${group[i]} declares it needs ${above.join(', ')}, which sits above it`,
+      };
+    const barred = needs.filter((need) => !mayJoin(need));
+    if (barred.length)
+      return {
+        group: [branch],
+        directNeeds: [],
+        declared,
+        blocker: `needs ${barred.join(', ')} (declared)`,
+      };
+    group.push(...needs.filter((need) => !group.includes(need)));
+  }
+  const directNeeds = [...declared];
   for (;;) {
     const [conflict] = simulateRebase(
       replaysOf(commitsOfBranches(stack, group)),
@@ -1674,6 +1731,7 @@ const standaloneGroup = (
       return {
         group: branches.filter((b) => group.includes(b)),
         directNeeds: branches.filter((b) => directNeeds.includes(b)),
+        declared,
       };
     const files = conflict.files.join(', ');
     const conflictAt = branches.findIndex((b) =>
@@ -1692,6 +1750,7 @@ const standaloneGroup = (
       return {
         group,
         directNeeds,
+        declared,
         blocker: `conflicts with ${base} itself (${files})`,
       };
     const barred = needs.filter((need) => !mayJoin(need));
@@ -1699,6 +1758,7 @@ const standaloneGroup = (
       return {
         group,
         directNeeds,
+        declared,
         blocker: `needs ${barred.join(', ')} (${files})`,
       };
     if (branches[conflictAt] === branch) directNeeds.push(...needs);
@@ -2028,9 +2088,10 @@ const extractableBranches = () => {
   const tested = branches.filter(movable);
   const needsOf = new Map<string, string[]>();
   const directNeedsOf = new Map<string, string[]>();
+  const declaredOf = new Map<string, string[]>();
   const blockerOf = new Map<string, string>();
   for (const branch of tested.filter((name) => own.get(name)?.length)) {
-    const { group, directNeeds, blocker } = standaloneGroup(
+    const { group, directNeeds, declared, blocker } = standaloneGroup(
       stack,
       wip,
       branch,
@@ -2040,6 +2101,7 @@ const extractableBranches = () => {
     else {
       needsOf.set(branch, group);
       directNeedsOf.set(branch, directNeeds);
+      declaredOf.set(branch, declared);
     }
   }
   for (const branch of tested.filter((name) => !own.get(name)?.length))
@@ -2065,6 +2127,7 @@ const extractableBranches = () => {
         members: chain.map((name, at) => ({
           name,
           needs: directNeedsOf.get(name) ?? [],
+          declared: declaredOf.get(name) ?? [],
           start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
           replay: tips.get(name) ?? null,
         })),
@@ -2099,7 +2162,11 @@ const extractableBranches = () => {
     if (members.length === 1) return;
     for (const member of members) {
       const needsText = member.needs.length
-        ? `needs ${member.needs.join(', ')}`
+        ? `needs ${member.needs
+            .map((need) =>
+              member.declared.includes(need) ? `${need} (declared)` : need,
+            )
+            .join(', ')}`
         : 'stands alone';
       console.log(
         `    ${member.name}  ${needsText}${replaysTo(member.replay)}`,
@@ -3333,6 +3400,32 @@ const editTodo = (todoPath: string) => {
   }
 };
 
+// Records, shows or forgets the branches a stack branch needs beyond what a text conflict shows.
+const declareNeeds = ([name, ...needed]: string[]) => {
+  const { branches } = readStack(currentBranch());
+  const branch = stackBranchNamed(name, branches);
+  if (!branch) throw new Error(`${name} is not a stack branch`);
+  const problems = needed.flatMap((need) => {
+    const found = stackBranchNamed(need, branches);
+    if (!found) return [`${need} is not a stack branch`];
+    if (found === branch) return [`${need} is the branch itself`];
+    if (branches.indexOf(found) > branches.indexOf(branch))
+      return [`${need} sits above ${branch}`];
+    return [];
+  });
+  if (problems.length) throw new Error(problems.join('; '));
+  const key = needsKey(branch);
+  if (rest.includes('--clear') && readConfigAll(key).length)
+    git('config', '--unset-all', key);
+  const stored = readConfigAll(key);
+  for (const need of needed.map(unprefixed))
+    if (!stored.includes(need)) git('config', '--add', key, need);
+  heading(`Needs of ${branch}`);
+  const declared = declaredNeeds(branch, branches);
+  if (!declared.length) console.log('none declared');
+  for (const need of declared) console.log(cyan(need));
+};
+
 const setMode = () => {
   const [wanted] = rest;
   if (wanted === 'full') git('config', MODE_KEY, 'full');
@@ -3368,6 +3461,7 @@ try {
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === 'extractable') extractableBranches();
   else if (command === 'mark') markBranches(branchesToMark);
+  else if (command === 'needs') declareNeeds(needsArgs);
   else if (command === '_todo') editTodo(args[0]);
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));
