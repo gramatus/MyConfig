@@ -1133,13 +1133,15 @@ const dropExtractSources = (
   if (!merged)
     attention('could not list merged PRs with gh, so only the content decides');
   for (const branch of dropping) {
-    const pull = mergedCopyPull(branch, merged);
+    const pull = mergedCopyPull(branch, merged, own.get(branch) ?? []);
     if (pull && !pull.inBase) {
       unclear++;
       attention(`${cyan(branch)}  ${notFetched(pull)}`);
       continue;
     }
-    if (pull) {
+    if (pull && !pull.landed)
+      attention(`${cyan(branch)}  ${notAllMerged(pull)}`);
+    if (pull?.landed) {
       good(
         `${cyan(branch)}  ${extractedNameOf(branch)} merged on GitHub as #${pull.number}`,
       );
@@ -1227,7 +1229,7 @@ const dropExtractSources = (
 // Picks every __ branch that has landed, then drops them as cut <__branch>... would.
 const dropMergedSources = (apply: boolean) => {
   const wip = currentBranch();
-  const { branches } = readStack(wip);
+  const { branches, own } = readStack(wip);
   const fork = forkOf(wip);
   const merged = pullRequests('merged');
   heading(`Landed ${EXTRACT_SOURCE_PREFIX} branches`);
@@ -1236,13 +1238,13 @@ const dropMergedSources = (apply: boolean) => {
   const picked: string[] = [];
   const leftOut: string[] = [];
   for (const source of branches.filter(isExtractSource)) {
-    const pull = mergedCopyPull(source, merged);
+    const pull = mergedCopyPull(source, merged, own.get(source) ?? []);
     if (pull && !pull.inBase) {
       leftOut.push(`${cyan(source)}  left out: ${notFetched(pull)}`);
       attention(leftOut.at(-1)!);
       continue;
     }
-    if (pull) {
+    if (pull?.landed) {
       picked.push(source);
       good(`${cyan(source)}  #${pull.number} merged on GitHub`);
       continue;
@@ -1252,6 +1254,9 @@ const dropMergedSources = (apply: boolean) => {
     if (landed.ok && landed.tree === treeOf(base)) {
       picked.push(source);
       good(`${cyan(source)}  contained in ${base}`);
+    } else if (pull) {
+      leftOut.push(`${cyan(source)}  left out: ${notAllMerged(pull)}`);
+      attention(leftOut.at(-1)!);
     } else if (!landed.ok) {
       leftOut.push(
         `${cyan(source)}  left out: can't tell, so compare by hand; to drop it anyway: stack-plan cut ${source}`,
@@ -1645,17 +1650,16 @@ const compareWithExtracted = (
     ? patchIdsIn(`${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`)
     : new Map<string, string>();
   const sourceIds = new Set(sourceIdOfSha.values());
-  const extractedIds = new Set(
-    patchIdsIn(`${extractedFork}..${extracted}`).values(),
-  );
+  const extractedIdOfSha = patchIdsIn(`${extractedFork}..${extracted}`);
+  const extractedIds = new Set(extractedIdOfSha.values());
   const missing = sourceCommits.filter((commit) => {
     const id = sourceIdOfSha.get(commit.sha);
     return id !== undefined && !extractedIds.has(id);
   });
-  const extraCount = [...extractedIds].filter(
-    (id) => !sourceIds.has(id),
-  ).length;
-  return { missing, extraCount };
+  const extra = [...extractedIdOfSha]
+    .filter(([, id]) => !sourceIds.has(id))
+    .map(([sha]) => sha);
+  return { missing, extraCount: extra.length, extra };
 };
 
 // Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
@@ -1880,7 +1884,8 @@ const mirrorStatus = (
     ));
   }
   const pull = pulls?.get(extracted);
-  const stale = landedTip !== undefined || (on !== undefined && tipOf(on) !== fork);
+  const stale =
+    landedTip !== undefined || (on !== undefined && tipOf(on) !== fork);
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
@@ -1904,7 +1909,11 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const stack = readStack(wip);
   const { branches, own } = stack;
   const sources = branches.filter(isExtractSource);
-  heading(landedOnly ? 'Rebuild extracted copies on landed commits' : `Extract onto ${base}`);
+  heading(
+    landedOnly
+      ? 'Rebuild extracted copies on landed commits'
+      : `Extract onto ${base}`,
+  );
   if (!sources.length) {
     good(`no ${EXTRACT_SOURCE_PREFIX} branch in the stack; nothing to extract`);
     return;
@@ -1962,9 +1971,11 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     }
     const below = branches[branches.indexOf(source) - 1];
     const landed = mergeTree(below ? tipOf(below) : forkOf(wip), base, source);
-    const found = mergedCopyPull(source, merged);
-    const pull = found?.inBase ? found : undefined;
+    const found = mergedCopyPull(source, merged, commits);
+    const pull = found?.landed ? found : undefined;
     if (found && !found.inBase) attention(`${label}  ${notFetched(found)}`);
+    else if (found && !found.landed)
+      attention(`${label}  ${notAllMerged(found)}`);
     if (pull || (landed.ok && landed.tree === treeOf(base))) {
       if (branchExists(extracted)) plannedTip.set(extracted, tipOf(extracted));
       const how = pull
@@ -1978,13 +1989,13 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     if (branchExists(extracted)) {
       const oldTip = tipOf(extracted);
       plannedTip.set(extracted, oldTip);
-      const found = extractedForkOf(
+      const forkFound = extractedForkOf(
         extracted,
         sources.slice(0, i).map(extractedNameOf),
       );
-      const { on } = found;
-      let { fork } = found;
-      let { missing, extraCount } = compareWithExtracted(
+      const { on } = forkFound;
+      let { fork } = forkFound;
+      let { missing, extraCount, extra } = compareWithExtracted(
         commits,
         extracted,
         fork,
@@ -1995,7 +2006,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           : undefined;
       if (landedTip) {
         fork = landedTip;
-        ({ missing, extraCount } = compareWithExtracted(
+        ({ missing, extraCount, extra } = compareWithExtracted(
           commits,
           extracted,
           fork,
@@ -2003,9 +2014,22 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       }
       if (extraCount) {
         findings++;
-        attention(
-          `${label}  has ${countOf(extraCount, 'commit')} ${source} lacks, such as a review fix; bring them into ${source} first`,
-        );
+        // Commits the base holds are lower copies that landed; only the rest is work to bring into the source.
+        const unlanded = extra.reverse().filter((sha) => {
+          const merged = mergeTree(`${sha}^`, base, sha);
+          return !merged.ok || merged.tree !== treeOf(base);
+        });
+        const held = extraCount - unlanded.length;
+        const alsoHeld = held ? `; ${held} more ${base} already holds` : '';
+        if (unlanded.length) {
+          attention(
+            `${label}  has ${countOf(unlanded.length, 'commit')} neither ${source} nor ${base} holds${alsoHeld}; bring them into ${source} first:`,
+          );
+          for (const sha of unlanded) console.log(commitLine(subjectOf(sha)));
+        } else
+          attention(
+            `${label}  sits on ${countOf(held, 'commit')} ${base} already holds, mixed in with its own; compare by hand`,
+          );
         return;
       }
       // A copy whose lower copy moved is rebuilt on it, which rewrites the copy's history.
@@ -2028,7 +2052,9 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         ({ onto: rebuildOn, start } = targetOf(source));
         if (!start) {
           findings++;
-          bad(`${label}  goes on ${rebuildOn}, which could not be made; see above`);
+          bad(
+            `${label}  goes on ${rebuildOn}, which could not be made; see above`,
+          );
           return;
         }
       }
@@ -2205,22 +2231,20 @@ const extractableBranches = () => {
     [...needsOf.values()],
     branches,
     isExtractSource,
-  ).map(
-    (chain) => {
-      const tips = replayTipsOf(chain);
-      return {
-        moveConflict: moveConflict(chain) ?? null,
-        members: chain.map((name, at) => ({
-          name,
-          marked: isExtractSource(name),
-          needs: directNeedsOf.get(name) ?? [],
-          declared: declaredOf.get(name) ?? [],
-          start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
-          replay: tips.get(name) ?? null,
-        })),
-      };
-    },
-  );
+  ).map((chain) => {
+    const tips = replayTipsOf(chain);
+    return {
+      moveConflict: moveConflict(chain) ?? null,
+      members: chain.map((name, at) => ({
+        name,
+        marked: isExtractSource(name),
+        needs: directNeedsOf.get(name) ?? [],
+        declared: declaredOf.get(name) ?? [],
+        start: tips.size ? (tips.get(chain[at - 1]) ?? baseSha) : null,
+        replay: tips.get(name) ?? null,
+      })),
+    };
+  });
   const extractable = new Set(
     chainReports
       .filter((report) => !report.moveConflict)
@@ -2403,6 +2427,7 @@ type PullRequest = {
   base: string;
   mergedAt: string;
   mergeCommit: string;
+  head: string;
 };
 
 /** Pull requests in a state keyed by head branch, the newest per branch, or undefined when gh cannot list them. */
@@ -2418,7 +2443,7 @@ const pullRequests = (
   const slug = origin.replace(/\.git$/, '').replace(/^.*github\.com[:/]/, '');
   const fields = [
     '--json',
-    'number,headRefName,baseRefName,mergedAt,mergeCommit',
+    'number,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit',
   ];
   const result = spawnSync(
     'gh',
@@ -2439,6 +2464,7 @@ const pullRequests = (
   const rows = JSON.parse(result.stdout) as {
     number: number;
     headRefName: string;
+    headRefOid: string;
     baseRefName: string;
     mergedAt: string;
     mergeCommit: { oid: string } | null;
@@ -2451,6 +2477,7 @@ const pullRequests = (
         base: row.baseRefName,
         mergedAt: row.mergedAt,
         mergeCommit: row.mergeCommit?.oid ?? '',
+        head: row.headRefOid,
       });
   return pulls;
 };
@@ -2460,6 +2487,7 @@ const openPullRequests = () => pullRequests('open');
 const mergedCopyPull = (
   source: string,
   merged: Map<string, PullRequest> | undefined,
+  sourceCommits: Commit[],
 ) => {
   const extracted = extractedNameOf(source);
   const pull = merged?.get(extracted);
@@ -2473,11 +2501,47 @@ const mergedCopyPull = (
   // A merge the local base lacks is not landed for a rebase onto that base.
   const inBase =
     Boolean(pull.mergeCommit) && isAncestor(pull.mergeCommit, base);
-  return { ...pull, inBase };
+  // A commit added to the source after the PR's last push merged nowhere, so GitHub's word does not cover it.
+  const lacking = commitsMissingFromPull(pull, sourceCommits);
+  return { ...pull, inBase, lacking, landed: inBase && lacking?.length === 0 };
+};
+
+const hasCommit = (sha: string) =>
+  gitSucceeds('cat-file', '-e', `${sha}^{commit}`);
+
+// The source commits a merged PR's head lacks by patch-id, or undefined when its head cannot be read even after a fetch.
+const commitsMissingFromPull = (pull: PullRequest, sourceCommits: Commit[]) => {
+  if (!sourceCommits.length) return [];
+  if (!pull.head) return undefined;
+  if (!hasCommit(pull.head))
+    gitSucceeds('fetch', '--quiet', 'origin', `refs/pull/${pull.number}/head`);
+  if (!hasCommit(pull.head)) return undefined;
+  const pullIds = new Set(
+    patchIdsIn(
+      `${git('merge-base', base, pull.head).trim()}..${pull.head}`,
+    ).values(),
+  );
+  const sourceIdOfSha = patchIdsIn(
+    `${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`,
+  );
+  return sourceCommits.filter((commit) => {
+    const id = sourceIdOfSha.get(commit.sha);
+    return id !== undefined && !pullIds.has(id);
+  });
 };
 
 const notFetched = (pull: { number: number }) =>
   `#${pull.number} merged on GitHub, but ${base} lacks its merge commit; git fetch, then run again`;
+
+// Why GitHub's merge does not settle a source; the content check decides instead.
+const notAllMerged = (pull: {
+  number: number;
+  head: string;
+  lacking?: Commit[];
+}) =>
+  pull.lacking
+    ? `#${pull.number} merged without ${countOf(pull.lacking.length, 'commit')} of it:\n${pull.lacking.map(commitLine).join('\n')}`
+    : `#${pull.number} merged, but its head ${pull.head.slice(0, 10)} could not be fetched to check it held every commit`;
 
 const exportPlan = () => {
   const wip = currentBranch();

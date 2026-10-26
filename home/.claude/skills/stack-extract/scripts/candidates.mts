@@ -78,7 +78,9 @@ const chains = fullReport.chains.flatMap((chain) => {
   if (cutAt >= 0)
     notReady.push(...chain.members.slice(cutAt).map((member) => member.name));
   // A chain left with only __ members has no candidate in it.
-  return members.some((member) => !member.marked) ? [{ ...chain, members }] : [];
+  return members.some((member) => !member.marked)
+    ? [{ ...chain, members }]
+    : [];
 });
 const blocked = fullReport.blocked.filter(({ name }) => isReady(name));
 notReady.push(
@@ -101,7 +103,9 @@ for (const { moveConflict, members } of report.chains) {
   }
   for (const { name, marked, start, replay } of members) {
     if (marked) {
-      console.log(`--- ${name}  marked already, so its extracted copy is the chain's base`);
+      console.log(
+        `--- ${name}  marked already, so its extracted copy is the chain's base`,
+      );
       continue;
     }
     if (!start || !replay) {
