@@ -23,7 +23,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## What typing this command approves
 
-**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, `stack-plan needs` as step 2 gives it, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n` and `stack-plan extract --apply`. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
+**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, `stack-plan needs` as step 2 gives it, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n`, `stack-plan extract --apply`, and writing or deleting `stack-extract.md` notes as step 4 gives it. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
 
 - Run each script as `node <this skill's base directory>/scripts/<script> <arguments>`, with the absolute path printed when this skill loaded.
 - **Never install dependencies.** Where a lockfile differs from the main checkout's, results for that package may not match the commit: say so in the report, and do not install.
@@ -57,7 +57,14 @@ The replay applied cleanly, but the change can still use something only a branch
 
 For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<path>` for a file, and `git grep -n <name> <sha>` for a name. **Something missing at the replay sha that exists on the wip branch is a dependency the text did not show.** Find where it comes from with `git log --format='%h %s' -S<name> origin/main..<wip>`, then find which candidate's saved diff adds it. `git branch --contains <commit>` also lists every branch stacked above that one, so it does not settle the branch alone.
 
-Sort each dependency by where it points, because that decides what the report does with it:
+**Then decide which kind each dependency is, because only build dependencies shape the stack.**
+
+- A **soft dependency** is one the candidate builds without: a relative link or the heading its anchor names, a log line, guard or command a document says exists, a config key, an environment variable, a script name or a CLI flag. **It never changes the stack.** Run no `stack-plan needs` for it, and never hold the candidate back for it. The candidate leaves as its own pull request on the base, and step 4 writes a merge-after note for its pull request body. The rows below for its own chain still apply to it, and so does the row for a branch above the cut, because that branch has no pull request to merge first.
+- A **build dependency** is everything else, such as an import, a function, a type, a component, a migration or a fixture. The table below sorts it.
+
+Step 3 corrects a wrong call. A candidate whose checks fail on something a soft dependency adds had a build dependency after all, and the table sorts it.
+
+Sort each build dependency by where it points, because that decides what the report does with it:
 
 | Points at | Report it as |
 | --- | --- |
@@ -96,11 +103,11 @@ Sort each dependency by where it points, because that decides what the report do
 
 The report answers three questions, in this order, in its header:
 
-1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with `__` branches is posted on the extracted copy of the last of them, so name that copy as its base. A chain whose build fails or that step 2 holds back is not among them.
+1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with `__` branches is posted on the extracted copy of the last of them, so name that copy as its base. A chain whose build fails or that step 2 holds back is not among them. A candidate with soft dependencies only is a chain of its own, and the line also names the branches it must merge after.
 2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line.
 3. **What happens next**: the `stack-plan mark` line below, and that the user's word or `/stack-extract mark` runs it.
 
-- **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at and how the table above sorted it. Name each need `candidates.json` lists under `declared`, with what it rests on, because the text does not show it and the user did not watch it being declared. A clean chain gets one line.
+- **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at, its kind, and how the table above sorted it. Name each need `candidates.json` lists under `declared`, with what it rests on, because the text does not show it and the user did not watch it being declared. A declared need that rests only on soft dependencies stacks a branch that step 2 would leave on its own, so say so, and give the `stack-plan needs <candidate> --clear <needs to keep>` line that forgets it. A clean chain gets one line.
 - **The mark line:** `stack-plan mark` followed by every branch of the chains in answer 1, in stack order, leaving out the `__` branches. Step 4 runs exactly this line.
 - **Not covered:** skipped checks, setup gaps, known worktree failures, lockfile warnings, and anything step 2 could not settle.
 
@@ -111,7 +118,8 @@ Run only on the user's word after the report, or on `/stack-extract mark`. Take 
 1. Run `stack-plan mark <branches> -n` and compare its renames with the mark line. Stop where they differ.
 2. Run `stack-plan mark <branches>`. It renames each branch to `__<name>`, moves the notes of waiting commits placed in it, rewrites the saved order with the `__` block directly above the PR branches, and exports the plan. The plan the user had is in `stackplan.txt.bak`.
 3. Run `stack-plan preview -n`, which writes no notes, to learn whether the `__` block has to move. Where the marked branches already sat at the bottom of the stack in chain order, it ends with `nothing to move`.
-4. Reply with the renames and the user's next step. Where nothing moves, that is `/stack-extract extract`, because `apply` and `verify` have nothing to do. Otherwise it is `stack-plan preview`, then `stack-plan apply` and `stack-plan verify`, then `/stack-extract extract`.
+4. Write the merge-after notes. For each marked branch, run `node .claude/skills/pr-summary/scripts/notes-path.mts <branch>` with the branch's name without `__`, which is its extracted copy's name and so its pull request's head branch. Where the report gave the branch soft dependencies, write `stack-extract.md` in the folder it prints, one bullet per needed branch: ``Merge after `<needed branch without __>`: <what this branch uses from it>``. Where it gave none, delete any `stack-extract.md` an earlier run left there. Where the script is missing, the repository has no `/pr-summary`, so give the notes in the reply instead.
+5. Reply with the renames, the notes written, and the user's next step. Where nothing moves, that is `/stack-extract extract`, because `apply` and `verify` have nothing to do. Otherwise it is `stack-plan preview`, then `stack-plan apply` and `stack-plan verify`, then `/stack-extract extract`.
 
 ## 5. Extract
 
