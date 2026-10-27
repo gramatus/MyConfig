@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Starts, lists or resumes remote-control Claude Code sessions on a folder under /repos, detached in tmux.
-// Usage: start.mts [audit [count] | <folder> [list [count] | resume <session-id>]]; ../SKILL.md says how the skill relays the result.
+// Usage: start.mts [audit [count] | <folder>[/<nested checkout>] [list [count] | resume <session-id>]]; ../SKILL.md says how the skill relays the result.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -42,18 +42,42 @@ const fail = (message: string): never => {
 const tmux = (...args: string[]) =>
   spawnSync('tmux', args, { encoding: 'utf8' });
 
-const resolveFolder = (name: string) => {
-  if (!FOLDER_NAME.test(name) || name === '.' || name === '..')
-    fail(`"${name}" is not a plain folder name`);
+const isPlainFolderName = (segment: string) =>
+  FOLDER_NAME.test(segment) && segment !== '.' && segment !== '..';
+
+const isGitCheckout = (path: string) => existsSync(join(path, '.git'));
+
+const realDirectoryIn = (parent: string, segment: string, shown: string) => {
   let path = '';
   try {
-    path = realpathSync(`${REPOS_ROOT}/${name}`);
+    path = realpathSync(join(parent, segment));
   } catch {
-    fail(`${REPOS_ROOT}/${name} does not exist`);
+    fail(`${shown} does not exist`);
   }
-  if (dirname(path) !== REPOS_ROOT || !statSync(path).isDirectory())
-    fail(`${REPOS_ROOT}/${name} resolves to ${path}, outside ${REPOS_ROOT}`);
+  if (dirname(path) !== parent || !statSync(path).isDirectory())
+    fail(`${shown} resolves to ${path}, outside ${parent}`);
   return path;
+};
+
+const resolveFolder = (name: string) => {
+  const segments = name.split('/');
+  if (segments.length > 2 || !segments.every(isPlainFolderName))
+    fail(`"${name}" is not <folder> or <folder>/<nested checkout>`);
+  const [repoName, nestedName] = segments;
+  const repoPath = realDirectoryIn(
+    REPOS_ROOT,
+    repoName,
+    `${REPOS_ROOT}/${repoName}`,
+  );
+  if (nestedName === undefined) return repoPath;
+  const nestedPath = realDirectoryIn(
+    repoPath,
+    nestedName,
+    `${REPOS_ROOT}/${name}`,
+  );
+  if (!isGitCheckout(nestedPath))
+    fail(`${REPOS_ROOT}/${name} is not a git checkout of its own`);
+  return nestedPath;
 };
 
 const githubOwner = (path: string) => {
@@ -237,12 +261,23 @@ const startInTmux = (
   console.log(`  stop it with: tmux kill-session -t ${session}`);
 };
 
+const byNameIgnoringCase = (a: string, b: string) =>
+  a.localeCompare(b, 'en', { sensitivity: 'base' });
+
+const nestedCheckouts = (folder: string) =>
+  readdirSync(join(REPOS_ROOT, folder), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && FOLDER_NAME.test(entry.name))
+    .filter((entry) => isGitCheckout(join(REPOS_ROOT, folder, entry.name)))
+    .map((entry) => `${folder}/${entry.name}`)
+    .sort(byNameIgnoringCase);
+
 const listFolders = () =>
   readdirSync(REPOS_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && FOLDER_NAME.test(entry.name))
     .filter((entry) => !entry.name.startsWith('.'))
     .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+    .sort(byNameIgnoringCase)
+    .flatMap((folder) => [folder, ...nestedCheckouts(folder)])
     .forEach((folder) => console.log(folder));
 
 const printAudit = (countArg: string | undefined) => {
@@ -283,7 +318,7 @@ if (name === 'audit') {
 }
 const path = resolveFolder(name);
 // tmux turns "." in a session name into "_", so the name it prints matches the one used here.
-const tmuxName = `cc-${name.replaceAll('.', '_')}`;
+const tmuxName = `cc-${name.replaceAll('.', '_').replaceAll('/', '-')}`;
 
 if (mode === undefined) startInTmux(path, name, tmuxName, []);
 else if (mode === 'list') listSessions(path, modeArg);
