@@ -101,7 +101,8 @@ const USAGE = [
   '  cut <__branch>...  the same for only the named __ branches, wherever they sit, once their copies have merged',
   '  cut --merged the same for every __ branch that has landed, found through gh or the content',
   '  sync         check putting each stack branch on its origin copy, with what origin lacks replayed on top',
-  '               and merged branches cut; --apply then does it, and -f does it despite a finding;',
+  '               and merged branches cut, landed __ branches included; --apply then does it, and -f does it',
+  '               despite a finding;',
   '               it fetches and prunes origin first, unless --no-fetch',
   '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
   '               --apply then moves those branches, and -f moves the clean ones despite a finding',
@@ -1234,18 +1235,20 @@ const dropExtractSources = (
   );
 };
 
-// Picks every __ branch that has landed, then drops them as cut <__branch>... would.
-const dropMergedSources = (apply: boolean) => {
-  const wip = currentBranch();
-  const { branches, own } = readStack(wip);
-  const fork = forkOf(wip);
-  const merged = pullRequests('merged');
-  heading(`Landed ${EXTRACT_SOURCE_PREFIX} branches`);
-  if (!merged)
-    attention('could not list merged PRs with gh, so only the content decides');
+// Finds the __ branches that have landed in the base, through gh or the content, and lists the ones it leaves out.
+const landedSources = (
+  branches: string[],
+  own: Map<string, Commit[]>,
+  fork: string,
+) => {
   const picked: string[] = [];
   const leftOut: string[] = [];
-  for (const source of branches.filter(isExtractSource)) {
+  const sources = branches.filter(isExtractSource);
+  if (!sources.length) return { picked, leftOut };
+  const merged = pullRequests('merged');
+  if (!merged)
+    attention('could not list merged PRs with gh, so only the content decides');
+  for (const source of sources) {
     const pull = mergedCopyPull(source, merged, own.get(source) ?? []);
     if (pull && !pull.inBase) {
       leftOut.push(`${cyan(source)}  left out: ${notFetched(pull)}`);
@@ -1272,6 +1275,15 @@ const dropMergedSources = (apply: boolean) => {
       attention(leftOut.at(-1)!);
     }
   }
+  return { picked, leftOut };
+};
+
+// Picks every __ branch that has landed, then drops them as cut <__branch>... would.
+const dropMergedSources = (apply: boolean) => {
+  const wip = currentBranch();
+  const { branches, own } = readStack(wip);
+  heading(`Landed ${EXTRACT_SOURCE_PREFIX} branches`);
+  const { picked, leftOut } = landedSources(branches, own, forkOf(wip));
   if (!picked.length) {
     good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed; nothing to drop`);
     return;
@@ -1324,6 +1336,13 @@ const remoteOf = (branch: string) => {
     ? remote
     : undefined;
 };
+
+const upstreamGone = (branch: string) =>
+  git(
+    'for-each-ref',
+    '--format=%(upstream:track)',
+    `refs/heads/${branch}`,
+  ).trim() === '[gone]';
 
 const countOf = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -1378,8 +1397,6 @@ const syncStack = (apply: boolean) => {
   const highestRemote = branches
     .map((branch) => remoteOfBranch.get(branch))
     .findLast(Boolean);
-  if (!highestRemote)
-    throw new Error('no stack branch is on origin; nothing to sync with');
   heading(`Sync with origin, onto ${base}`);
   let findings = 0;
 
@@ -1396,13 +1413,19 @@ const syncStack = (apply: boolean) => {
     isAncestor(remoteAt(lowestInOriginStack - 1), remoteAt(lowestInOriginStack))
   )
     lowestInOriginStack--;
-  const lowestOnOrigin = branches.indexOf(
-    branchesOnOrigin[lowestInOriginStack],
+  // With nothing on origin, only the pushed branches origin deleted have merged; a branch never pushed has no upstream.
+  const mergedAndDeleted = branches.findIndex(
+    (branch) => isExtractSource(branch) || !upstreamGone(branch),
   );
+  const lowestOnOrigin = highestRemote
+    ? branches.indexOf(branchesOnOrigin[lowestInOriginStack])
+    : mergedAndDeleted < 0
+      ? branches.length
+      : mergedAndDeleted;
   const cut: string[] = [];
   let unclearCuts = 0;
   for (const branch of branches.slice(0, lowestOnOrigin)) {
-    if (isAncestor(tipOf(branch), highestRemote)) {
+    if (highestRemote && isAncestor(tipOf(branch), highestRemote)) {
       attention(
         `${cyan(branch)}  not on origin, but origin's stack still sits on it, so it stays`,
       );
@@ -1437,13 +1460,13 @@ const syncStack = (apply: boolean) => {
 
   const kept = branches.slice(cut.length);
   const adopted = kept.filter((branch) => remoteOfBranch.has(branch));
-  if (!adopted.length)
-    throw new Error(
-      'no stack branch above the cut is on origin; nothing to sync with',
-    );
-  const topBranch = adopted.at(-1)!;
-  const topRemote = remoteOfBranch.get(topBranch)!;
-  const onto = git('merge-base', base, remoteOfBranch.get(adopted[0])!).trim();
+  // With no origin stack left, the rest moves onto the base, as after a cut.
+  const onBase = !adopted.length;
+  const topBranch = adopted.at(-1);
+  const topRemote = topBranch && remoteOfBranch.get(topBranch)!;
+  const onto = onBase
+    ? tipOf(base)
+    : git('merge-base', base, remoteOfBranch.get(adopted[0])!).trim();
   let below = { name: base, sha: onto };
   for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
     if (!isAncestor(below.sha, remote))
@@ -1452,16 +1475,47 @@ const syncStack = (apply: boolean) => {
       );
     below = { name: remote, sha: remote };
   }
-  if (git('rev-list', '--merges', `${onto}..${topRemote}`).trim()) {
+  if (
+    topRemote &&
+    git('rev-list', '--merges', `${onto}..${topRemote}`).trim()
+  ) {
     throw new Error(
       `origin's stack holds merge commits, which the rebase cannot replay; sync by hand`,
     );
   }
 
-  const originCommits = commitsIn(`${onto}..${topRemote}`);
+  subheading(`Landed ${EXTRACT_SOURCE_PREFIX} branches`);
+  const landed = landedSources(branches, own, fork);
+  // Dropping a source whose change origin's base lacks would take that change out of the tip.
+  const droppedSources = landed.picked.filter((source) => {
+    if (!kept.includes(source)) return false;
+    if (onBase) return true;
+    const belowSource = branches[branches.indexOf(source) - 1];
+    const inOnto = mergeTree(
+      belowSource ? tipOf(belowSource) : fork,
+      onto,
+      source,
+    );
+    if (inOnto.ok && inOnto.tree === treeOf(onto)) return true;
+    attention(
+      `${cyan(source)}  landed, but origin's stack sits on an older ${base}, so it stays until that moves`,
+    );
+    return false;
+  });
+  if (!landed.picked.length && !landed.leftOut.length)
+    good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed`);
+  if (onBase && !cut.length && !droppedSources.length)
+    throw new Error(
+      'no stack branch is on origin, and none has merged; nothing to sync with',
+    );
+
+  const originRange = topRemote ? `${onto}..${topRemote}` : undefined;
+  const originCommits = originRange ? commitsIn(originRange) : [];
   const originShas = new Set(originCommits.map((commit) => commit.sha));
   const originShaById = new Map(
-    [...patchIdsIn(`${onto}..${topRemote}`)].map(([sha, id]) => [id, sha]),
+    originRange
+      ? [...patchIdsIn(originRange)].map(([sha, id]) => [id, sha])
+      : [],
   );
   const localCommits = commitsIn(`${fork}..${wip}`);
   const localShas = new Set(localCommits.map((commit) => commit.sha));
@@ -1487,6 +1541,11 @@ const syncStack = (apply: boolean) => {
   let newFromOrigin = 0;
   let picksUpToTop = 0;
   for (const branch of kept) {
+    if (droppedSources.includes(branch)) {
+      dropped.push(...(own.get(branch) ?? []));
+      console.log(`${cyan(branch)}  dropped, landed in ${base}`);
+      continue;
+    }
     const remote = remoteOfBranch.get(branch);
     const fromOrigin = remote ? commitsIn(`${belowRemote}..${remote}`) : [];
     const local = own.get(branch) ?? [];
@@ -1546,28 +1605,30 @@ const syncStack = (apply: boolean) => {
     `${cyan(wip)}  ${countOf(pendingKept.length, 'commit')} replayed${replacedNote}; its own origin copy is left alone`,
   );
 
-  subheading(`Origin against ${base}`);
-  if (onto !== fork && isAncestor(onto, fork)) {
-    const lost = commitsIn(`${onto}..${fork}`);
-    console.log(
-      `syncing moves the stack back onto origin's base, taking ${countOf(lost.length, 'commit')} of ${base} out from under it:`,
-    );
-    for (const commit of lost) console.log(commitLine(commit));
+  if (!onBase) {
+    subheading(`Origin against ${base}`);
+    if (onto !== fork && isAncestor(onto, fork)) {
+      const lost = commitsIn(`${onto}..${fork}`);
+      console.log(
+        `syncing moves the stack back onto origin's base, taking ${countOf(lost.length, 'commit')} of ${base} out from under it:`,
+      );
+      for (const commit of lost) console.log(commitLine(commit));
+    }
+    // Branches above the lowest conflicting one carry its conflict, so only that one is listed.
+    let mergesCleanly = true;
+    for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
+      const merged = mergeTree(onto, base, remote);
+      if (merged.ok) continue;
+      attention(
+        `${remote} conflicts with ${base}, and syncing keeps that; rebase onto ${base} and push to fix it:`,
+      );
+      for (const file of merged.files) console.log(`    ${file}`);
+      mergesCleanly = false;
+      break;
+    }
+    if (mergesCleanly)
+      good(`origin's stack merges into ${base} without conflicts`);
   }
-  // Branches above the lowest conflicting one carry its conflict, so only that one is listed.
-  let mergesCleanly = true;
-  for (const remote of adopted.map((branch) => remoteOfBranch.get(branch)!)) {
-    const merged = mergeTree(onto, base, remote);
-    if (merged.ok) continue;
-    attention(
-      `${remote} conflicts with ${base}, and syncing keeps that; rebase onto ${base} and push to fix it:`,
-    );
-    for (const file of merged.files) console.log(`    ${file}`);
-    mergesCleanly = false;
-    break;
-  }
-  if (mergesCleanly)
-    good(`origin's stack merges into ${base} without conflicts`);
 
   if (!cut.length && !dropped.length && !newFromOrigin) {
     console.log('');
@@ -1582,24 +1643,45 @@ const syncStack = (apply: boolean) => {
     reportConflicts(simulation, onto, '', landingBranches(todo, wip));
   } else {
     good(`all ${simulation.picks} picks apply cleanly in memory`);
-    const newTop = picksUpToTop
-      ? simulation.tipAfterPick[picksUpToTop - 1]
-      : onto;
-    const sameAboveTop = sameNetChange(
-      `${topBranch}..${wip}`,
-      topBranch,
-      wip,
-      newTop,
-      simulation.tip,
-      topBranch,
-    );
-    const sameTip = sameTipOutsideOrigin(
-      tipOf(topBranch),
-      wip,
-      newTop,
-      simulation.tip,
-    );
-    if (!sameAboveTop || !sameTip) findings++;
+    if (topBranch) {
+      const newTop = picksUpToTop
+        ? simulation.tipAfterPick[picksUpToTop - 1]
+        : onto;
+      const sameAboveTop = sameNetChange(
+        `${topBranch}..${wip}`,
+        topBranch,
+        wip,
+        newTop,
+        simulation.tip,
+        topBranch,
+      );
+      const sameTip = sameTipOutsideOrigin(
+        tipOf(topBranch),
+        wip,
+        newTop,
+        simulation.tip,
+      );
+      if (!sameAboveTop || !sameTip) findings++;
+    } else {
+      // The checks cut runs, since the whole stack moves onto the base.
+      const sameNet = sameNetChange(
+        'the stack',
+        fork,
+        wip,
+        onto,
+        simulation.tip,
+        base,
+        new Set(fileList(gitQuiet('diff', '--name-only', fork, onto))),
+      );
+      const sameTip = sameTipOutsideOrigin(
+        fork,
+        wip,
+        onto,
+        simulation.tip,
+        `${base} moved since the stack left it`,
+      );
+      if (!sameNet || !sameTip || sameNet === 'unclear') findings++;
+    }
     if (unclearCuts && treeOf(simulation.tip) === treeOf(wip)) {
       good(`so the cut branches lose nothing, whatever their checks above say`);
       unclearCuts = 0;
@@ -1627,12 +1709,21 @@ const syncStack = (apply: boolean) => {
 
   ensurePlanFile(wip);
   recordPreRebase(tipOf(wip), []);
-  writeHeader(
-    SYNC_PREFIX,
-    [onto, fork, tipOf(topBranch), tipOf(topRemote), topBranch, ...cut].join(
-      ' ',
-    ),
-  );
+  const cutAndDropped = [...cut, ...droppedSources];
+  // With no origin stack, verify reads it as a cut whose old range starts at the fork.
+  if (topBranch && topRemote)
+    writeHeader(
+      SYNC_PREFIX,
+      [
+        onto,
+        fork,
+        tipOf(topBranch),
+        tipOf(topRemote),
+        topBranch,
+        ...cutAndDropped,
+      ].join(' '),
+    );
+  else writeHeader(CUT_PREFIX, [fork, onto, ...cutAndDropped].join(' '));
   const drops = dropped.map((commit) => `drop ${commit.sha} ${commit.subject}`);
   const syncTodo = [
     ...(drops.length

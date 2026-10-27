@@ -17,7 +17,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
 | `sp cut <__b>...` | The same for only the named `__` branches, wherever they sit, once their extracted copies have merged. |
 | `sp cut --merged` | The same for every `__` branch that has landed, without naming them. |
-| `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top. `--apply` does it. |
+| `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top, and dropping every merged branch, `__` branches included. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
 | `sp mark <b>...` | Renames each branch to its `__` name, carrying its notes and the saved order along, and exports the plan with them as one block. Add `-n` to see what it will do. |
@@ -248,6 +248,8 @@ It sorts every commit since the base, bottom to top, by its `git patch-id`, whic
 - A local commit origin lacks stays in its branch, on top of that branch's origin commits. It is listed as `kept local`. The branches above it then differ from origin again, and need a force push.
 - A branch that is not on origin, and the wip branch, have their commits replayed above the branch below them. The wip branch's own origin copy is left alone.
 - Origin's stack is the run of origin branches, counted from the top down, where each sits on the one below. A branch below that run is cut, because origin's stack has moved past it. That holds whether origin deleted the branch after merging it or still has a copy left behind. A branch that origin's stack still sits on is kept. Each cut branch gets the same containment check as `cut`. A branch the base does not plainly contain is listed with its files, as a finding to compare by hand. A squash merge that review changed, or lines the base changed again since, cause that. A cut branch keeps its old tip, so its commits stay reachable.
+- When no stack branch is on origin, origin's stack is empty. The branches cut are then the bottom run of branches without the prefix whose upstream origin deleted, because a branch that was pushed and then deleted has merged. A branch that was never pushed has no upstream, so it is never cut this way. The rest of the stack moves onto `--base`, as after a `cut`.
+- A `__` branch that has landed is dropped wherever it sits, by the test `cut --merged` uses. Its commits become `drop` lines and it keeps its old tip. When origin's stack sits on an older base that lacks the branch's change, the branch stays until that base moves, because dropping it would take the change out of the tip.
 
 It refuses when origin's branches do not sit on one another in stack order, or when origin's stack holds a merge commit. It reports a finding when you reworded a commit or changed its author after pushing it, because syncing would bring back origin's version, and pushing is what you want. A commit that differs from origin's copy only in its base or its dates is not a finding: syncing it is safe and avoids the CI runs and reset approvals a push would cause.
 
@@ -257,7 +259,7 @@ When the replay is clean, two checks stand in for the tree check, which cannot m
 
 `--apply` runs `git rebase -i --update-refs --empty=drop --onto <onto> <fork>`. `<onto>` is where origin's lowest branch leaves the base, and `<fork>` is where the local stack does. Git's todo then holds exactly the local commits. The planned todo picks origin's commits, which git reuses unchanged where their parent matches, so a branch with nothing kept local ends up identical to origin. Each commit giving way is a `drop` line, which `rebase.missingCommitsCheck error` requires. Local commits kept in an origin branch carry `>>> [local]` after their hash.
 
-It records a `# sync:` line, which works like the `# cut:` line. After a sync, `verify` compares the old stack with the new one from where each leaves the base. It counts commits only origin had as `from origin`, and a dropped commit whose change origin holds as already there. It then runs the two checks the preview ran, on the real result. Cut branches are then removed from `stackplan.order` as after a cut.
+It records a `# sync:` line, which works like the `# cut:` line. After a sync, `verify` compares the old stack with the new one from where each leaves the base. It counts commits only origin had as `from origin`, and a dropped commit whose change origin holds as already there. It then runs the two checks the preview ran, on the real result. Cut branches are then removed from `stackplan.order` as after a cut, and the extracted copies that sat on a dropped `__` branch are rebuilt. When origin's stack was empty, it records a `# cut:` line instead, whose old range starts at the fork, and `verify` checks the result as after `cut <__branch>`.
 
 ### 8. Extract branches that need not be stacked
 
@@ -311,7 +313,7 @@ stack-plan cut __skills/foo
 stack-plan cut __skills/foo --apply
 ```
 
-`stack-plan cut --merged` names them for you. It picks every `__` branch that has landed by the first test below, and lists each one it leaves out because the content check can't tell. The rest goes as for named branches, and `stack-plan cut --merged --apply` does it. Merged branches of the main stack, the ones without the prefix, stay with `sync`, which also puts the branches above them back on GitHub's rebased copies.
+`stack-plan cut --merged` names them for you. It picks every `__` branch that has landed by the first test below, and lists each one it leaves out because the content check can't tell. The rest goes as for named branches, and `stack-plan cut --merged --apply` does it. `sync` drops landed `__` branches the same way, and also cuts merged branches of the main stack, the ones without the prefix, and puts the branches above them back on GitHub's rebased copies.
 
 Given `__` branches, `cut` drops only those, wherever they sit, rather than everything up to them. It refuses a name without the prefix among them. It checks three things:
 
