@@ -24,6 +24,8 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp unmark <__b>...` | Undoes `mark`: deletes each extracted copy once it holds the same commits, renames the branch back, and puts it just above the `__` block. Add `-n` to see what it will do. |
 | `sp mode full` | Makes export list every commit, for reordering like a rebase todo. `short` switches back. |
 
+To move a commit that sits in the wrong stack branch, add a `pick` line for it above the right branch's `update-ref`. In full mode its line is already there, so move that line instead.
+
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
 
 `e`, `s`, `a` and `v` are short for `export`, `save`, `apply` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored. `--verbose` fits every command.
@@ -90,6 +92,9 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 - A pick below the marker is untagged. Moving a tagged commit back below the marker removes its note.
 - The order of the `update-ref` lines is the stack order. Moving one moves that branch, and its own commits go with it as a block.
 - An `update-ref` line naming a branch that does not exist adds that branch to the stack, with the picks above it or empty. The rebase creates it.
+- A `pick` line you add by hand, for a commit already in a stack branch, moves that commit. Above another branch's `update-ref`, it goes to the end of that branch. In the wip section, it leaves the stack and lands on wip, below the waiting commits. This is the way to fix a commit that landed in the wrong branch without switching to full mode. Its position inside the new branch is always the end, so use full mode when it has to go elsewhere.
+
+A move of a commit already in the stack is saved as a note, like a placement, and export shows it in its new section with `>>> [moved]`. From then on the file must keep its line, as for a waiting commit. To cancel the move, put the line back in its own branch or below the untagged marker.
 
 Commits tagged in an earlier round are exported already sitting in their section, so the file only ever needs the new ones placed. The same goes for a stack order saved but not yet rebased. Export marks them the way the apply todo does: `>>> [moved]` after the hash of a pick whose note moves it into a branch, and a `# >>> [new branch]` or `# >>> [moved branch]` line above a branch the saved order adds or moves. The markers show what was saved at export, not your edits since, and `save` ignores them.
 
@@ -105,7 +110,7 @@ The export marks the file with a `# mode: full` line, and `save` refuses a file 
 
 Full mode also takes `fixup` (`f`), `fixup -C` and `squash` (`s`) in place of `pick`, as in a rebase todo. Either one folds the commit into the pick above it, so it has to follow a pick in the same branch rather than an `update-ref` line. A squash stops the rebase for the combined message. `save` removes the note from a folded commit, because that commit stops existing. `apply` records each fold in the file's `# folded:` line. `verify` then lists the range-diff entries those folds account for under "from folds", rather than as dropped or added, and the tree check still covers them.
 
-Notes record which branch a commit goes to, but not its order within the branch. So in full mode `preview` and `apply` take the todo from the file itself, rather than from the notes. `save` still writes notes for the waiting commits and stores the order, so switching back to short mode loses no placement. A re-export before `apply` does lose any reordering within a branch, except in `stackplan.txt.bak`.
+Notes record which branch a commit goes to, but not its order within the branch. So in full mode `preview` and `apply` take the todo from the file itself, rather than from the notes. `save` still writes notes for the waiting commits, and for stack commits moved to another branch, and stores the order. Switching back to short mode then loses no placement. A re-export before `apply` does lose any reordering within a branch, except in `stackplan.txt.bak`.
 
 #### Folding by subject
 
@@ -207,7 +212,7 @@ The summary line starts with `✓` when no change differs, `!` when some did and
 
 Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 
-When the tree matches and nothing was dropped or added, `verify` removes the notes from every commit that has landed in its branch, in one `git notes remove`, and then prints the tree verdict as its last line. Commits still waiting on the wip branch keep theirs. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
+When the tree matches and nothing was dropped or added, `verify` removes the notes from every commit that has landed in the branch its note names, in one `git notes remove`, and then prints the tree verdict as its last line. Commits still waiting on the wip branch keep theirs. So does a stack commit whose move has not run yet, which is why a `cut` or `sync` between `save` and `apply` keeps it. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
 
 ### 6. Cut the stack once its bottom has landed
 

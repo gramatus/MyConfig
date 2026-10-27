@@ -492,8 +492,29 @@ const readStack = (wip: string) => {
     branches: line.flatMap((commit) => commit.branches),
     pending: line.slice(topIndex + 1),
     own,
+    branchOf: new Map(
+      [...own].flatMap(([branch, commits]) =>
+        commits.map((commit) => [commit.sha, branch] as const),
+      ),
+    ),
   };
 };
+
+// A note on a commit in a stack branch names where it moves; one naming its own branch has done its job.
+const movesOut = (
+  commit: Commit,
+  from: string | undefined,
+  order: string[],
+  wip: string,
+) =>
+  from !== undefined &&
+  commit.note !== '' &&
+  commit.note !== from &&
+  (commit.note === wip || order.includes(commit.note));
+
+// The note save leaves on a commit placed in target; a stack commit placed in its own branch needs none.
+const noteFor = (target: string | undefined, from: string | undefined) =>
+  target === undefined || target === from ? '' : target;
 
 const printOrderChanges = (current: string[], order: string[]) => {
   const below = (branch: string) => order[order.indexOf(branch) - 1] ?? base;
@@ -2426,7 +2447,7 @@ const extractableBranches = () => {
 // Renames each branch to its __ name, carries its notes and the saved order along, and exports the plan with the __ block in place.
 const markBranches = (names: string[]) => {
   const wip = currentBranch();
-  const { branches, pending } = readStack(wip);
+  const { branches, line } = readStack(wip);
   const pulls = openPullRequests();
   heading(`Mark${dryRun ? ' (dry run)' : ''}`);
   if (!pulls)
@@ -2459,13 +2480,13 @@ const markBranches = (names: string[]) => {
     ...order.filter((branch) => sourceOf.has(branch)),
     ...order.slice(anchorAt + 1).filter(unmarked),
   ].map(renamed);
-  const notesToMove = pending.filter((commit) => sourceOf.has(commit.note));
+  const notesToMove = line.filter((commit) => sourceOf.has(commit.note));
 
   for (const [name, source] of sourceOf)
     console.log(`${cyan(name)} → ${cyan(source)}`);
   if (notesToMove.length)
     console.log(
-      `placed in them: ${countOf(notesToMove.length, 'waiting commit')}, whose notes follow the rename`,
+      `placed in them: ${countOf(notesToMove.length, 'commit')}, whose notes follow the rename`,
     );
   printOrderChanges(branches.map(renamed), markedOrder);
   if (dryRun) {
@@ -2508,7 +2529,7 @@ const markBranches = (names: string[]) => {
 // Undoes mark: deletes each extracted copy that holds the same commits as its source, renames the source back, and moves it above the __ block.
 const unmarkBranches = (names: string[]) => {
   const wip = currentBranch();
-  const { branches, pending, own } = readStack(wip);
+  const { branches, line, own } = readStack(wip);
   const pulls = openPullRequests();
   heading(`Unmark${dryRun ? ' (dry run)' : ''}`);
   if (!pulls)
@@ -2567,7 +2588,7 @@ const unmarkBranches = (names: string[]) => {
     ...branches.filter((branch) => nameOf.has(branch)).map(renamed),
     ...order.slice(anchorAt + 1),
   ];
-  const notesToMove = pending.filter((commit) => nameOf.has(commit.note));
+  const notesToMove = line.filter((commit) => nameOf.has(commit.note));
 
   for (const extracted of toDelete) {
     const remote = remoteOf(extracted);
@@ -2579,7 +2600,7 @@ const unmarkBranches = (names: string[]) => {
     console.log(`${cyan(name)} → ${cyan(plain)}`);
   if (notesToMove.length)
     console.log(
-      `placed in them: ${countOf(notesToMove.length, 'waiting commit')}, whose notes follow the rename`,
+      `placed in them: ${countOf(notesToMove.length, 'commit')}, whose notes follow the rename`,
     );
   printOrderChanges(branches.map(renamed), unmarkedOrder);
   if (dryRun) {
@@ -2762,7 +2783,7 @@ const notAllMerged = (pull: {
 const exportPlan = () => {
   const wip = currentBranch();
   const full = fullMode();
-  const { line, branches: current, pending, own } = readStack(wip);
+  const { line, branches: current, pending, own, branchOf } = readStack(wip);
   const { folding, unmatched, foldsInto } = foldsBySubject(line);
   // An order saved but not yet rebased is exported as planned, like the notes are.
   const branches = desiredOrder(current);
@@ -2772,6 +2793,17 @@ const exportPlan = () => {
   const untagged: Commit[] = [];
   const strayNotes: Commit[] = [];
   const waiting = pending.filter((commit) => !folding.has(commit.sha));
+  const leaving = new Set(
+    line
+      .filter(
+        (commit) =>
+          !folding.has(commit.sha) &&
+          movesOut(commit, branchOf.get(commit.sha), branches, wip),
+      )
+      .map((commit) => commit.sha),
+  );
+  for (const commit of line)
+    if (leaving.has(commit.sha)) sections.get(commit.note)!.push(commit);
   // Short mode lists no fold, since the subject decides it; the comment only shows where it goes.
   const foldLines = (target: Commit) =>
     foldsInto(target).map((commit) => {
@@ -2867,7 +2899,9 @@ const exportPlan = () => {
           pulls,
         )
       : undefined;
-    const ownCommits = own.get(branch) ?? [];
+    const ownCommits = (own.get(branch) ?? []).filter(
+      (commit) => !leaving.has(commit.sha),
+    );
     const inBranch = full
       ? linesOf(ownCommits)
       : ownCommits.flatMap((commit) => foldLines(commit));
@@ -2883,8 +2917,13 @@ const exportPlan = () => {
     );
   });
   if (pulls && stopAt === branches.length) out.push(PRS_STOP_MARKER);
+  const staying = sections.get(wip)!;
   out.push(
-    ...linesOf(sections.get(wip)!),
+    ...linesOf(
+      staying.filter((commit) => leaving.has(commit.sha)),
+      `${MOVED_MARKER} `,
+    ),
+    ...linesOf(staying.filter((commit) => !leaving.has(commit.sha))),
     UNTAGGED_MARKER,
     ...linesOf(untagged),
     '',
@@ -2901,8 +2940,11 @@ const exportPlan = () => {
     ? ` · ${line.length - pending.length} in branches`
     : '';
   const folded = folding.size ? ` · ${folding.size} fold by subject` : '';
+  const leavingCount = leaving.size
+    ? ` · ${leaving.size} moving out of their branch`
+    : '';
   console.log(
-    `${waiting.length} waiting · ${waiting.length - untagged.length} placed${inBranches}${folded} · ${branches.length} stack branches`,
+    `${waiting.length} waiting · ${waiting.length - untagged.length} placed${inBranches}${leavingCount}${folded} · ${branches.length} stack branches`,
   );
   warnUnmatched(unmatched);
   if (untagged.length)
@@ -2922,12 +2964,21 @@ const exportPlan = () => {
 
 const savePlan = () => {
   const wip = currentBranch();
-  const { line: history, branches, pending } = readStack(wip);
+  const { line: history, branches, pending, branchOf } = readStack(wip);
   const { folding } = foldsBySubject(history);
   const full = readHeader(MODE_PREFIX) === 'full';
+  const order = desiredOrder(branches);
+  // Short mode may list any commit, but must keep the waiting ones and those export showed moving.
   const listable = full
     ? history
-    : pending.filter((commit) => !folding.has(commit.sha));
+    : history.filter((commit) => !folding.has(commit.sha));
+  const required = full
+    ? history
+    : listable.filter(
+        (commit) =>
+          !branchOf.has(commit.sha) ||
+          movesOut(commit, branchOf.get(commit.sha), order, wip),
+      );
   const errors: string[] = [];
   const targets = new Map<string, string | undefined>();
   const listed = new Set<string>();
@@ -2971,7 +3022,7 @@ const savePlan = () => {
                 candidate.sha.startsWith(arg) && folding.has(candidate.sha),
             )
           : undefined;
-        const scope = full ? `in ${base}..${wip}` : `waiting on ${wip}`;
+        const scope = `in ${base}..${wip}`;
         if (kind !== 'pick' && !full)
           errors.push(
             `${where}: ${todoVerb(kind)} needs full mode (stack-plan mode full)`,
@@ -3057,7 +3108,7 @@ const savePlan = () => {
         `${lowest} is new and empty at the bottom of the stack, where git cannot tell it from ${base}`,
       );
     }
-    for (const commit of listable) {
+    for (const commit of required) {
       if (!listed.has(commit.sha) && !addedSinceExport.has(commit.sha)) {
         errors.push(
           `${commit.sha.slice(0, 10)} is missing from the plan: ${commit.subject}`,
@@ -3073,13 +3124,15 @@ const savePlan = () => {
     process.exit(1);
   }
 
-  const toTag = pending.filter(
+  const noteOf = (commit: Commit) =>
+    noteFor(targets.get(commit.sha), branchOf.get(commit.sha));
+  const toTag = history.filter(
     (commit) =>
       (listed.has(commit.sha) || folding.has(commit.sha)) &&
-      (targets.get(commit.sha) ?? '') !== commit.note,
+      noteOf(commit) !== commit.note,
   );
-  const tagged = toTag.filter((commit) => targets.get(commit.sha));
-  const untagged = toTag.filter((commit) => !targets.get(commit.sha));
+  const tagged = toTag.filter((commit) => noteOf(commit));
+  const untagged = toTag.filter((commit) => !noteOf(commit));
   printByBranch(
     [...updateRefs, wip],
     (commit) => targets.get(commit.sha) ?? '',
@@ -3098,7 +3151,7 @@ const savePlan = () => {
         'add',
         '-f',
         '-m',
-        targets.get(commit.sha)!,
+        noteOf(commit),
         commit.sha,
       );
     for (const commit of untagged)
@@ -3393,11 +3446,14 @@ const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
     );
   }
 
-  // A note on a commit no longer waiting on wip has done its job; the pre-rebase commits keep their copies.
-  const { line, pending } = readStack(wip);
-  const waiting = new Set(pending.map((commit) => commit.sha));
+  // A note on a commit now in the branch it names has done its job; the pre-rebase commits keep their copies.
+  const { line, branches, branchOf } = readStack(wip);
+  const stackOrder = desiredOrder(branches);
   const landed = line.filter(
-    (commit) => commit.note && !waiting.has(commit.sha),
+    (commit) =>
+      commit.note &&
+      branchOf.has(commit.sha) &&
+      !movesOut(commit, branchOf.get(commit.sha), stackOrder, wip),
   );
   if (!landed.length) return;
   if (!dryRun)
@@ -3487,39 +3543,47 @@ const branchMarker = (branch: string, branches: string[], order: string[]) => {
     return `# ${MOVED_BRANCH_MARKER} ${branch}, now above ${below}`;
 };
 
-// Short mode: each branch keeps its own commits as a block, and waiting commits join the branch their note names.
+// Short mode: each branch keeps its own commits as a block, and commits with a note join the branch it names.
 const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
-  const { line, branches, pending, own } = readStack(wip);
+  const { line, branches, pending, own, branchOf } = readStack(wip);
   const { folding, unmatched, foldsInto } = foldsBySubject(line);
   // A dry-run save writes no notes or config, so its plan stands in for them.
-  for (const commit of pending)
+  for (const commit of line)
     if (planned?.targets.has(commit.sha))
-      commit.note = planned.targets.get(commit.sha) ?? '';
+      commit.note = noteFor(
+        planned.targets.get(commit.sha),
+        branchOf.get(commit.sha),
+      );
   const order = planned?.order ?? desiredOrder(branches);
   // A folding commit goes with its target, whatever its note says.
-  const moves = pending.filter(
+  const leaving = line.filter(
     (commit) =>
       !folding.has(commit.sha) &&
-      commit.note !== wip &&
-      order.includes(commit.note),
+      movesOut(commit, branchOf.get(commit.sha), order, wip),
   );
-  const moved = new Set(moves.map((commit) => commit.sha));
-  const branchOf = new Map(
-    [...own].flatMap(([branch, commits]) =>
-      commits.map((commit) => [commit.sha, branch] as const),
+  const moves = [
+    ...leaving.filter((commit) => commit.note !== wip),
+    ...pending.filter(
+      (commit) =>
+        !folding.has(commit.sha) &&
+        commit.note !== wip &&
+        order.includes(commit.note),
     ),
-  );
+  ];
+  const toWip = leaving.filter((commit) => commit.note === wip);
+  const moved = new Set([...moves, ...toWip].map((commit) => commit.sha));
   const foldsLandIn = [...folding.values()].map(({ into }) =>
     moved.has(into.sha) ? into.note : (branchOf.get(into.sha) ?? wip),
   );
-  const receives = (branch: string) =>
+  const changes = (branch: string) =>
     moves.some((commit) => commit.note === branch) ||
+    leaving.some((commit) => branchOf.get(commit.sha) === branch) ||
     foldsLandIn.includes(branch);
   let first = 0;
   while (
     first < order.length &&
     order[first] === branches[first] &&
-    !receives(order[first])
+    !changes(order[first])
   )
     first++;
   warnUnmatched(unmatched);
@@ -3531,7 +3595,7 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   }
   // Everything below the first changed branch stays as it is.
   const rebaseBase = first === 0 ? forkOf(wip) : order[first - 1];
-  printByBranch(order, (commit) => commit.note, moves);
+  printByBranch([...order, wip], (commit) => commit.note, [...moves, ...toWip]);
   for (const [sha, { into }] of folding)
     printFold(line.find((commit) => commit.sha === sha)!, into);
   printOrderChanges(branches, order);
@@ -3550,11 +3614,15 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   for (const branch of order.slice(first)) {
     const marker = branchMarker(branch, branches, order);
     if (marker) todo.push(marker);
-    for (const commit of unfolded(own.get(branch) ?? [])) pickWithFolds(commit);
+    for (const commit of unfolded(own.get(branch) ?? []).filter(
+      (commit) => !moved.has(commit.sha),
+    ))
+      pickWithFolds(commit);
     for (const commit of moves.filter((move) => move.note === branch))
       pickWithFolds(commit, `${MOVED_MARKER} `);
     todo.push(`update-ref refs/heads/${branch}`, '');
   }
+  for (const commit of toWip) pickWithFolds(commit, `${MOVED_MARKER} `);
   for (const commit of unfolded(pending).filter(
     (commit) => !moved.has(commit.sha),
   ))
