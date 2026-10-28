@@ -26,6 +26,7 @@ const SYNC_PREFIX = '# sync: ';
 const FROM_COPY_PREFIX = '# from-copy: ';
 const STOPS_PREFIX = '# stops: ';
 const MOVED_MARKER = '>>> [moved]';
+const STOP_MARKER = '>>> [break]';
 const LOCAL_MARKER = '>>> [local]';
 const COPY_MARKER = '>>> [copy]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
@@ -3337,7 +3338,8 @@ const exportPlan = () => {
     });
   const branchStops = readBranchStops([...branches, wip]);
   const commitStops = readCommitStops(line);
-  const stopLine = (message?: string) => (message ? [`stop ${message}`] : []);
+  const stopLine = (message?: string) =>
+    message ? [`${STOP_MARKER} stop ${message}`] : [];
   const linesOf = (commits: Commit[], marker = '') =>
     commits
       .filter((commit) => !folding.has(commit.sha))
@@ -3382,7 +3384,7 @@ const exportPlan = () => {
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
     '# new branch, then run: stack-plan preview, then stack-plan apply',
-    `# ${MOVED_MARKER} and the branch markers show what was saved at export; save ignores them.`,
+    `# ${MOVED_MARKER}, ${STOP_MARKER} and the branch markers show what was saved at export; save ignores them.`,
     '# stop <message> pauses the next apply there and prints the message: right above an',
     '# update-ref or the untagged marker at the end of that branch, else after the pick above it.',
     ...(full
@@ -3472,7 +3474,7 @@ const exportPlan = () => {
     ...linesOf(staying.filter((commit) => !leaving.has(commit.sha))),
     ...stopLine(branchStops.get(wip)),
     UNTAGGED_MARKER,
-    ...linesOf(untagged).filter((listed) => !listed.startsWith('stop ')),
+    ...linesOf(untagged).filter((listed) => !listed.startsWith(STOP_MARKER)),
     '',
   );
 
@@ -3543,7 +3545,10 @@ const savePlan = () => {
   readFileSync(planPath(), 'utf8')
     .split('\n')
     .forEach((raw, index) => {
-      const line = raw.trim();
+      const trimmed = raw.trim();
+      const line = trimmed.startsWith(STOP_MARKER)
+        ? trimmed.slice(STOP_MARKER.length).trim()
+        : trimmed;
       const where = `line ${index + 1}`;
       if (line === UNTAGGED_MARKER) {
         for (const sha of held) targets.set(sha, wip);
