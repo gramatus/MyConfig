@@ -208,7 +208,7 @@ _stack_plan() {
         save|s|preview|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;;
         sync) flags+=('--apply[do the sync once the check passes]' '(-f --anyway)'{-f,--anyway}'[sync despite a finding]' '--no-fetch[skip fetching and pruning origin first]') ;;
         extract) flags+=('--apply[move the branches once the check passes]' '(-f --anyway)'{-f,--anyway}'[move the clean ones despite a finding]') ;;
-        extractable) flags+=('--json[print the candidates as JSON]') ;;
+        extractable) flags+=('--json[print the candidates as JSON]' '--upto[test only the branches up to this one]:branch:_stack_plan_refs') ;;
     esac
     shift words
     (( CURRENT-- ))

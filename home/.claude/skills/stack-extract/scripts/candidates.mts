@@ -19,6 +19,7 @@ type ExtractableReport = {
   baseSha: string;
   chains: { moveConflict: string | null; members: Member[] }[];
   blocked: { name: string; reason: string }[];
+  untested: string[];
 };
 
 const STACK_PLAN_SCRIPT = join(homedir(), 'scripts', 'stack-plan.mts');
@@ -49,20 +50,19 @@ if (!lastReady || lastReady.startsWith('-')) {
   process.exit(2);
 }
 readGit(mainCheckout, 'rev-parse', '--verify', `refs/heads/${lastReady}`);
-// Every branch below the last ready one in the stack is an ancestor of it.
-const isReady = (branch: string) => {
-  try {
-    readGit(mainCheckout, 'merge-base', '--is-ancestor', branch, lastReady);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
+// --upto keeps the branches above the cut out of the chains, so their needs cannot join branches below it.
 const fullReport: ExtractableReport = JSON.parse(
   execFileSync(
     'node',
-    [STACK_PLAN_SCRIPT, 'extractable', '--json', ...extractableArgs],
+    [
+      STACK_PLAN_SCRIPT,
+      'extractable',
+      '--json',
+      '--upto',
+      lastReady,
+      ...extractableArgs,
+    ],
     {
       encoding: 'utf8',
       maxBuffer: 1 << 28,
@@ -70,25 +70,12 @@ const fullReport: ExtractableReport = JSON.parse(
     },
   ),
 );
-// A chain runs in stack order, so cutting it at the first unready member keeps the members that need nothing above the cut.
-const notReady: string[] = [];
-const chains = fullReport.chains.flatMap((chain) => {
-  const cutAt = chain.members.findIndex((member) => !isReady(member.name));
-  const members = cutAt < 0 ? chain.members : chain.members.slice(0, cutAt);
-  if (cutAt >= 0)
-    notReady.push(...chain.members.slice(cutAt).map((member) => member.name));
-  // A chain left with only __ members has no candidate in it.
-  return members.some((member) => !member.marked)
-    ? [{ ...chain, members }]
-    : [];
-});
-const blocked = fullReport.blocked.filter(({ name }) => isReady(name));
-notReady.push(
-  ...fullReport.blocked
-    .filter(({ name }) => !isReady(name))
-    .map(({ name }) => name),
+// A chain left with only __ members has no candidate in it.
+const chains = fullReport.chains.filter(({ members }) =>
+  members.some((member) => !member.marked),
 );
-const report = { ...fullReport, lastReady, chains, blocked, notReady };
+const { untested: notReady, ...rest } = fullReport;
+const report = { ...rest, lastReady, chains, notReady };
 mkdirSync(resultsPath, { recursive: true });
 writeFileSync(
   join(resultsPath, 'candidates.json'),

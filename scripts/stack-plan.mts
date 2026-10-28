@@ -111,7 +111,8 @@ const USAGE = [
   "  extract --from-copy <__branch>...  check rewriting each named __ branch to take its copy's commits instead;",
   '               --apply then rebases the stack, and -f does it despite a finding',
   '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows;',
-  "               --json prints each chain with every member's start and replay commits",
+  "               --json prints each chain with every member's start and replay commits;",
+  '               --upto <branch> tests only the branches up to and including <branch>',
   '  mark <branch>...  rename each to its __ name, carrying its notes and the saved order along, and export the plan',
   '               with them as one block above the PRs; -n only shows what it would do',
   '  unmark <__branch>...  undo mark: delete each extracted copy once it matches its source, rename the source back,',
@@ -142,7 +143,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   cut: ['--base', '--apply', '--anyway', '--merged'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
   extract: ['--base', '--apply', '--anyway', '--from-copy'],
-  extractable: ['--base', '--json'],
+  extractable: ['--base', '--json', '--upto'],
   mark: ['--base', '--dry-run'],
   unmark: ['--base', '--dry-run'],
   needs: ['--base', '--clear'],
@@ -174,7 +175,11 @@ if (command !== '_todo') {
     usageError(given ? `unknown command "${given}"` : undefined);
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--base' && allowed.includes('--base')) i++;
-    else if (command === 'cut' && !rest[i].startsWith('-'))
+    else if (rest[i] === '--upto' && allowed.includes('--upto')) {
+      if (!rest[i + 1] || rest[i + 1].startsWith('-'))
+        usageError('--upto needs the last branch to test');
+      i++;
+    } else if (command === 'cut' && !rest[i].startsWith('-'))
       cutTargets.push(rest[i]);
     else if (
       (command === 'mark' || command === 'unmark') &&
@@ -220,6 +225,7 @@ const optionValue = (name: string) => {
   return index >= 0 ? rest[index + 1] : undefined;
 };
 const base = optionValue('--base') ?? 'origin/main';
+const upto = optionValue('--upto');
 const dryRun = rest.includes('--dry-run');
 const asJson = rest.includes('--json');
 
@@ -2668,7 +2674,13 @@ const extractableBranches = () => {
   // A branch may stack on a __ branch, whose extracted copy then becomes its base, but never on a branch with a PR.
   const mayJoin = (branch: string) =>
     movable(branch) || isExtractSource(branch);
-  const tested = branches.filter(movable);
+  const uptoBranch = upto && stackBranchNamed(upto, branches);
+  if (upto && !uptoBranch) throw new Error(`${upto} is not a stack branch`);
+  // Needs point only downwards, so leaving out the branches above --upto keeps their needs from joining chains below it.
+  const belowUpto = (branch: string) =>
+    !uptoBranch || branches.indexOf(branch) <= branches.indexOf(uptoBranch);
+  const tested = branches.filter(movable).filter(belowUpto);
+  const untested = branches.filter(movable).filter((name) => !belowUpto(name));
   const needsOf = new Map<string, string[]>();
   const directNeedsOf = new Map<string, string[]>();
   const declaredOf = new Map<string, string[]>();
@@ -2741,7 +2753,11 @@ const extractableBranches = () => {
     const blocked = [...blockerOf].map(([name, reason]) => ({ name, reason }));
     const report = { base, baseSha, wip, prsListed: Boolean(pulls) };
     console.log(
-      JSON.stringify({ ...report, chains: chainReports, blocked }, null, 2),
+      JSON.stringify(
+        { ...report, chains: chainReports, blocked, untested },
+        null,
+        2,
+      ),
     );
     return;
   }
@@ -2791,6 +2807,10 @@ const extractableBranches = () => {
     if (own.get(branch)?.length) bad(`${cyan(branch)}  ${blocker}`);
     else attention(`${cyan(branch)}  ${blocker}`);
   }
+  if (untested.length)
+    console.log(
+      `not tested, above ${uptoBranch}: ${untested.map(cyan).join(', ')}`,
+    );
 
   subheading('Conclusion');
   if (!extractable.size) {

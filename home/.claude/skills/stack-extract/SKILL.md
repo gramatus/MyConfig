@@ -31,7 +31,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 | Script | Does |
 | --- | --- |
-| `candidates.mts <last-ready-branch>` | Runs `stack-plan extractable --json`, cuts each chain at the first branch above the last ready one, saves the result as `candidates.json`, and saves each candidate's own change as `<branch>.diff`, with `/` turned into `-` |
+| `candidates.mts <last-ready-branch>` | Runs `stack-plan extractable --json --upto <last-ready-branch>`, which tests only the branches up to the cut, saves the result as `candidates.json`, and saves each candidate's own change as `<branch>.diff`, with `/` turned into `-` |
 | `worktree.mts open` | Adds the worktree at `.agent-context/.tmp/stack-extract` and links every `node_modules` |
 | `worktree.mts goto <ref>` | Discards what the last checks left, sparing the `node_modules` links, and checks out the ref detached |
 | `worktree.mts close` | Removes the links, then the worktree |
