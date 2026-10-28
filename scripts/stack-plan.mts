@@ -1782,6 +1782,27 @@ const compareWithExtracted = (
   return { missing, extraCount: extra.length, extra };
 };
 
+// A subject pairs only where it is unique among the copy's extra commits and among the missing source commits.
+const sourceVersionsByCopySha = (copyShas: string[], missing: Commit[]) => {
+  const copyCommits = copyShas.map(subjectOf);
+  const countsBySubject = (subjects: string[]) => {
+    const counts = new Map<string, number>();
+    for (const subject of subjects)
+      counts.set(subject, (counts.get(subject) ?? 0) + 1);
+    return counts;
+  };
+  const copyCounts = countsBySubject(copyCommits.map((c) => c.subject));
+  const sourceCounts = countsBySubject(missing.map((c) => c.subject));
+  return new Map(
+    copyCommits.flatMap(({ sha, subject }) => {
+      const sourceVersion = missing.find((c) => c.subject === subject);
+      const unique =
+        copyCounts.get(subject) === 1 && sourceCounts.get(subject) === 1;
+      return sourceVersion && unique ? [[sha, sourceVersion] as const] : [];
+    }),
+  );
+};
+
 // Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
 const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
   let fork = git('merge-base', base, extracted).trim();
@@ -2128,31 +2149,40 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           fork,
         ));
       }
+      let sourceVersionOf = new Map<string, Commit>();
       if (extraCount) {
-        findings++;
         // Commits the base holds are lower copies that landed; only the rest is work to bring into the source.
         const unlanded = extra.reverse().filter((sha) => {
           const merged = mergeTree(`${sha}^`, base, sha);
           return !merged.ok || merged.tree !== treeOf(base);
         });
         const held = extraCount - unlanded.length;
-        const alsoHeld = held ? `; ${held} more ${base} already holds` : '';
-        if (unlanded.length) {
-          attention(
-            `${label}  has ${countOf(unlanded.length, 'commit')} neither ${source} nor ${base} holds${alsoHeld}; bring them into ${source} first:`,
-          );
-          for (const sha of unlanded) console.log(commitLine(subjectOf(sha)));
-        } else
-          attention(
-            `${label}  sits on ${countOf(held, 'commit')} ${base} already holds, mixed in with its own; compare by hand`,
-          );
-        return;
+        if (!held && !landedOnly)
+          sourceVersionOf = sourceVersionsByCopySha(unlanded, missing);
+        const unpaired = unlanded.filter((sha) => !sourceVersionOf.has(sha));
+        if (held || unpaired.length) {
+          findings++;
+          const alsoHeld = held ? `; ${held} more ${base} already holds` : '';
+          if (unpaired.length) {
+            attention(
+              `${label}  has ${countOf(unpaired.length, 'commit')} neither ${source} nor ${base} holds${alsoHeld}; bring them into ${source} first:`,
+            );
+            for (const sha of unpaired) console.log(commitLine(subjectOf(sha)));
+          } else
+            attention(
+              `${label}  sits on ${countOf(held, 'commit')} ${base} already holds, mixed in with its own; compare by hand`,
+            );
+          return;
+        }
+        const replacing = new Set(sourceVersionOf.values());
+        missing = missing.filter((commit) => !replacing.has(commit));
       }
       // A copy whose lower copy moved is rebuilt on it, which rewrites the copy's history.
       const onTip = on === undefined ? undefined : plannedTip.get(on);
       const movedOn = onTip !== undefined && onTip !== fork ? on : undefined;
       if (landedOnly && !landedTip && !movedOn) return;
-      if (!missing.length && !landedTip && !movedOn) {
+      const replaces = sourceVersionOf.size > 0;
+      if (!missing.length && !landedTip && !movedOn && !replaces) {
         good(`${label}  up to date`);
         return;
       }
@@ -2174,23 +2204,32 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           return;
         }
       }
-      const replay =
-        rebuildOn && start
-          ? replayOnto(
-              [...commitsIn(`${fork}..${extracted}`), ...missing],
-              start,
-            )
-          : replayOnto(missing, oldTip);
+      const rebuildStart = rebuildOn ? start : replaces ? fork : undefined;
+      const ownCommits = () =>
+        commitsIn(`${fork}..${extracted}`).map(
+          (commit) => sourceVersionOf.get(commit.sha) ?? commit,
+        );
+      const replay = rebuildStart
+        ? replayOnto([...ownCommits(), ...missing], rebuildStart)
+        : replayOnto(missing, oldTip);
       if (!replay.ok)
         return reportConflict(label, rebuildOn ?? extracted, replay);
       const added = missing.length
         ? `+${countOf(missing.length, 'commit')}`
         : '';
-      if (rebuildOn) {
+      if (rebuildStart) {
+        const where = rebuildOn ? ` on ${rebuildOn}` : '';
         const off = landedTip ? ', off landed commits' : '';
+        const replaced = replaces
+          ? `, ${countOf(sourceVersionOf.size, 'commit')} replaced by ${source}'s version`
+          : '';
         good(
-          `${label}  rebuilt on ${rebuildOn}${off}${added ? `, ${added}` : ''}; needs a force push`,
+          `${label}  rebuilt${where}${off}${replaced}${added ? `, ${added}` : ''}; needs a force push`,
         );
+        for (const [copySha, sourceVersion] of sourceVersionOf)
+          console.log(
+            `  ${yellow(copySha.slice(0, 10))} → ${commitLine(sourceVersion).trimStart()}`,
+          );
         rebuilt.push(extracted);
       } else good(`${label}  ${added}`);
       moves.push({ extracted, tip: replay.tip, oldTip });
