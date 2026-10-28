@@ -33,8 +33,7 @@ const shellQuote = (arg: string) =>
   /^[\w@%+=:,./^-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`;
 
 const git = (...args: string[]) => {
-  if (!UNTRACED_COMMANDS.includes(command))
-    console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
+  if (verbose) console.error(dimErr(`$ git ${args.map(shellQuote).join(' ')}`));
   try {
     return execFileSync('git', args, {
       encoding: 'utf8',
@@ -50,7 +49,8 @@ const git = (...args: string[]) => {
 };
 
 const USAGE = [
-  'Usage: git-tools <command> [-b|--base <ref>]',
+  'Usage: git-tools <command> [-b|--base <ref>] [--verbose]',
+  '  --verbose echoes each git command it runs to stderr',
   '  branch-of (bo) <subject>  find the branch holding each commit in <base>..HEAD whose subject',
   '                            contains <subject>, ignoring case; the words need no quotes',
   '  stack (s)                 list the branches in <base>..HEAD along the first parent, bottom to top',
@@ -74,10 +74,11 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   'sync-check': ['--base'],
 };
 const TAKES_POSITIONAL = ['branch-of'];
-const UNTRACED_COMMANDS = ['sync-check'];
 
-const [given = '', ...args] = process.argv.slice(2);
+const [given = '', ...rawArgs] = process.argv.slice(2);
 const command = EXPANSIONS[given] ?? given;
+const verbose = rawArgs.includes('--verbose');
+const args = rawArgs.filter((arg) => arg !== '--verbose');
 
 const usageError = (message?: string): never => {
   if (message) console.error(redErr(`✗ ${message}`));
