@@ -107,7 +107,8 @@ const USAGE = [
   '               despite a finding;',
   '               it fetches and prunes origin first, unless --no-fetch',
   '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
-  '               --apply then moves those branches, and -f moves the clean ones despite a finding',
+  '               --apply then moves those branches, and -f moves the clean ones despite a finding;',
+  '               --rebase also rebuilds each copy that sits on an older base on its current tip',
   "  extract --from-copy <__branch>...  check rewriting each named __ branch to take its copy's commits instead;",
   '               --apply then rebases the stack, and -f does it despite a finding',
   '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows;',
@@ -142,7 +143,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   verify: ['--base', '--dry-run'],
   cut: ['--base', '--apply', '--anyway', '--merged'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
-  extract: ['--base', '--apply', '--anyway', '--from-copy'],
+  extract: ['--base', '--apply', '--anyway', '--from-copy', '--rebase'],
   extractable: ['--base', '--json', '--upto'],
   mark: ['--base', '--dry-run'],
   unmark: ['--base', '--dry-run'],
@@ -218,6 +219,8 @@ if (command !== '_todo') {
     usageError('--from-copy needs the __ branches to take from their copies');
   if (!fromCopy && fromCopyTargets.length)
     usageError('extract takes branch names only with --from-copy');
+  if (fromCopy && rest.includes('--rebase'))
+    usageError('--rebase does not apply to --from-copy');
 }
 
 const optionValue = (name: string) => {
@@ -228,6 +231,7 @@ const base = optionValue('--base') ?? 'origin/main';
 const upto = optionValue('--upto');
 const dryRun = rest.includes('--dry-run');
 const asJson = rest.includes('--json');
+const rebaseCopies = rest.includes('--rebase');
 
 type Commit = {
   sha: string;
@@ -2200,18 +2204,22 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       const onTip = on === undefined ? undefined : plannedTip.get(on);
       const movedOn = onTip !== undefined && onTip !== fork ? on : undefined;
       if (landedOnly && !landedTip && !movedOn) return;
+      const onOldBase =
+        rebaseCopies && on === undefined && !landedTip && fork !== tipOf(base);
       const replaces = sourceVersionOf.size > 0;
-      if (!missing.length && !landedTip && !movedOn && !replaces) {
+      const rebuildsOnBase = landedTip !== undefined || onOldBase;
+      if (!missing.length && !rebuildsOnBase && !movedOn && !replaces) {
         good(`${label}  up to date`);
         return;
       }
       let rebuildOn = movedOn;
       let start = onTip;
-      if (landedTip) {
+      if (rebuildsOnBase) {
         const blocker = blockerOf.get(source);
         if (blocker) {
           findings++;
-          bad(`${label}  sits on landed commits, but ${blocker}`);
+          const sitsOn = landedTip ? 'landed commits' : `an older ${base}`;
+          bad(`${label}  sits on ${sitsOn}, but ${blocker}`);
           return;
         }
         ({ onto: rebuildOn, start } = targetOf(source));
@@ -2284,18 +2292,17 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     );
   else if (landedOnly) good('no extracted copy sits on landed commits');
   else good('every extracted branch is up to date');
+  const applyCommand = `stack-plan extract --apply${rebaseCopies ? ' --rebase' : ''}`;
   // verify goes on to tidy after this, so a finding must not end the process there.
   if (!apply) {
     if (moves.length)
-      console.log(
-        `To do it: stack-plan extract --apply${findings ? ' -f' : ''}`,
-      );
+      console.log(`To do it: ${applyCommand}${findings ? ' -f' : ''}`);
     if (findings && !landedOnly) process.exit(1);
     return;
   }
   if (findings && !rest.includes('--anyway')) {
     console.log(
-      '\nNo branch moved. To move the clean ones anyway: stack-plan extract --apply -f',
+      `\nNo branch moved. To move the clean ones anyway: ${applyCommand} -f`,
     );
     if (!landedOnly) process.exit(1);
     return;

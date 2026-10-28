@@ -19,6 +19,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp cut --merged` | The same for every `__` branch that has landed, without naming them. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top, and dropping every merged branch, `__` branches included. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
+| `sp extract --rebase` | The same, and rebuilds each copy that sits on an older base on its current tip. `--apply` does it. |
 | `sp extract --from-copy <__b>...` | Checks rewriting each named `__` branch to take its copy's commits instead. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. `--upto <b>` tests only those up to `b`. |
 | `sp mark <b>...` | Renames each branch to its `__` name, carrying its notes and the saved order along, and exports the plan with them as one block. Add `-n` to see what it will do. |
@@ -307,6 +308,8 @@ It refuses a branch that is not in the stack, already has the prefix, has a PR, 
 - An extracted copy that sits on the copy of a lower `__` branch, where that lower copy has moved since, is rebuilt. Its own commits are replayed onto the lower copy's new tip, followed by any source commits it lacks. Rebuilding rewrites the branch, so `--apply` resets the local branch and ends by printing the `git push --force-with-lease` its PR needs. Export's `# mirror:` line shows such a copy as `on an old <branch>`.
 - An extracted copy that sits on commits the base already holds is rebuilt where a new copy would go: on `--base`, or on the copy of the member below it in its chain. That happens when a lower member of its chain merged and was cut. Its own commits are the run at its tip that match the source by `git patch-id`, and the commits under that run must merge into the base without changing it. Export's `# mirror:` line shows such a copy as `on landed commits`.
 - A `__` branch whose unprefixed name is also a stack branch is a finding.
+
+An extracted copy that sits directly on the base only moves forward, so it stays on the base it was made on. `stack-plan extract --rebase` rebuilds each such copy on the base's current tip, so fetch first. Its own commits are replayed there, followed by any source commits it lacks, and the copies chained above it are rebuilt on it in turn. A copy already on the tip shows as up to date, and one holding commits the source lacks is a finding, as above. Like every rebuild, `--apply` moves only the local branches and ends by printing the `git push --force-with-lease` their PRs need.
 
 The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. It signs every commit it writes, and fails when git has no signing key, because the org requires signed commits. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
 
