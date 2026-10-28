@@ -35,7 +35,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 | `worktree.mts open` | Adds the worktree at `.agent-context/.tmp/stack-extract` and links every `node_modules` |
 | `worktree.mts goto <ref>` | Discards what the last checks left, sparing the `node_modules` links, and checks out the ref detached |
 | `worktree.mts close` | Removes the links, then the worktree |
-| `checks.mts <script>... [--changed <script>...]` | Runs each npm script at the base, then at each candidate's replay commit, chains bottom first, and sorts each result. Scripts after `--changed` get the candidate's changed files |
+| `checks.mts <script>... [--changed <script>...]` | Runs each npm script at the base, then at each candidate's replay commit, chains bottom first, and sorts each result. Scripts after `--changed` get the candidate's changed files. `<dir>#<script>` runs a script from that directory's `package.json` |
 
 ## 1. Find the candidates
 
@@ -79,6 +79,8 @@ Sort each build dependency by where it points, because that decides what the rep
 ## 3. Check that each candidate builds
 
 1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck and lint. Leave tests out unless the user asked for them, and list them under "Not covered".
+   - **Where a script only chains others with `&&`, name its parts instead.** The chain stops at its first failing step, so an error the base already has in that step hides every step after it. `checks.mts` warns about a chain it is given, and names the parts.
+   - **Check a package that has its own scripts and that the root scripts skip, such as one with its own lockfile and lint config.** Name its scripts as `<dir>#<script>`, as in `dev-harness#tsc`. `checks.mts` runs them in that directory, and passes only the changed files under it, relative to it.
    - **Lint only the files each candidate changes, through an npm script that takes paths.** A lint of the whole tree at every commit can use up the machine's memory. For ESLint 9 the script needs `--no-warn-ignored` beside `--max-warnings 0`, because it warns about every ignored path it is given, such as a Markdown file. **Where the repository has no such script, stop and ask the user before running any check.** They may want to add one.
    - **Leave out every check that writes into `node_modules`, and list it under "Not covered".** The worktree's `node_modules` are links to the main checkout's installs, so such a check overwrites them, or fails with `EACCES`. Backstage's build is one: `backstage-cli repo build` writes generated files into `packages/app/node_modules`.
 2. Read the repository's testing guide, such as `agent-project/testing-ops.md`, for failures it says happen in a worktree. Report those as known, never as red.
@@ -91,7 +93,7 @@ Sort each build dependency by where it points, because that decides what the rep
 | Verdict | Means |
 | --- | --- |
 | `pass` | The script exits 0 |
-| `skipped` | A script after `--changed` at the base, or at a candidate that only deletes files |
+| `skipped` | A script after `--changed` at the base, or at a candidate that changes no file it would get, such as one that only deletes files or changes nothing under the script's directory |
 | `absent` | The script does not exist at that commit, so the check starts on a later branch. Not red |
 | `inherited` | Every error line also appears at the base or at the chain member below. Not this candidate's |
 | `setup gap` | Every new error is in a file that imports a path git ignores or a package missing from the linked `node_modules`. A fresh worktree lacks those, so list it under "Not covered", never as red |

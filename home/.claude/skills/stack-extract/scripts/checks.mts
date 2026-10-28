@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs npm scripts at the base and at each candidate's replay commit, and sorts each failure.
-// Usage: checks.mts <script>... [--changed <script>...]; run candidates.mts and worktree.mts open first, per ../SKILL.md.
+// Usage: checks.mts <script>... [--changed <script>...], a script in a subdirectory's package.json named <dir>#<script>; run candidates.mts and worktree.mts open first, per ../SKILL.md.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -20,6 +20,16 @@ type ExtractableReport = {
 type CheckedRef = { name: string; ref: string; start?: string; below?: string };
 
 const CHANGED_PATHS_FLAG = '--changed';
+// npm script names use ':' and '/', but not '#'.
+const DIR_SEPARATOR = '#';
+
+/** Splits `<dir>#<script>` into the package directory and the script, the directory empty for the root. */
+const parseScript = (spec: string) => {
+  const at = spec.indexOf(DIR_SEPARATOR);
+  return at < 0
+    ? { dir: '', script: spec }
+    : { dir: spec.slice(0, at), script: spec.slice(at + 1) };
+};
 
 const WORKTREE_SCRIPT = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -141,21 +151,21 @@ const hasLinkedPackage = (fromFile: string, packageName: string) => {
   }
 };
 
-/** Returns the setup gap behind a missing-module error line, if it has one. */
-const setupGapOf = (line: string) => {
+/** Returns the setup gap behind a missing-module error line, if it has one; `dir` is the package the script ran in. */
+const setupGapOf = (line: string, dir: string) => {
   const match = MISSING_MODULE.exec(line)?.groups;
   if (!match) {
     return undefined;
   }
   const { file, spec } = match;
   if (spec.startsWith('.')) {
-    const path = normalize(join(dirname(file), spec));
+    const path = normalize(join(dir, dirname(file), spec));
     return isIgnoredByGit(path)
       ? { file, gap: `${path} is ignored by git, so the worktree lacks it` }
       : undefined;
   }
   const packageName = packageNameOf(spec);
-  return hasLinkedPackage(file, packageName)
+  return hasLinkedPackage(join(dir, file), packageName)
     ? undefined
     : { file, gap: `${packageName} is missing from the linked node_modules` };
 };
@@ -168,6 +178,7 @@ const verdictOf = (
   status: number | null,
   output: string,
   inheritedErrors: Set<string>,
+  dir: string,
 ) => {
   if (/Missing script:/.test(output)) {
     return { verdict: 'absent', detail: 'the script does not exist here' };
@@ -185,7 +196,7 @@ const verdictOf = (
   if (!newErrors.length) {
     return { verdict: 'inherited', detail: withoutPosition(errors[0]) };
   }
-  const gaps = newErrors.flatMap((line) => setupGapOf(line) ?? []);
+  const gaps = newErrors.flatMap((line) => setupGapOf(line, dir) ?? []);
   const gapFiles = new Set(gaps.map(({ file }) => file));
   const unexplained = newErrors.filter((line) => {
     const file = fileOf(line);
@@ -251,6 +262,37 @@ const record = (line: string) => {
   writeFileSync(join(checksPath, 'summary.txt'), `${summary.join('\n')}\n`);
 };
 
+const scriptBodyAtBase = (dir: string, script: string) => {
+  try {
+    const packageJson = JSON.parse(
+      readGit(
+        mainCheckout,
+        'show',
+        `${report.baseSha}:${join(dir, 'package.json')}`,
+      ),
+    );
+    const body: unknown = packageJson.scripts?.[script];
+    return typeof body === 'string' ? body : undefined;
+  } catch {
+    return undefined;
+  }
+};
+// A chain stops at its first failing step, so a verdict on it says nothing about the steps after.
+for (const spec of [...wholeTreeScripts, ...changedPathScripts]) {
+  const { dir, script } = parseScript(spec);
+  const body = scriptBodyAtBase(dir, script);
+  if (!body?.includes('&&')) {
+    continue;
+  }
+  const steps = body
+    .split('&&')
+    .map((step) => step.trim().replace(/^(yarn|npm)( run)? /, ''))
+    .map((step) => (dir ? `${dir}${DIR_SEPARATOR}${step}` : step));
+  record(
+    `! ${spec} chains steps with &&, so a failing step hides the rest; name them instead: ${steps.join(' ')}`,
+  );
+}
+
 for (const { name, ref, start, below } of checkedRefs) {
   const moved = run('node', [WORKTREE_SCRIPT, 'goto', ref]);
   writeFileSync(join(checksPath, `${fileNameOf(name)}.goto.txt`), moved.output);
@@ -279,17 +321,23 @@ for (const { name, ref, start, below } of checkedRefs) {
         .split('\n')
         .filter(Boolean)
     : [];
-  for (const script of [...wholeTreeScripts, ...changedPathScripts]) {
-    const takesPaths = changedPathScripts.includes(script);
-    if (takesPaths && !changedPaths.length) {
-      record(`${name}  ${script}  skipped  no changed file to check`);
+  for (const spec of [...wholeTreeScripts, ...changedPathScripts]) {
+    const { dir, script } = parseScript(spec);
+    const takesPaths = changedPathScripts.includes(spec);
+    const pathsHere = dir
+      ? changedPaths
+          .filter((path) => path.startsWith(`${dir}/`))
+          .map((path) => path.slice(dir.length + 1))
+      : changedPaths;
+    if (takesPaths && !pathsHere.length) {
+      record(`${name}  ${spec}  skipped  no changed file to check`);
       continue;
     }
-    const batches = takesPaths ? batchesOf(changedPaths) : [[]];
+    const batches = takesPaths ? batchesOf(pathsHere) : [[]];
     const results = batches.map((paths) =>
       run('npm', [
         '--prefix',
-        worktreePath,
+        join(worktreePath, dir),
         'run',
         script,
         ...(paths.length ? ['--', ...paths] : []),
@@ -299,7 +347,7 @@ for (const { name, ref, start, below } of checkedRefs) {
       status: results.find(({ status }) => status !== 0)?.status ?? 0,
       output: results.map(({ output }) => output).join('\n'),
     };
-    const outputName = `${fileNameOf(name)}.${script.replaceAll(':', '-')}.txt`;
+    const outputName = `${fileNameOf(name)}.${spec.replaceAll(/[:#/]/g, '-')}.txt`;
     writeFileSync(join(checksPath, outputName), result.output);
     for (const line of errorLinesOf(result.output)) {
       errorsHere.add(withoutPosition(line));
@@ -312,8 +360,9 @@ for (const { name, ref, start, below } of checkedRefs) {
       result.status,
       result.output,
       inheritedErrors,
+      dir,
     );
-    record(`${name}  ${script}  ${verdict}${detail ? `  ${detail}` : ''}`);
+    record(`${name}  ${spec}  ${verdict}${detail ? `  ${detail}` : ''}`);
   }
   errorsAt.set(name, errorsHere);
 }
