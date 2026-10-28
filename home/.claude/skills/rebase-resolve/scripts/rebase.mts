@@ -74,6 +74,12 @@ const status = () => {
     `pre-rebase tip: ${readIfPresent(join(dir, 'orig-head')).trim()}`,
   );
   console.log(`stopped at:     ${done.at(-1) ?? '(nothing picked yet)'}`);
+  // A stop from the plan is a break right after stack-plan's _stop line, which printed the user's message.
+  const userStop = /\s_stop\s+'?([^']+)'?$/.exec(done.at(-2) ?? '')?.[1];
+  if (done.at(-1) === 'break' && userStop)
+    console.log(
+      `user stop:      ${userStop}, planned for the user; hand over with its message, never continue past it`,
+    );
   console.log(
     `next:           ${todo[0] ?? '(nothing left)'}  (${todo.length} commands left)`,
   );

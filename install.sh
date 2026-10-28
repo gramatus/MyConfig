@@ -198,8 +198,10 @@ git config --global rebase.updateRefs true
 git config --global rebase.missingCommitsCheck error
 git config --global rerere.enabled true
 git config --global rerere.autoupdate false
-# Carries scripts/stack-plan's target notes onto rewritten commits.
-git config --global notes.rewriteRef refs/notes/target
+# Carries scripts/stack-plan's target and stop notes onto rewritten commits; the value pattern keeps a rerun from adding duplicates.
+# The stop ref is a glob because git warns on every rewrite about a plain ref that does not exist yet.
+git config --global notes.rewriteRef refs/notes/target '^refs/notes/target$'
+git config --global notes.rewriteRef 'refs/notes/stackplan-stop*' '^refs/notes/stackplan-stop\*$'
 
 echo "############### Setup commit signing if the private key is saved to the ssh agent ###############"
 if ssh-add -L 2>/dev/null | grep -q "GitHub Signing"; then

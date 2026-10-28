@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Moves commits waiting on the current branch into stack branches, and reorders or adds those branches.
-// Usage: stack-plan export|save|preview|apply|prepare|verify|cut|sync|extract|extractable|mark|needs|mode [-b <ref>] [-n] [-f]; run without arguments for details.
+// Usage: stack-plan export|save|preview|apply|continue|prepare|verify|cut|sync|extract|extractable|mark|needs|mode [-b <ref>] [-n] [-f]; run without arguments for details.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -14,6 +14,7 @@ import {
 import { dirname, join } from 'node:path';
 
 const NOTES_REF = 'refs/notes/target';
+const STOP_NOTES_REF = 'refs/notes/stackplan-stop';
 const UNTAGGED_MARKER =
   '# ---- untagged: move each line above the update-ref of its branch ----';
 const EXPORTED_AT_PREFIX = '# exported-at: ';
@@ -23,6 +24,7 @@ const FOLDED_PREFIX = '# folded: ';
 const CUT_PREFIX = '# cut: ';
 const SYNC_PREFIX = '# sync: ';
 const FROM_COPY_PREFIX = '# from-copy: ';
+const STOPS_PREFIX = '# stops: ';
 const MOVED_MARKER = '>>> [moved]';
 const LOCAL_MARKER = '>>> [local]';
 const COPY_MARKER = '>>> [copy]';
@@ -96,7 +98,8 @@ const USAGE = [
   '  save (s)     write notes from the plan',
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
-  '  prepare      record the pre-rebase tip before a rebase run by hand',
+  '  continue (c) git rebase --continue after a stop or a conflict, then verify once the rebase is done',
+  '  prepare     record the pre-rebase tip before a rebase run by hand',
   '  verify (v)   compare the stack with the pre-rebase tip',
   '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work;',
   '               --apply then does it, and -f does it despite a finding',
@@ -127,6 +130,7 @@ const EXPANSIONS: Record<string, string[]> = {
   e: ['export'],
   s: ['save'],
   a: ['apply'],
+  c: ['continue'],
   v: ['verify'],
 };
 const FLAG_ALIASES: Record<string, string> = {
@@ -139,6 +143,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   save: ['--base', '--dry-run'],
   preview: ['--base', '--dry-run'],
   apply: ['--base', '--anyway'],
+  continue: ['--base'],
   prepare: [],
   verify: ['--base', '--dry-run'],
   cut: ['--base', '--apply', '--anyway', '--merged'],
@@ -170,7 +175,8 @@ const cutTargets: string[] = [];
 const branchesToMark: string[] = [];
 const needsArgs: string[] = [];
 const fromCopyTargets: string[] = [];
-if (command !== '_todo') {
+// Commands starting with _ are git's callbacks during a rebase, with arguments of their own.
+if (!command.startsWith('_')) {
   const allowed =
     ALLOWED_FLAGS[command] ??
     usageError(given ? `unknown command "${given}"` : undefined);
@@ -370,6 +376,55 @@ const declaredNeeds = (branch: string, branches: string[]) =>
     (need) => stackBranchNamed(need, branches) ?? [],
   );
 
+// A stop at a branch's end lives in the branch's config, so git branch -m carries it along like a need.
+const stopKey = (branch: string) => `branch.${branch}.stackStop`;
+type Stops = { branches: Map<string, string>; commits: Map<string, string> };
+const readBranchStops = (branches: string[]) =>
+  new Map(
+    branches.flatMap((branch) => {
+      const message = readConfig(stopKey(branch));
+      return message ? [[branch, message] as const] : [];
+    }),
+  );
+
+// A stop after a commit is a note, which notes.rewriteRef carries across a rebase like the placement note.
+const readCommitStops = (line: Commit[]) => {
+  const stops = new Map<string, string>();
+  const inLine = new Set(line.map((commit) => commit.sha));
+  let listing: string;
+  try {
+    listing = git('notes', `--ref=${STOP_NOTES_REF}`, 'list');
+  } catch {
+    return stops;
+  }
+  for (const row of listing.split('\n')) {
+    const sha = words(row)[1];
+    if (sha && inLine.has(sha))
+      stops.set(
+        sha,
+        git('notes', `--ref=${STOP_NOTES_REF}`, 'show', sha).trim(),
+      );
+  }
+  return stops;
+};
+
+// The stops the last apply put in its todo, as <key>~<HEAD at the stop>~<HEAD on continue>; a key is b:<branch> or c:<sha>.
+type StopRecord = { key: string; before?: string; after?: string };
+const readStopRecords = (): StopRecord[] =>
+  words(readHeader(STOPS_PREFIX) ?? '').map((token) => {
+    const [key, before, after] = token.split('~');
+    return { key, before, after };
+  });
+const writeStopRecords = (records: StopRecord[]) =>
+  writeHeader(
+    STOPS_PREFIX,
+    records
+      .map(({ key, before, after }) =>
+        [key, before, after].filter(Boolean).join('~'),
+      )
+      .join(' '),
+  );
+
 // The order save stored, while it still covers the stack; a missing branch counts only while it waits to be created.
 const desiredOrder = (current: string[]) => {
   const waiting = words(readConfig(NEW_KEY));
@@ -437,6 +492,7 @@ const recordPreRebase = (sha: string, folded: string[]) => {
   dropHeader(CUT_PREFIX);
   dropHeader(SYNC_PREFIX);
   dropHeader(FROM_COPY_PREFIX);
+  dropHeader(STOPS_PREFIX);
   logPreRebase(sha);
 };
 
@@ -943,6 +999,22 @@ const patchId = (from: string, to: string, path?: string) => {
 
 const fileList = (output: string) => output.split('\n').filter(Boolean);
 
+// What was done at each stop the rebase got past: the commits made there, the files they change, and any commit amended.
+const stopWork = (records: StopRecord[]) => {
+  const commits: string[] = [];
+  const files = new Set<string>();
+  const amendedSubjects = new Set<string>();
+  for (const { before, after } of records) {
+    if (!before || !after || before === after) continue;
+    commits.push(...fileList(gitQuiet('rev-list', `${before}..${after}`)));
+    for (const file of fileList(gitQuiet('diff', '--name-only', before, after)))
+      files.add(file);
+    if (!isAncestor(before, after))
+      amendedSubjects.add(gitQuiet('log', '-1', '--format=%s', before).trim());
+  }
+  return { commits, files, amendedSubjects };
+};
+
 // Whether from..to and onFrom..onTo make the same change; false when some file ends differently, 'unclear' when only files in baseChanged do.
 const sameNetChange = (
   label: string,
@@ -1003,9 +1075,8 @@ const sameNetChange = (
   return false;
 };
 
-// Git exits 0 when it pauses at an edit or break, and non-zero when it refuses to start, so the rebase state decides.
-const exitUnlessRebaseFinished = (status: number | null) => {
-  const inProgress = existsSync(
+const rebaseInProgress = () =>
+  existsSync(
     gitQuiet(
       'rev-parse',
       '--path-format=absolute',
@@ -1013,22 +1084,86 @@ const exitUnlessRebaseFinished = (status: number | null) => {
       'rebase-merge',
     ).trim(),
   );
+
+// Git exits 0 when it pauses at an edit or break, and non-zero when it refuses to start, so the rebase state decides.
+const exitUnlessRebaseFinished = (
+  status: number | null,
+  refused = 'the rebase did not start',
+) => {
+  const inProgress = rebaseInProgress();
   if (status !== 0 && !inProgress) {
-    bad('the rebase did not start; see the message above');
+    bad(`${refused}; see the message above`);
     process.exit(status ?? 1);
   }
   if (status !== 0) {
-    attention(
-      'the rebase stopped. Resolve it and run `git rebase --continue`, then: stack-plan verify',
-    );
+    attention('the rebase stopped. Resolve it, then: stack-plan continue');
     process.exit(status ?? 1);
   }
   if (inProgress) {
     attention(
-      'the rebase paused for an edit. When done: `git rebase --continue`, then: stack-plan verify',
+      'the rebase paused. When done: stack-plan continue, which verifies once the rebase is done',
     );
     process.exit(0);
   }
+};
+
+// Git runs no stack-plan once a rebase has paused, so this brings back the verify apply would have run.
+const continueRebase = () => {
+  if (!rebaseInProgress()) throw new Error('no rebase is in progress');
+  heading('Continue');
+  const result = spawnSync('git', ['rebase', '--continue'], {
+    stdio: 'inherit',
+  });
+  exitUnlessRebaseFinished(result.status, 'git rebase --continue failed');
+  verifyRebase();
+};
+
+// The three todo lines of a stop: git prints the message from the first, pauses at the break, and runs the last on continue.
+const stopLines = (key: string) => {
+  const self = `node ${shellQuote(realpathSync(process.argv[1]))}`;
+  return [
+    `exec ${self} _stop ${shellQuote(key)}`,
+    'break',
+    `exec ${self} _resume ${shellQuote(key)}`,
+  ];
+};
+
+const stopMessage = (key: string) =>
+  key.startsWith('b:')
+    ? readConfig(stopKey(key.slice(2)))
+    : gitSucceeds('notes', `--ref=${STOP_NOTES_REF}`, 'show', key.slice(2))
+      ? git('notes', `--ref=${STOP_NOTES_REF}`, 'show', key.slice(2)).trim()
+      : '';
+
+const recordStopHead = (key: string, when: 'before' | 'after') => {
+  const head = tipOf('HEAD');
+  writeStopRecords(
+    readStopRecords().map((record) =>
+      record.key !== key
+        ? record
+        : when === 'before'
+          ? { key, before: head }
+          : { ...record, after: head },
+    ),
+  );
+};
+
+// Runs from git's todo, with HEAD detached at the commit the stop follows.
+const stopHere = (key: string) => {
+  recordStopHead(key, 'before');
+  heading('Stop');
+  const message = stopMessage(key) || '(no message)';
+  if (key.startsWith('b:')) {
+    attention(`end of ${cyan(key.slice(2))}: ${message}`);
+    console.log(`Commits you make now land in ${cyan(key.slice(2))}.`);
+  } else {
+    const subject = git('log', '-1', '--format=%s', key.slice(2)).trim();
+    attention(`after ${yellow(key.slice(2, 12))} ${subject}: ${message}`);
+    console.log(
+      'Commits you make now come after it, and git commit --amend changes it.',
+    );
+  }
+  console.log('When done: stack-plan continue');
 };
 
 // Per branch, since a squash merge leaves only a branch's end state in the base.
@@ -3200,10 +3335,24 @@ const exportPlan = () => {
         ? listed
         : `# fold ${listed} → into ${target.sha.slice(0, 10)}`;
     });
+  const branchStops = readBranchStops([...branches, wip]);
+  const commitStops = readCommitStops(line);
+  const stopLine = (message?: string) => (message ? [`stop ${message}`] : []);
   const linesOf = (commits: Commit[], marker = '') =>
     commits
       .filter((commit) => !folding.has(commit.sha))
-      .flatMap((commit) => [pickLine(commit, marker), ...foldLines(commit)]);
+      .flatMap((commit) => [
+        pickLine(commit, marker),
+        ...foldLines(commit),
+        ...stopLine(commitStops.get(commit.sha)),
+      ]);
+  // Short mode lists no commit that stays put, so a stop after one shows as a comment, and save leaves it as it is.
+  const stopComment = (commit: Commit) =>
+    commitStops.has(commit.sha)
+      ? [
+          `# stop after ${commit.sha.slice(0, 10)} ${commit.subject}: ${commitStops.get(commit.sha)}`,
+        ]
+      : [];
   for (const commit of waiting) {
     const section = sections.get(commit.note);
     if (section) section.push(commit);
@@ -3220,16 +3369,22 @@ const exportPlan = () => {
   const lastFolded = existsSync(planPath())
     ? readHeader(FOLDED_PREFIX)
     : undefined;
+  const lastStops = existsSync(planPath())
+    ? readHeader(STOPS_PREFIX)
+    : undefined;
   const out = [
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
     ...(lastPreRebase ? [`${PRE_REBASE_PREFIX}${lastPreRebase}`] : []),
     ...(lastFolded ? [`${FOLDED_PREFIX}${lastFolded}`] : []),
+    ...(lastStops ? [`${STOPS_PREFIX}${lastStops}`] : []),
     ...(full ? [`${MODE_PREFIX}full`] : []),
     '# A pick belongs to the first update-ref below it. Picks between the last update-ref and',
     `# the untagged marker stay on ${wip}. Move picks, reorder update-refs or add one for a`,
     '# new branch, then run: stack-plan preview, then stack-plan apply',
     `# ${MOVED_MARKER} and the branch markers show what was saved at export; save ignores them.`,
+    '# stop <message> pauses the next apply there and prints the message: right above an',
+    '# update-ref or the untagged marker at the end of that branch, else after the pick above it.',
     ...(full
       ? [
           `# Full mode: every commit since ${base} is listed, and the rebase follows this order.`,
@@ -3291,7 +3446,10 @@ const exportPlan = () => {
     );
     const inBranch = full
       ? linesOf(ownCommits)
-      : ownCommits.flatMap((commit) => foldLines(commit));
+      : ownCommits.flatMap((commit) => [
+          ...foldLines(commit),
+          ...stopComment(commit),
+        ]);
     const moving = linesOf(sections.get(branch)!, `${MOVED_MARKER} `);
     if (pulls && i === stopAt) out.push(PRS_STOP_MARKER);
     out.push(
@@ -3299,6 +3457,7 @@ const exportPlan = () => {
       ...(status ? [status] : []),
       ...inBranch,
       ...moving,
+      ...stopLine(branchStops.get(branch)),
       `update-ref refs/heads/${branch}\n`,
       ...(branch === sources.at(-1) ? [OTHER_STACKS_STOP_MARKER] : []),
     );
@@ -3311,8 +3470,9 @@ const exportPlan = () => {
       `${MOVED_MARKER} `,
     ),
     ...linesOf(staying.filter((commit) => !leaving.has(commit.sha))),
+    ...stopLine(branchStops.get(wip)),
     UNTAGGED_MARKER,
-    ...linesOf(untagged),
+    ...linesOf(untagged).filter((listed) => !listed.startsWith('stop ')),
     '',
   );
 
@@ -3374,6 +3534,11 @@ const savePlan = () => {
   const folded = new Set<string>();
   let held: string[] = [];
   let pastMarker = false;
+  const branchStops = new Map<string, string>();
+  const commitStops = new Map<string, string>();
+  // The line after a stop places it: an update-ref or the marker makes it that branch's end, a pick the end of the pick above it.
+  let heldStop: { message: string; where: string; after?: Commit } | undefined;
+  let lastPick: Commit | undefined;
 
   readFileSync(planPath(), 'utf8')
     .split('\n')
@@ -3384,12 +3549,35 @@ const savePlan = () => {
         for (const sha of held) targets.set(sha, wip);
         held = [];
         pastMarker = true;
+        if (heldStop) branchStops.set(wip, heldStop.message);
+        heldStop = undefined;
         return;
       }
       if (!line || line.startsWith('#')) return;
       const fields = line.split(/\s+/);
       const amends = /^(?:fixup|f)$/.test(fields[0]) && fields[1] === '-C';
       const [verb, arg = ''] = amends ? [fields[0], fields[2]] : fields;
+      if (verb === 'stop') {
+        const message = line.slice(verb.length).trim();
+        if (pastMarker) errors.push(`${where}: stop below the untagged marker`);
+        else if (!message)
+          errors.push(
+            `${where}: stop needs a message, such as: stop run yarn install`,
+          );
+        // Two stops in one place are one pause, as export writes a commit's stop and its branch's back to back.
+        else if (heldStop) heldStop.message += `; ${message}`;
+        else heldStop = { message, where, after: lastPick };
+        return;
+      }
+      if (heldStop && verb !== 'update-ref') {
+        if (heldStop.after)
+          commitStops.set(heldStop.after.sha, heldStop.message);
+        else
+          errors.push(
+            `${heldStop.where}: a stop needs a pick above it in its branch, or an update-ref right below it`,
+          );
+        heldStop = undefined;
+      }
       if (verb === 'update-ref') {
         if (pastMarker)
           errors.push(`${where}: update-ref below the untagged marker`);
@@ -3398,6 +3586,9 @@ const savePlan = () => {
         steps.push({ updateRef: branch });
         for (const sha of held) targets.set(sha, branch);
         held = [];
+        if (heldStop) branchStops.set(branch, heldStop.message);
+        heldStop = undefined;
+        lastPick = undefined;
       } else if (Object.hasOwn(VERBS, verb)) {
         const kind = amends ? 'amend' : VERBS[verb];
         const commit = listable.find((candidate) =>
@@ -3434,13 +3625,14 @@ const savePlan = () => {
         else {
           listed.add(commit.sha);
           steps.push({ pick: commit, verb: kind });
+          if (kind === 'pick') lastPick = commit;
           if (kind !== 'pick') folded.add(commit.sha);
           if (pastMarker) targets.set(commit.sha, undefined);
           else held.push(commit.sha);
         }
       } else
         errors.push(
-          `${where}: expected pick, fixup, fixup -C, squash or update-ref, got "${verb}"`,
+          `${where}: expected pick, fixup, fixup -C, squash, stop or update-ref, got "${verb}"`,
         );
     });
 
@@ -3563,6 +3755,46 @@ const savePlan = () => {
     );
   }
 
+  // The file holds every branch's stop, but only the listed commits'; a commit stop on any other commit stays as it is.
+  const storedBranchStops = readBranchStops([...updateRefs, wip]);
+  const storedCommitStops = readCommitStops(history);
+  let stopsChanged = 0;
+  for (const branch of [...updateRefs, wip]) {
+    const wanted = branchStops.get(branch) ?? '';
+    if (wanted === (storedBranchStops.get(branch) ?? '')) continue;
+    stopsChanged++;
+    console.log(
+      `${yellow(wanted ? 'stop' : 'unstop')}  end of ${cyan(branch)}${wanted ? `: ${wanted}` : ''}`,
+    );
+    if (dryRun) continue;
+    if (wanted) git('config', stopKey(branch), wanted);
+    else git('config', '--unset', stopKey(branch));
+  }
+  for (const commit of history.filter((candidate) =>
+    listed.has(candidate.sha),
+  )) {
+    const wanted = commitStops.get(commit.sha) ?? '';
+    if (wanted === (storedCommitStops.get(commit.sha) ?? '')) continue;
+    stopsChanged++;
+    console.log(
+      `${yellow(wanted ? 'stop' : 'unstop')}  after${commitLine(commit)}${wanted ? `: ${wanted}` : ''}`,
+    );
+    if (dryRun) continue;
+    if (wanted)
+      git(
+        'notes',
+        `--ref=${STOP_NOTES_REF}`,
+        'add',
+        '-f',
+        '-m',
+        wanted,
+        commit.sha,
+      );
+    else git('notes', `--ref=${STOP_NOTES_REF}`, 'remove', commit.sha);
+  }
+  if (stopsChanged)
+    good(`${stopsChanged} stops ${dryRun ? 'would change' : 'changed'}`);
+
   const unplaced = pending.filter(
     (commit) => addedSinceExport.has(commit.sha) && !listed.has(commit.sha),
   );
@@ -3589,10 +3821,31 @@ const savePlan = () => {
     while (folds(steps[at + 1])) at++;
     steps.splice(at + 1, 0, { pick, verb: fold.verb });
   }
-  return { targets, order: updateRefs, steps: full ? steps : undefined };
+  return {
+    targets,
+    order: updateRefs,
+    steps: full ? steps : undefined,
+    stops: { branches: branchStops, commits: commitStops, listed },
+  };
 };
 
 type Planned = ReturnType<typeof savePlan>;
+
+// A dry-run save writes no stops, so the plan's stand in for the stored ones wherever the file lists them.
+const stopsFor = (
+  line: Commit[],
+  branches: string[],
+  planned?: Planned,
+): Stops => {
+  const commits = readCommitStops(line);
+  if (!planned) return { branches: readBranchStops(branches), commits };
+  for (const sha of planned.stops.listed) {
+    const message = planned.stops.commits.get(sha);
+    if (message) commits.set(sha, message);
+    else commits.delete(sha);
+  }
+  return { branches: planned.stops.branches, commits };
+};
 
 // A pure reorder keeps the tip's tree and every patch, so any difference here is worth reading.
 const verifyRebase = () => {
@@ -3633,7 +3886,16 @@ const verifyRebase = () => {
   const statArgs = ['diff', '--stat', recorded, wip];
   const entries = splitRangeDiff(gitQuiet(...rangeArgs));
   const treeMayChange = baseMoved || Boolean(taken);
-  const stat = treeMayChange ? '' : gitQuiet(...statArgs).trimEnd();
+  const atStops = stopWork(readStopRecords());
+  // Work done at a stop changes the tree on purpose, so only a file no stop touched still counts as a difference.
+  const differing =
+    treeMayChange || !atStops.files.size
+      ? []
+      : fileList(gitQuiet('diff', '--name-only', recorded, wip));
+  const explainedByStops =
+    differing.length > 0 && differing.every((file) => atStops.files.has(file));
+  const stat =
+    treeMayChange || explainedByStops ? '' : gitQuiet(...statArgs).trimEnd();
   // range-diff pairs a fold's commits unpredictably, so every entry from a planned fold is set apart instead.
   const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) =>
     pair.split('>'),
@@ -3706,6 +3968,15 @@ const verifyRebase = () => {
         entry.kind = 'copy';
   }
 
+  for (const entry of entries) {
+    const madeAtStop =
+      ['!', '>'].includes(entry.kind) &&
+      atStops.commits.some((sha) => sha.startsWith(entry.newSha));
+    const amendedAtStop =
+      entry.kind === '<' && atStops.amendedSubjects.has(entry.subject);
+    if (madeAtStop || amendedAtStop) entry.kind = 'stop';
+  }
+
   const worthReading = entries.filter((entry) =>
     ['!', '<', '>'].includes(entry.kind),
   );
@@ -3732,7 +4003,8 @@ const verifyRebase = () => {
   const copyCount = count('copy')
     ? ` · ${count('copy')} from the extracted copies`
     : '';
-  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}${originCount}${copyCount}`;
+  const stopCount = count('stop') ? ` · ${count('stop')} made at stops` : '';
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}${originCount}${copyCount}${stopCount}`;
   if (count('<') || count('>')) bad(`${summary}; read the entries above`);
   else if (count('!')) attention(`${summary}; read the changed entries above`);
   else good(summary);
@@ -3776,6 +4048,13 @@ const verifyRebase = () => {
       `\nTaken from the extracted copies, or replaced by their version:`,
     );
     for (const entry of copyEntries) console.log(entry.lines[0]);
+  }
+  const stopEntries = entries.filter((entry) => entry.kind === 'stop');
+  if (stopEntries.length) {
+    console.log(
+      `\nMade or amended at a stop, so expected; the tree check below allows only the files they change:`,
+    );
+    for (const entry of stopEntries) console.log(entry.lines[0]);
   }
   const droppedOrAdded = entries.filter(
     (entry) => entry.kind === '<' || entry.kind === '>',
@@ -3833,11 +4112,42 @@ const verifyRebase = () => {
     );
   }
   if (treeOk && !droppedOrAdded.length) tidyAfterRebase(wip, cutBranches);
-  if (!stat && !treeMayChange) good(`tree matches the pre-rebase tip ${short}`);
+  if (explainedByStops)
+    good(
+      `tree matches the pre-rebase tip ${short}, apart from files changed at stops: ${differing.join(', ')}`,
+    );
+  else if (!stat && !treeMayChange)
+    good(`tree matches the pre-rebase tip ${short}`);
+};
+
+// A stop is one-shot: once the rebase got past it, it goes, along with the copies of its note the rebase made.
+const clearReachedStops = () => {
+  let cleared = 0;
+  for (const { key, before, after } of readStopRecords()) {
+    if (!before || !after) continue;
+    const name = key.slice(2);
+    if (key.startsWith('b:')) {
+      if (!readConfig(stopKey(name))) continue;
+      if (!dryRun) git('config', '--unset', stopKey(name));
+    } else {
+      const holders = [...new Set([before, after])].filter((sha) =>
+        gitSucceeds('notes', `--ref=${STOP_NOTES_REF}`, 'show', sha),
+      );
+      if (!holders.length) continue;
+      if (!dryRun)
+        git('notes', `--ref=${STOP_NOTES_REF}`, 'remove', ...holders);
+    }
+    cleared++;
+  }
+  if (cleared)
+    good(
+      `${cleared} stops ${dryRun ? 'would be cleared' : 'cleared'}, each one passed in this rebase`,
+    );
 };
 
 // Runs once verify has passed, so the plan's bookkeeping catches up with what the rebase did.
 const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
+  clearReachedStops();
   const order = words(readConfig(ORDER_KEY));
   if (cutBranches.some((branch) => order.includes(branch))) {
     if (!dryRun)
@@ -3901,7 +4211,8 @@ type Entry = {
     | 'folded'
     | 'landed'
     | 'origin'
-    | 'copy';
+    | 'copy'
+    | 'stop';
   oldSha: string;
   newSha: string;
   subject: string;
@@ -3955,16 +4266,40 @@ const onlyContextDiffers = (body: string[]) => {
   return true;
 };
 
-type Rebase = { todo: string[]; sequence: Replay[]; rebaseBase: string };
+type Rebase = {
+  todo: string[];
+  sequence: Replay[];
+  rebaseBase: string;
+  stops: string[];
+};
 
 const newTodo = () => {
   const todo: string[] = [];
   const sequence: Replay[] = [];
+  const stops: string[] = [];
   const pick = (commit: Commit, marker = '', verb: Verb = 'pick') => {
     todo.push(`${todoVerb(verb)} ${commit.sha} ${marker}${commit.subject}`);
     sequence.push({ commit, fold: verb !== 'pick' });
   };
-  return { todo, sequence, pick };
+  const stop = (key: string) => {
+    todo.push(...stopLines(key));
+    stops.push(key);
+  };
+  return { todo, sequence, pick, stops, stop };
+};
+
+const printStops = (stops: Stops, keys: string[], line: Commit[]) => {
+  for (const key of keys) {
+    const name = key.slice(2);
+    if (key.startsWith('b:'))
+      console.log(
+        `${yellow('stop')}  end of ${cyan(name)}: ${stops.branches.get(name)}`,
+      );
+    else
+      console.log(
+        `${yellow('stop')}  after${commitLine(line.find((commit) => commit.sha === name)!)}: ${stops.commits.get(name)}`,
+      );
+  }
 };
 
 const branchMarker = (branch: string, branches: string[], order: string[]) => {
@@ -4007,10 +4342,21 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   const foldsLandIn = [...folding.values()].map(({ into }) =>
     moved.has(into.sha) ? into.note : (branchOf.get(into.sha) ?? wip),
   );
+  const stops = stopsFor(line, [...order, wip], planned);
+  // A stop needs its branch in the todo, so it counts as a change to that branch.
+  const stopsLandIn = [
+    ...stops.branches.keys(),
+    ...[...stops.commits.keys()].flatMap((sha) => {
+      const commit = line.find((candidate) => candidate.sha === sha);
+      if (!commit || folding.has(sha)) return [];
+      return moved.has(sha) ? [commit.note] : [branchOf.get(sha) ?? wip];
+    }),
+  ];
   const changes = (branch: string) =>
     moves.some((commit) => commit.note === branch) ||
     leaving.some((commit) => branchOf.get(commit.sha) === branch) ||
-    foldsLandIn.includes(branch);
+    foldsLandIn.includes(branch) ||
+    stopsLandIn.includes(branch);
   let first = 0;
   while (
     first < order.length &&
@@ -4019,7 +4365,11 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   )
     first++;
   warnUnmatched(unmatched);
-  if (first === order.length && !foldsLandIn.includes(wip)) {
+  if (
+    first === order.length &&
+    !foldsLandIn.includes(wip) &&
+    !stopsLandIn.includes(wip)
+  ) {
     good(
       `no tagged commits waiting on ${wip} and no change to the stack order; nothing to move`,
     );
@@ -4035,11 +4385,12 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
     `${bold('base')}  ${first === 0 ? forkLabel(rebaseBase) : cyan(rebaseBase)}`,
   );
 
-  const { todo, sequence, pick } = newTodo();
+  const { todo, sequence, pick, stops: stopKeys, stop } = newTodo();
   const pickWithFolds = (commit: Commit, marker = '') => {
     pick(commit, marker);
     for (const fold of foldsInto(commit))
       pick(fold, '', folding.get(fold.sha)!.verb);
+    if (stops.commits.has(commit.sha)) stop(`c:${commit.sha}`);
   };
   const unfolded = (commits: Commit[]) =>
     commits.filter((commit) => !folding.has(commit.sha));
@@ -4052,6 +4403,7 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
       pickWithFolds(commit);
     for (const commit of moves.filter((move) => move.note === branch))
       pickWithFolds(commit, `${MOVED_MARKER} `);
+    if (stops.branches.has(branch)) stop(`b:${branch}`);
     todo.push(`update-ref refs/heads/${branch}`, '');
   }
   for (const commit of toWip) pickWithFolds(commit, `${MOVED_MARKER} `);
@@ -4059,7 +4411,9 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
     (commit) => !moved.has(commit.sha),
   ))
     pickWithFolds(commit);
-  return { todo, sequence, rebaseBase };
+  if (stops.branches.has(wip)) stop(`b:${wip}`);
+  printStops(stops, stopKeys, line);
+  return { todo, sequence, rebaseBase, stops: stopKeys };
 };
 
 // Full mode: the plan's own steps are the todo, from the last commit where they still match history.
@@ -4080,6 +4434,30 @@ const fullRebase = (
       : 'updateRef' in b && a.updateRef === b.updateRef);
   let kept = 0;
   while (kept < steps.length && same(steps[kept], current[kept])) kept++;
+  // A stop sits in the todo after a pick, so the rebase starts at the last pick before it at the latest.
+  const stops = stopsFor(line, [...planned.order, wip], planned);
+  const isPickOf = (step: Step, sha?: string) =>
+    'pick' in step && step.verb === 'pick' && (!sha || step.pick.sha === sha);
+  const stopAt = [
+    ...[...stops.branches.keys()].map((branch) =>
+      branch === wip
+        ? steps.length
+        : steps.findIndex(
+            (step) => 'updateRef' in step && step.updateRef === branch,
+          ),
+    ),
+    ...[...stops.commits.keys()].map((sha) =>
+      steps.findIndex((step) => isPickOf(step, sha)),
+    ),
+  ].filter((at) => at >= 0);
+  for (const at of stopAt)
+    kept = Math.min(
+      kept,
+      Math.max(
+        0,
+        steps.slice(0, at + 1).findLastIndex((step) => isPickOf(step)),
+      ),
+    );
   // A fold needs the commit it folds into inside the todo, so the rebase starts below that commit.
   while (kept > 0 && folds(steps[kept])) kept--;
   if (kept === steps.length && kept === current.length) {
@@ -4117,21 +4495,35 @@ const fullRebase = (
     `${bold('base')}  ${lastCommit ? commitLine(lastCommit).trim() : forkLabel(rebaseBase)}`,
   );
 
-  const { todo, sequence, pick } = newTodo();
+  const { todo, sequence, pick, stops: stopKeys, stop } = newTodo();
+  // A commit's stop waits for its folds, so it goes in before the next pick or update-ref.
+  let stopAfter: string | undefined;
+  const placeStop = () => {
+    if (stopAfter) stop(`c:${stopAfter}`);
+    stopAfter = undefined;
+  };
   let sectionStart = 0;
   for (const step of steps.slice(kept)) {
     if ('pick' in step) {
+      if (step.verb === 'pick') placeStop();
       const movesBranch =
         step.verb === 'pick' && was(step.pick) !== goes(step.pick);
       pick(step.pick, movesBranch ? `${MOVED_MARKER} ` : '', step.verb);
+      if (step.verb === 'pick' && stops.commits.has(step.pick.sha))
+        stopAfter = step.pick.sha;
       continue;
     }
+    placeStop();
+    if (stops.branches.has(step.updateRef)) stop(`b:${step.updateRef}`);
     const marker = branchMarker(step.updateRef, branches, order);
     if (marker) todo.splice(sectionStart, 0, marker);
     todo.push(`update-ref refs/heads/${step.updateRef}`, '');
     sectionStart = todo.length;
   }
-  return { todo, sequence, rebaseBase };
+  placeStop();
+  if (stops.branches.has(wip)) stop(`b:${wip}`);
+  printStops(stops, stopKeys, line);
+  return { todo, sequence, rebaseBase, stops: stopKeys };
 };
 
 const applyStack = (planned?: Planned, preview = dryRun) => {
@@ -4184,6 +4576,8 @@ const applyStack = (planned?: Planned, preview = dryRun) => {
       );
   });
   recordPreRebase(tipOf(wip), folded);
+  if (rebase.stops.length)
+    writeStopRecords(rebase.stops.map((key) => ({ key })));
   runRebase(todo, ['rebase', '-i', '--update-refs', rebaseBase]);
 };
 
@@ -4325,7 +4719,8 @@ try {
       applyStack(dryRun || planned.steps ? planned : undefined, true);
     else if (command === 'apply')
       applyStack(planned.steps ? planned : undefined);
-  } else if (command === 'verify') verifyRebase();
+  } else if (command === 'continue') continueRebase();
+  else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
   else if (command === 'cut' && rest.includes('--merged'))
@@ -4342,6 +4737,8 @@ try {
   else if (command === 'unmark') unmarkBranches(branchesToMark);
   else if (command === 'needs') declareNeeds(needsArgs);
   else if (command === '_todo') editTodo(args[0]);
+  else if (command === '_stop') stopHere(args[0]);
+  else if (command === '_resume') recordStopHead(args[0], 'after');
 } catch (error) {
   console.error(redErr(`✗ ${(error as Error).message}`));
   process.exit(1);

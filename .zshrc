@@ -166,6 +166,7 @@ _stack_plan() {
         'save:write notes from the plan'
         'preview:save, then preview the rebase'
         'apply:save, then rebase the stack'
+        'continue:git rebase --continue after a stop or a conflict, then verify once done'
         'prepare:record the pre-rebase tip before a rebase run by hand'
         'verify:compare the stack with the pre-rebase tip'
         'cut:check that cutting the stack at a branch loses no work'

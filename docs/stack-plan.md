@@ -12,6 +12,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp save` | Saves the file as notes on the commits. Add `-n` to see what it will do. |
 | `sp preview` | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either. |
 | `sp apply` | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
+| `sp continue` | Runs `git rebase --continue` after a stop or a conflict, then `verify` once the rebase is done. |
 | `sp prepare` | Records the pre-rebase tip, so `verify` works after a rebase you run by hand. |
 | `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
@@ -28,9 +29,11 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 
 To move a commit that sits in the wrong stack branch, add a `pick` line for it above the right branch's `update-ref`. In full mode its line is already there, so move that line instead.
 
+To have the next `apply` pause somewhere with a reminder, add a `stop <message>` line there. Right above a branch's `update-ref`, it pauses at the end of that branch. "Stops" under step 2 has the rest.
+
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
 
-`e`, `s`, `a` and `v` are short for `export`, `save`, `apply` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored. `--verbose` fits every command.
+`e`, `s`, `a`, `c` and `v` are short for `export`, `save`, `apply`, `continue` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored. `--verbose` fits every command.
 
 ## The problem it solves
 
@@ -42,7 +45,7 @@ Notes rather than a `Target:` trailer in the commit message, because a note sits
 
 `install.sh` sets these globally. Each one matters for a reason the script cannot show:
 
-- `notes.rewriteRef refs/notes/target` — git copies a note onto the rewritten commit on rebase and amend only for refs named here. Without it, every rebase leaves the notes behind on the old SHAs, and the plan is lost the first time something below the commit moves.
+- `notes.rewriteRef refs/notes/target` and `notes.rewriteRef 'refs/notes/stackplan-stop*'` — git copies a note onto the rewritten commit on rebase and amend only for refs named here. Without the first, every rebase leaves the notes behind on the old SHAs, and the plan is lost the first time something below the commit moves. Without the second, a stop after a commit is lost the same way. The second is a glob because git warns on every rebase about a plain ref name that does not exist yet, and the stop ref exists only once a stop has been saved.
 - `rebase.updateRefs true` — the rebase todo gets an `update-ref` line per stacked branch, and the plan file borrows that shape.
 - `rebase.missingCommitsCheck error` — a todo that leaves a commit out stops the rebase instead of dropping the commit.
 - `rerere.enabled true` and `rerere.autoupdate false` — a conflict resolved once is replayed into the file on the next attempt, but left unstaged, so the rebase still stops and the replay gets a look before `git add`. A wrong replay is the risk, and step 4 says how to undo one. `stack-plan verify` below catches one that slipped through, for a rebase that only moves commits.
@@ -134,6 +137,41 @@ In short mode the plan file shows a folding commit only as a comment under its t
 
 Only `preview` and `apply` fold. `cut`, `sync` and `extract` replay a folding commit as it is.
 
+#### Stops
+
+A `stop <message>` line makes the next `apply` pause there and print the message, in either mode. Use it for work that has to happen at one place in the stack, such as a `yarn install` whose lockfile change belongs in a lower branch:
+
+```text
+pick 1a2b3c4d5e feat(vending): add the vending-react plugin
+stop run yarn install and commit yarn.lock
+update-ref refs/heads/feat/alz-vending-part1
+```
+
+The line after the stop decides where it goes:
+
+- Right above an `update-ref`, it stops at the end of that branch. A commit made at the stop lands in that branch, because the branch is moved to wherever HEAD stands when the rebase reaches its `update-ref`.
+- Right above the untagged marker, it stops at the end of the wip branch.
+- Anywhere else, it stops after the pick above it, and after any commits that fold into that pick. That is git's `edit`: `git commit --amend` changes the commit, and a new commit follows it in the same branch.
+- Two stops in a row are one stop, with the messages joined. `save` refuses a stop below the marker, a stop with no message, and a stop with no pick above it in its branch.
+
+`save` stores the stops outside the file, so `export` writes them back. A stop at a branch's end is the git config key `branch.<name>.stackStop`, which `git branch -m` moves along, as it does for `needs`. A stop after a commit is a note in `refs/notes/stackplan-stop`, which follows the commit across rebases like its placement note. Deleting a `stop` line and saving removes the stop. In short mode, a stop after a commit that stays in its branch has no `pick` line to follow. Export shows it as a `# stop after` comment, and `save` leaves it as it is. Switch to full mode to change or remove it.
+
+A stop counts as a change to its branch, so the rebase starts low enough to reach it. In full mode it starts at the pick before the stop at the latest. `preview` lists the stops, and its replay runs straight through them.
+
+`apply` writes each stop into git's todo as three lines:
+
+```text
+exec node …/stack-plan.mts _stop b:feat/alz-vending-part1
+break
+exec node …/stack-plan.mts _resume b:feat/alz-vending-part1
+```
+
+Git runs the first `exec` when the rebase reaches the stop, whoever ran the rebase or the last `--continue`. It prints the message and records HEAD in the plan's `# stops:` line. The `break` pauses the rebase. On `stack-plan continue`, or a plain `git rebase --continue`, the second `exec` records HEAD again, so `verify` knows what was done at the stop. A plan can hold any number of stops, and the rebase pauses at each one in turn.
+
+Git records no rewrite for a commit amended at a `break`, so the amended commit loses its placement note. That only shows for a commit staying on wip, which the next export lists as untagged again.
+
+A stop is one-shot. Once a rebase has got past it and `verify` passes, `verify` removes it. An aborted rebase keeps it for the next `apply`. `cut`, `sync` and `extract` build their own todos and ignore stops.
+
 ### 3. Save
 
 ```shell
@@ -166,7 +204,7 @@ The rebase reads the notes and the saved order, not `stackplan.txt`, so what `sa
 
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. When that is the lowest branch of the stack, the base is the commit where the stack leaves `--base` (`origin/main`), and the preview shows that commit. Moving the bottom branch therefore rebases the whole stack, but keeps it where it was on `origin/main`. Moving the stack onto newer `origin/main` commits is the work of `cut` and `sync`.
 
-If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. The `pre-rebase:` line already holds the new tip by then, because `apply` and `cut` record it before git runs, and that is intended: once you have run either, the tip before an earlier rebase is no longer the one to verify against. When a pick conflicts, the rebase stops as usual: resolve it, `git rebase --continue`, then run `stack-plan verify` yourself. The same goes for an `edit` or `break` you add while reviewing the todo. Git exits 0 at that pause, so stack-plan checks for a rebase still in progress and stops there instead of verifying.
+If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. The `pre-rebase:` line already holds the new tip by then, because `apply` and `cut` record it before git runs, and that is intended: once you have run either, the tip before an earlier rebase is no longer the one to verify against. When a pick conflicts, the rebase stops as usual: resolve it, then run `stack-plan continue`. That runs `git rebase --continue`, and `verify` once the rebase is done, as `apply` would have. The same goes for a stop from the plan, and for an `edit` or `break` you add while reviewing the todo. Git exits 0 at such a pause, so stack-plan checks for a rebase still in progress and stops there instead of verifying. A plain `git rebase --continue` works too, but then nothing runs `verify` at the end, so run it yourself. Git moves the stack branches only after the last line of the todo, which is why `verify` cannot run as a final `exec` line.
 
 #### When rerere replays the wrong resolution
 
@@ -212,9 +250,11 @@ That is `restore` rather than `git checkout <sha> .`, because `checkout` only wr
 
 The summary line starts with `✓` when no change differs, `!` when some did and are worth reading, and `✗` when a commit was dropped or added. After a clean reorder it reads `0 changed · 0 dropped · 0 added`. In a terminal the entries keep git's own range-diff colours.
 
+Work done at a stop is expected, so `verify` sets it apart. It reads the two HEADs each stop recorded in the `# stops:` line. A commit made between them is counted as `made at stops` rather than as added. An amended commit's old version is counted there too, rather than as dropped. The tree may then differ from the pre-rebase tip, but only in files changed at a stop, and the tree verdict names them. A file changed at a stop and also changed wrongly elsewhere passes this check, so read the stop's commits in the range-diff.
+
 Reading a printed entry: the body has two marker columns. The first compares the two versions of the patch (`-` only in the old, `+` only in the new). The second is the patch's own `+`, `-` or context space. A first-column `+` or `-` followed by a space is a context line that moved. A first-column marker followed by `+` or `-` is the commit's actual change differing, and that is the line to read.
 
-When the tree matches and nothing was dropped or added, `verify` removes the notes from every commit that has landed in the branch its note names, in one `git notes remove`, and then prints the tree verdict as its last line. Commits still waiting on the wip branch keep theirs. So does a stack commit whose move has not run yet, which is why a `cut` or `sync` between `save` and `apply` keeps it. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
+When the tree matches and nothing was dropped or added, `verify` removes each stop the rebase got past, and the copies of its note the rebase made. It also removes the notes from every commit that has landed in the branch its note names, in one `git notes remove`, and then prints the tree verdict as its last line. Commits still waiting on the wip branch keep theirs. So does a stack commit whose move has not run yet, which is why a `cut` or `sync` between `save` and `apply` keeps it. The pre-rebase commits keep their own copies too, so resetting to a SHA from `stackplan-rebases.log` loses no placement. `verify --dry-run` only counts the notes it would remove.
 
 ### 6. Cut the stack once its bottom has landed
 
@@ -363,4 +403,5 @@ Given `__` branches, `cut` drops only those, wherever they sit, rather than ever
 - The rebase log: `stackplan-rebases.log` beside the plan, one `[yymmdd hhmm] <sha>` line per rebase `stack-plan apply` ran, newest first. Each SHA is the wip tip from before that rebase, the one to hand `git restore --source=` to go back.
 - The notes: `refs/notes/target`, shared across worktrees. Notes stay local, because the default push refspec leaves `refs/notes/*` out.
 - The stack order: `stackplan.order` and, while a branch waits to be created, `stackplan.new`, in the repository's git config.
+- The stops: `branch.<name>.stackStop` in the repository's git config for a stop at a branch's end, and `refs/notes/stackplan-stop` for a stop after a commit.
 - The script: [`scripts/stack-plan.mts`](../scripts/stack-plan.mts), with `scripts/stack-plan` linking to it.

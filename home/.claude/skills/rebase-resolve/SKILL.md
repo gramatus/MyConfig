@@ -54,6 +54,8 @@ Where the plan changes, usually by the user's own edit of stackplan.txt, run `pr
 
 ## At each stop
 
+**Where `status` shows a `user stop:` line, the plan stops there for the user, not for a conflict.** Stop the run and report the message `stack-plan` printed above the status, with the stop's place. Never run `continue` past one. The user does the work it names, then runs `stack-plan continue` themselves.
+
 1. Read `status`. The commit being picked decides what the resolution must hold.
 2. **Resolve so the file holds that commit's change applied to the code at this position.** At a lower position, keep the older shapes the commit was written against, such as a function's earlier signature. The later commits bring their own parts back when they replay. Where a later commit's replay conflicts with lines you added, keep both changes.
 3. **Copy any line you bring in exactly as the pre-rebase tip has it**, so later picks merge cleanly. `git grep -n <symbol> <pre-rebase tip> -- <file>` shows the spelling.
