@@ -1684,9 +1684,11 @@ const syncStack = (apply: boolean) => {
   });
   if (!landed.picked.length && !landed.leftOut.length)
     good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed`);
-  if (onBase && !cut.length && !droppedSources.length)
+  // With nothing on origin, a newer base is still worth moving onto.
+  const baseMoved = onBase && onto !== fork;
+  if (onBase && !baseMoved && !cut.length && !droppedSources.length)
     throw new Error(
-      'no stack branch is on origin, and none has merged; nothing to sync with',
+      `no stack branch is on origin, none has merged, and the stack already sits on ${base}; nothing to sync`,
     );
 
   const originRange = topRemote ? `${onto}..${topRemote}` : undefined;
@@ -1810,7 +1812,7 @@ const syncStack = (apply: boolean) => {
       good(`origin's stack merges into ${base} without conflicts`);
   }
 
-  if (!cut.length && !dropped.length && !newFromOrigin) {
+  if (!baseMoved && !cut.length && !dropped.length && !newFromOrigin) {
     console.log('');
     good('the stack is already in line with origin; nothing to sync');
     return;
