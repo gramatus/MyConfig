@@ -22,8 +22,10 @@ const MODE_PREFIX = '# mode: ';
 const FOLDED_PREFIX = '# folded: ';
 const CUT_PREFIX = '# cut: ';
 const SYNC_PREFIX = '# sync: ';
+const FROM_COPY_PREFIX = '# from-copy: ';
 const MOVED_MARKER = '>>> [moved]';
 const LOCAL_MARKER = '>>> [local]';
+const COPY_MARKER = '>>> [copy]';
 const MOVED_BRANCH_MARKER = '>>> [moved branch]';
 const NEW_BRANCH_MARKER = '>>> [new branch]';
 const PRS_STOP_MARKER = '# --- PRs stop here ---';
@@ -106,6 +108,8 @@ const USAGE = [
   '               it fetches and prunes origin first, unless --no-fetch',
   '  extract      check copying each __ branch onto the branch named without the prefix, off the stack;',
   '               --apply then moves those branches, and -f moves the clean ones despite a finding',
+  "  extract --from-copy <__branch>...  check rewriting each named __ branch to take its copy's commits instead;",
+  '               --apply then rebases the stack, and -f does it despite a finding',
   '  extractable  list the branches above the PRs that could become __ branches, as far as the text shows;',
   "               --json prints each chain with every member's start and replay commits",
   '  mark <branch>...  rename each to its __ name, carrying its notes and the saved order along, and export the plan',
@@ -137,7 +141,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   verify: ['--base', '--dry-run'],
   cut: ['--base', '--apply', '--anyway', '--merged'],
   sync: ['--base', '--apply', '--anyway', '--no-fetch'],
-  extract: ['--base', '--apply', '--anyway'],
+  extract: ['--base', '--apply', '--anyway', '--from-copy'],
   extractable: ['--base', '--json'],
   mark: ['--base', '--dry-run'],
   unmark: ['--base', '--dry-run'],
@@ -163,6 +167,7 @@ const usageError = (message?: string): never => {
 const cutTargets: string[] = [];
 const branchesToMark: string[] = [];
 const needsArgs: string[] = [];
+const fromCopyTargets: string[] = [];
 if (command !== '_todo') {
   const allowed =
     ALLOWED_FLAGS[command] ??
@@ -178,6 +183,8 @@ if (command !== '_todo') {
       branchesToMark.push(rest[i]);
     else if (command === 'needs' && !rest[i].startsWith('-'))
       needsArgs.push(rest[i]);
+    else if (command === 'extract' && !rest[i].startsWith('-'))
+      fromCopyTargets.push(rest[i]);
     else if (!allowed.includes(rest[i]))
       usageError(`${rest[i]} does not apply to ${given}`);
   }
@@ -201,6 +208,11 @@ if (command !== '_todo') {
     usageError('unmark needs the __ branches to unmark');
   if (command === 'needs' && !needsArgs.length)
     usageError('needs takes the branch whose needs to record or show');
+  const fromCopy = command === 'extract' && rest.includes('--from-copy');
+  if (fromCopy && !fromCopyTargets.length)
+    usageError('--from-copy needs the __ branches to take from their copies');
+  if (!fromCopy && fromCopyTargets.length)
+    usageError('extract takes branch names only with --from-copy');
 }
 
 const optionValue = (name: string) => {
@@ -414,6 +426,7 @@ const recordPreRebase = (sha: string, folded: string[]) => {
   else dropHeader(FOLDED_PREFIX);
   dropHeader(CUT_PREFIX);
   dropHeader(SYNC_PREFIX);
+  dropHeader(FROM_COPY_PREFIX);
   logPreRebase(sha);
 };
 
@@ -2299,6 +2312,314 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     );
 };
 
+type TakenBranch = {
+  name: string;
+  oldTip: string;
+  copyFork?: string;
+  copyTip?: string;
+};
+type TakenRecord = { start: string; branches: TakenBranch[] };
+
+// ':' cannot appear in a ref name, so it separates a branch from its SHAs.
+const takenRecordLine = ({ start, branches }: TakenRecord) =>
+  [
+    start,
+    ...branches.map(({ name, oldTip, copyFork, copyTip }) =>
+      [name, oldTip, ...(copyFork && copyTip ? [copyFork, copyTip] : [])].join(
+        ':',
+      ),
+    ),
+  ].join(' ');
+
+const parseTakenRecord = (line: string): TakenRecord => {
+  const [start, ...entries] = words(line);
+  return {
+    start,
+    branches: entries.map((entry) => {
+      const [name, oldTip, copyFork, copyTip] = entry.split(':');
+      return { name, oldTip, copyFork, copyTip };
+    }),
+  };
+};
+
+const filesOfCommit = (sha: string) =>
+  fileList(
+    gitQuiet('diff-tree', '-r', '--root', '--no-commit-id', '--name-only', sha),
+  );
+
+/** Checks that each taken branch ends with its copy's net change, and every other branch and wip with its old one. */
+const sameAsCopiesAndBefore = (
+  taken: TakenRecord,
+  newTipOf: (branch: string) => string,
+  oldWipTip: string,
+  newWipTip: string,
+  wip: string,
+) => {
+  const results: (boolean | 'unclear')[] = [];
+  const takenFiles = new Set<string>();
+  let oldBelow = taken.start;
+  let newBelow = taken.start;
+  let top: { oldTip: string; newTip: string } | undefined;
+  for (const { name, oldTip, copyFork, copyTip } of taken.branches) {
+    const newTip = newTipOf(name);
+    if (copyFork && copyTip) {
+      // Commits the copy lacks stay in the branch, so the files they touch may end differently.
+      const copyIds = new Set(patchIdsIn(`${copyFork}..${copyTip}`).values());
+      const keptFiles = new Set(
+        [...patchIdsIn(`${newBelow}..${newTip}`)]
+          .filter(([, id]) => !copyIds.has(id))
+          .flatMap(([sha]) => filesOfCommit(sha)),
+      );
+      results.push(
+        sameNetChange(
+          extractedNameOf(name),
+          copyFork,
+          copyTip,
+          newBelow,
+          newTip,
+          name,
+          keptFiles,
+        ),
+      );
+      for (const file of fileList(
+        gitQuiet('diff', '--name-only', oldTip, newTip),
+      ))
+        takenFiles.add(file);
+      top = { oldTip, newTip };
+    } else
+      results.push(
+        sameNetChange(
+          name,
+          oldBelow,
+          oldTip,
+          newBelow,
+          newTip,
+          'the rebased stack',
+          takenFiles,
+        ),
+      );
+    oldBelow = oldTip;
+    newBelow = newTip;
+  }
+  results.push(
+    sameNetChange(
+      `${wip}'s own commits`,
+      oldBelow,
+      oldWipTip,
+      newBelow,
+      newWipTip,
+      'the rebased stack',
+      takenFiles,
+    ),
+  );
+  if (top)
+    results.push(
+      sameTipOutsideOrigin(
+        top.oldTip,
+        oldWipTip,
+        top.newTip,
+        newWipTip,
+        'a taken copy differs from its source',
+      ),
+    );
+  if (results.includes(false)) return false;
+  return results.includes('unclear') ? 'unclear' : true;
+};
+
+// What a __ branch becomes when its copy wins: paired commits swapped for the copy's, the copy's own on top.
+const takenFromCopy = (
+  source: string,
+  commits: Commit[],
+  sourcesBelow: string[],
+) => {
+  const copy = extractedNameOf(source);
+  const { fork } = extractedForkOf(copy, sourcesBelow.map(extractedNameOf));
+  const { missing, extra } = compareWithExtracted(commits, copy, fork);
+  const landed = extra.filter((sha) => {
+    const merged = mergeTree(`${sha}^`, base, sha);
+    return merged.ok && merged.tree === treeOf(base);
+  });
+  const unlanded = extra.filter((sha) => !landed.includes(sha));
+  const sourceVersionOf = sourceVersionsByCopySha(unlanded, missing);
+  const copyCommits = commitsIn(`${fork}..${copy}`);
+  const copyVersionOf = new Map(
+    [...sourceVersionOf].map(([copySha, sourceVersion]) => [
+      sourceVersion.sha,
+      copyCommits.find((commit) => commit.sha === copySha)!,
+    ]),
+  );
+  return {
+    copy,
+    fork,
+    copyTip: tipOf(copy),
+    landed,
+    copyVersionOf,
+    added: copyCommits.filter(
+      (commit) =>
+        unlanded.includes(commit.sha) && !sourceVersionOf.has(commit.sha),
+    ),
+    kept: missing.filter((commit) => !copyVersionOf.has(commit.sha)),
+  };
+};
+
+// Rewrites each named __ branch to take its extracted copy's commits, and replays everything above it unchanged.
+const takeFromCopies = (names: string[], apply: boolean) => {
+  const wip = currentBranch();
+  const { branches, pending, own } = readStack(wip);
+  const unknown = names.filter(
+    (name) => !isExtractSource(name) || !branches.includes(name),
+  );
+  if (unknown.length)
+    throw new Error(
+      `${unknown.join(', ')} not a ${EXTRACT_SOURCE_PREFIX} branch below ${wip}; the stack is: ${branches.join(' ')}`,
+    );
+  const noCopy = names.filter((name) => !branchExists(extractedNameOf(name)));
+  if (noCopy.length)
+    throw new Error(
+      `${noCopy.join(', ')} has no extracted copy to take from; run stack-plan extract --apply first`,
+    );
+  const lowest = branches.findIndex((branch) => names.includes(branch));
+  const below = branches[lowest - 1];
+  const start = below ? tipOf(below) : forkOf(wip);
+  const sources = branches.filter(isExtractSource);
+  heading(`Take ${names.join(', ')} from the extracted copies`);
+  let findings = 0;
+  let takenCount = 0;
+
+  subheading('Branches');
+  const { todo, sequence, pick } = newTodo();
+  const dropped: Commit[] = [];
+  const adopted: string[] = [];
+  const record: TakenRecord = { start, branches: [] };
+  const picksUpTo = new Map<string, number>();
+  const pickFromCopy = (commit: Commit) => {
+    pick(commit, `${COPY_MARKER} `);
+    adopted.push(commit.sha);
+  };
+  for (const branch of branches.slice(lowest)) {
+    const commits = own.get(branch) ?? [];
+    if (!names.includes(branch)) {
+      for (const commit of commits) pick(commit);
+      todo.push(`update-ref refs/heads/${branch}`, '');
+      picksUpTo.set(branch, sequence.length);
+      record.branches.push({ name: branch, oldTip: tipOf(branch) });
+      continue;
+    }
+    const taken = takenFromCopy(
+      branch,
+      commits,
+      sources.slice(0, sources.indexOf(branch)),
+    );
+    const label = `${cyan(branch)} ← ${cyan(taken.copy)}`;
+    if (taken.landed.length) {
+      findings++;
+      attention(
+        `${label}  ${taken.copy} sits on ${countOf(taken.landed.length, 'commit')} ${base} already holds; run stack-plan extract first`,
+      );
+    }
+    for (const commit of commits) {
+      const copyVersion = taken.copyVersionOf.get(commit.sha);
+      if (!copyVersion) {
+        pick(commit);
+        continue;
+      }
+      dropped.push(commit);
+      pickFromCopy(copyVersion);
+    }
+    for (const commit of taken.added) pickFromCopy(commit);
+    todo.push(`update-ref refs/heads/${branch}`, '');
+    picksUpTo.set(branch, sequence.length);
+    record.branches.push({
+      name: branch,
+      oldTip: tipOf(branch),
+      copyFork: taken.fork,
+      copyTip: taken.copyTip,
+    });
+    takenCount += taken.copyVersionOf.size + taken.added.length;
+    if (!taken.copyVersionOf.size && !taken.added.length)
+      good(`${label}  already holds every commit of ${taken.copy}`);
+    else {
+      console.log(
+        `${label}  ${taken.copyVersionOf.size} replaced by ${taken.copy}'s version · ${taken.added.length} new from ${taken.copy}`,
+      );
+      for (const [sourceSha, copyVersion] of taken.copyVersionOf)
+        console.log(
+          `  ${yellow(sourceSha.slice(0, 10))} → ${commitLine(copyVersion).trimStart()}`,
+        );
+      for (const commit of taken.added)
+        console.log(`  ${yellow('new')}${commitLine(commit)}`);
+    }
+    if (taken.kept.length) {
+      attention(
+        `${label}  keeps ${countOf(taken.kept.length, 'commit')} ${taken.copy} lacks; stack-plan extract adds them to it afterwards:`,
+      );
+      for (const commit of taken.kept) console.log(commitLine(commit));
+    }
+  }
+  for (const commit of pending) pick(commit);
+
+  if (!takenCount) {
+    console.log('');
+    good('every named branch already holds its copy; nothing to take');
+    return;
+  }
+
+  subheading('Preview');
+  const simulation = simulateRebase(sequence, start, wip);
+  if (simulation.conflicts.length) {
+    findings++;
+    reportConflicts(simulation, start, '', landingBranches(todo, wip));
+  } else {
+    good(`all ${simulation.picks} picks apply cleanly in memory`);
+    const newTipOf = (branch: string) => {
+      const count = picksUpTo.get(branch) ?? 0;
+      return count ? simulation.tipAfterPick[count - 1] : start;
+    };
+    const same = sameAsCopiesAndBefore(
+      record,
+      newTipOf,
+      tipOf(wip),
+      simulation.tip,
+      wip,
+    );
+    if (same !== true) findings++;
+  }
+
+  subheading('Conclusion');
+  if (findings) attention('some of it needs a look by hand; see above');
+  else
+    good(
+      `${countOf(takenCount, 'commit')} taken from the extracted copies, and the rest of the stack replays unchanged`,
+    );
+  const rerun = `extract --from-copy ${names.join(' ')}`;
+  if (!apply) {
+    if (findings) process.exit(1);
+    console.log(`To do it: stack-plan ${rerun} --apply`);
+    return;
+  }
+  if (findings && !rest.includes('--anyway')) {
+    console.log(
+      `\nNothing rewritten. To take them anyway: stack-plan ${rerun} --apply -f`,
+    );
+    process.exit(1);
+  }
+
+  ensurePlanFile(wip);
+  recordPreRebase(tipOf(wip), []);
+  writeHeader(FROM_COPY_PREFIX, takenRecordLine(record));
+  const drops = dropped.map((commit) => `drop ${commit.sha} ${commit.subject}`);
+  runRebase(
+    [
+      ...(drops.length
+        ? ["# replaced by the extracted copy's version", ...drops, '']
+        : []),
+      ...todo,
+    ],
+    ['rebase', '-i', '--update-refs', start],
+    adopted,
+  );
+};
+
 // Tries each branch above the PRs and the __ block onto the base alone, and moved down to just above them.
 const extractableBranches = () => {
   const wip = currentBranch();
@@ -3268,9 +3589,11 @@ const verifyRebase = () => {
     syncTop,
     ...branchesCutBySync
   ] = words(readHeader(SYNC_PREFIX) ?? '');
+  const takenLine = readHeader(FROM_COPY_PREFIX);
+  const taken = takenLine ? parseTakenRecord(takenLine) : undefined;
   const baseMoved = Boolean(cutTip || syncOnto);
-  const oldFrom = syncFork ?? cutTip ?? base;
-  const newFrom = syncOnto ?? newBase ?? base;
+  const oldFrom = syncFork ?? cutTip ?? taken?.start ?? base;
+  const newFrom = syncOnto ?? newBase ?? taken?.start ?? base;
   const cutBranches = syncOnto ? branchesCutBySync : branchesCutByCut;
 
   // Both run before anything prints, so the details come first and the verdict ends the output.
@@ -3282,7 +3605,8 @@ const verifyRebase = () => {
   ];
   const statArgs = ['diff', '--stat', recorded, wip];
   const entries = splitRangeDiff(gitQuiet(...rangeArgs));
-  const stat = baseMoved ? '' : gitQuiet(...statArgs).trimEnd();
+  const treeMayChange = baseMoved || Boolean(taken);
+  const stat = treeMayChange ? '' : gitQuiet(...statArgs).trimEnd();
   // range-diff pairs a fold's commits unpredictably, so every entry from a planned fold is set apart instead.
   const foldGroups = words(readHeader(FOLDED_PREFIX) ?? '').map((pair) =>
     pair.split('>'),
@@ -3333,6 +3657,27 @@ const verifyRebase = () => {
       if (isAncestor(entry.newSha, syncOrigin)) entry.kind = 'origin';
     }
   }
+  if (taken) {
+    const copyIds = new Set(
+      taken.branches.flatMap(({ copyFork, copyTip }) =>
+        copyFork && copyTip
+          ? [...patchIdsIn(`${copyFork}..${copyTip}`).values()]
+          : [],
+      ),
+    );
+    const patchIdOf = (sha: string) =>
+      patchIdsIn(`${sha}^..${sha}`).values().next().value ?? '';
+    const fromCopy = entries.filter(
+      (entry) =>
+        ['!', '>'].includes(entry.kind) && copyIds.has(patchIdOf(entry.newSha)),
+    );
+    for (const entry of fromCopy) entry.kind = 'copy';
+    // A source commit whose copy version range-diff did not pair with it was replaced, not lost.
+    const copySubjects = new Set(fromCopy.map((entry) => entry.subject));
+    for (const entry of entries)
+      if (entry.kind === '<' && copySubjects.has(entry.subject))
+        entry.kind = 'copy';
+  }
 
   const worthReading = entries.filter((entry) =>
     ['!', '<', '>'].includes(entry.kind),
@@ -3357,7 +3702,10 @@ const verifyRebase = () => {
   const originCount = count('origin')
     ? ` · ${count('origin')} from origin`
     : '';
-  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}${originCount}`;
+  const copyCount = count('copy')
+    ? ` · ${count('copy')} from the extracted copies`
+    : '';
+  const summary = `range-diff  ${count('=')} unchanged · ${count('context')} context only · ${count('!')} changed · ${count('<')} dropped · ${count('>')} added${foldedCount}${landedCount}${originCount}${copyCount}`;
   if (count('<') || count('>')) bad(`${summary}; read the entries above`);
   else if (count('!')) attention(`${summary}; read the changed entries above`);
   else good(summary);
@@ -3395,6 +3743,13 @@ const verifyRebase = () => {
     console.log(`\nTaken from origin, which you did not have locally:`);
     for (const entry of originEntries) console.log(entry.lines[0]);
   }
+  const copyEntries = entries.filter((entry) => entry.kind === 'copy');
+  if (copyEntries.length) {
+    console.log(
+      `\nTaken from the extracted copies, or replaced by their version:`,
+    );
+    for (const entry of copyEntries) console.log(entry.lines[0]);
+  }
   const droppedOrAdded = entries.filter(
     (entry) => entry.kind === '<' || entry.kind === '>',
   );
@@ -3419,27 +3774,29 @@ const verifyRebase = () => {
       sameAboveTop
     );
   };
-  const treeOk = syncOnto
-    ? syncedOk()
-    : cutTip
-      ? sameNetChange(
-          `${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`,
-          cutTip,
-          recorded,
-          newBase,
-          wip,
-          newBase.slice(0, 10),
-          new Set(fileList(gitQuiet('diff', '--name-only', cutTip, newBase))),
-        ) &&
-        sameTipOutsideOrigin(
-          cutTip,
-          recorded,
-          newBase,
-          wip,
-          `${newBase.slice(0, 10)} moved since the stack left it`,
-        )
-      : !stat;
-  if (!baseMoved) traceGit(statArgs);
+  const treeOk = taken
+    ? sameAsCopiesAndBefore(taken, tipOf, recorded, tipOf(wip), wip) === true
+    : syncOnto
+      ? syncedOk()
+      : cutTip
+        ? sameNetChange(
+            `${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`,
+            cutTip,
+            recorded,
+            newBase,
+            wip,
+            newBase.slice(0, 10),
+            new Set(fileList(gitQuiet('diff', '--name-only', cutTip, newBase))),
+          ) &&
+          sameTipOutsideOrigin(
+            cutTip,
+            recorded,
+            newBase,
+            wip,
+            `${newBase.slice(0, 10)} moved since the stack left it`,
+          )
+        : !stat;
+  if (!treeMayChange) traceGit(statArgs);
   if (stat) {
     bad(`tree differs from the pre-rebase tip ${short}`);
     console.log(stat);
@@ -3449,7 +3806,7 @@ const verifyRebase = () => {
     );
   }
   if (treeOk && !droppedOrAdded.length) tidyAfterRebase(wip, cutBranches);
-  if (!stat && !baseMoved) good(`tree matches the pre-rebase tip ${short}`);
+  if (!stat && !treeMayChange) good(`tree matches the pre-rebase tip ${short}`);
 };
 
 // Runs once verify has passed, so the plan's bookkeeping catches up with what the rebase did.
@@ -3508,7 +3865,16 @@ const tidyAfterRebase = (wip: string, cutBranches: string[]) => {
 };
 
 type Entry = {
-  kind: '=' | '!' | '<' | '>' | 'context' | 'folded' | 'landed' | 'origin';
+  kind:
+    | '='
+    | '!'
+    | '<'
+    | '>'
+    | 'context'
+    | 'folded'
+    | 'landed'
+    | 'origin'
+    | 'copy';
   oldSha: string;
   newSha: string;
   subject: string;
@@ -3941,6 +4307,8 @@ try {
     dropExtractSources(cutTargets, rest.includes('--apply'));
   else if (command === 'cut') cutStack(cutTargets[0], rest.includes('--apply'));
   else if (command === 'sync') syncStack(rest.includes('--apply'));
+  else if (command === 'extract' && rest.includes('--from-copy'))
+    takeFromCopies(fromCopyTargets, rest.includes('--apply'));
   else if (command === 'extract') extractBranches(rest.includes('--apply'));
   else if (command === 'extractable') extractableBranches();
   else if (command === 'mark') markBranches(branchesToMark);

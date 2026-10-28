@@ -19,6 +19,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp cut --merged` | The same for every `__` branch that has landed, without naming them. |
 | `sp sync` | Checks putting each stack branch on its origin copy, with local work replayed on top, and dropping every merged branch, `__` branches included. `--apply` does it. |
 | `sp extract` | Checks copying each `__` branch off the stack, onto its name without the prefix. `--apply` does it. |
+| `sp extract --from-copy <__b>...` | Checks rewriting each named `__` branch to take its copy's commits instead. `--apply` does it. |
 | `sp extractable` | Lists the branches that could become `__` branches, as far as the text shows. |
 | `sp mark <b>...` | Renames each branch to its `__` name, carrying its notes and the saved order along, and exports the plan with them as one block. Add `-n` to see what it will do. |
 | `sp unmark <__b>...` | Undoes `mark`: deletes each extracted copy once it holds the same commits, renames the branch back, and puts it just above the `__` block. Add `-n` to see what it will do. |
@@ -308,6 +309,30 @@ It refuses a branch that is not in the stack, already has the prefix, has a PR, 
 - A `__` branch whose unprefixed name is also a stack branch is a finding.
 
 The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. It signs every commit it writes, and fails when git has no signing key, because the org requires signed commits. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
+
+#### When the copy should win
+
+```shell
+stack-plan extract --from-copy __skills/foo
+stack-plan extract --from-copy __skills/foo --apply
+```
+
+By default the source wins, as described above. `--from-copy` turns that round for the `__` branches you name. Each named branch takes its copy's commits, and the stack above it replays unchanged. Use it for a review fix pushed to the copy, or for a conflict you resolved on the copy rather than in the stack.
+
+For each named branch:
+
+- A source commit paired with a copy commit is dropped, and the copy's version takes its place. Pairing works as in the rebuild above: same subject, unique on both sides.
+- Copy commits with no counterpart in the source are picked onto the top of the branch, marked `>>> [copy]` in the todo.
+- Source commits the copy lacks stay where they are, and the check lists them. A plain `extract` adds them to the copy afterwards.
+- A copy that sits on commits the base already holds is a finding. Run a plain `extract` first to rebuild it.
+
+The rebase starts at the tip of the branch below the lowest named one, so nothing below it moves. Like `apply`, it previews the replay in memory and refuses on a predicted conflict unless you pass `-f`. Like `sync`, it also checks the result before rewriting anything:
+
+- Each named branch's net change must equal its copy's. Files touched by source commits the copy lacks may end differently, and the check lists them for a look by hand.
+- Every other branch above, and wip's own commits, must keep the net change they had.
+- The tip tree may change only in files where a taken copy differs from its source.
+
+`--apply` records a `# from-copy:` line, and `verify` reads it to run the same checks on the real result. In the range-diff it counts the copy's commits, and the source commits they replaced, as `from the extracted copies` rather than as changed, dropped or added. Unlike a plain `extract`, this rewrites the stack, so the worktree must be free. The copies do not move: afterwards a plain `extract` reports them as up to date.
 
 Once an extracted copy has been squash-merged, `extract` reports its `__` branch as already in the base, or as merged on GitHub, and leaves it alone. Fetch, then take the branch out of the stack with `cut`:
 
