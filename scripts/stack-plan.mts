@@ -34,6 +34,8 @@ const NEW_BRANCH_MARKER = '>>> [new branch]';
 const PRS_STOP_MARKER = '# --- PRs stop here ---';
 const OTHER_STACKS_STOP_MARKER = '# --- Other stacks stop here ---';
 const MIRROR_STATUS_PREFIX = '# mirror: ';
+const ORIGIN_STATUS_PREFIX = '# origin: ';
+const BASE_STATUS_PREFIX = '# base: ';
 const EXTRACT_SOURCE_PREFIX = '__';
 const ORDER_KEY = 'stackplan.order';
 const NEW_KEY = 'stackplan.new';
@@ -1964,6 +1966,69 @@ const sourceVersionsByCopySha = (copyShas: string[], missing: Commit[]) => {
   );
 };
 
+// Commits the base holds are lower copies that landed; only the rest is work to bring into the source.
+const splitExtras = (extra: string[], missing: Commit[], pair: boolean) => {
+  const unlanded = [...extra].reverse().filter((sha) => {
+    const merged = mergeTree(`${sha}^`, base, sha);
+    return !merged.ok || merged.tree !== treeOf(base);
+  });
+  const held = extra.length - unlanded.length;
+  const sourceVersionOf =
+    !held && pair
+      ? sourceVersionsByCopySha(unlanded, missing)
+      : new Map<string, Commit>();
+  const unpaired = unlanded.filter((sha) => !sourceVersionOf.has(sha));
+  return { held, unpaired, sourceVersionOf };
+};
+
+type OriginCommands = {
+  gone: string;
+  newWork: (remote: string, fastForward: boolean) => string;
+};
+
+/** How a branch differs from its origin copy, and the command that brings them together; undefined where they match or origin has none. */
+const originState = (branch: string, commands: OriginCommands) => {
+  if (upstreamGone(branch))
+    return {
+      parts: ['its origin branch is gone'],
+      command: commands.gone,
+      first: true,
+    };
+  const remote = remoteOf(branch);
+  if (!remote) return undefined;
+  const [onlyLocal, onlyOrigin] = git(
+    'rev-list',
+    '--left-right',
+    '--count',
+    `${branch}...${remote}`,
+  )
+    .trim()
+    .split(/\s+/)
+    .map(Number);
+  if (!onlyLocal && !onlyOrigin) return undefined;
+  const parts = [
+    ...(onlyLocal ? [`${countOf(onlyLocal, 'commit')} not on ${remote}`] : []),
+    ...(onlyOrigin
+      ? [`${countOf(onlyOrigin, 'commit')} only on ${remote}`]
+      : []),
+  ];
+  // Origin commits matching a local one by patch-id were only rewritten here, by a rebase.
+  const localIds = onlyOrigin
+    ? new Set(patchIdsIn(`${remote}..${branch}`).values())
+    : new Set<string>();
+  const newWork =
+    onlyOrigin > 0 &&
+    [...patchIdsIn(`${branch}..${remote}`).values()].some(
+      (id) => !localIds.has(id),
+    );
+  const command = newWork
+    ? commands.newWork(remote, !onlyLocal)
+    : onlyOrigin
+      ? `git push --force-with-lease origin ${branch}`
+      : `git push origin ${branch}`;
+  return { parts, command, first: newWork };
+};
+
 // Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
 const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
   let fork = git('merge-base', base, extracted).trim();
@@ -2151,7 +2216,7 @@ const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
   return { ok: true, tip };
 };
 
-/** Returns the comment line export writes above a __ branch, giving the state of its extracted copy. */
+/** Returns the comment line export writes above a __ branch: the state of its extracted copy, and the command that brings it back in sync. */
 const mirrorStatus = (
   source: string,
   sourcesBelow: string[],
@@ -2160,11 +2225,11 @@ const mirrorStatus = (
 ) => {
   const extracted = extractedNameOf(source);
   if (!branchExists(extracted))
-    return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted`;
+    return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted → stack-plan extract`;
   const found = extractedForkOf(extracted, sourcesBelow.map(extractedNameOf));
   const { on } = found;
   let { fork } = found;
-  let { missing, extraCount } = compareWithExtracted(
+  let { missing, extraCount, extra } = compareWithExtracted(
     sourceCommits,
     extracted,
     fork,
@@ -2175,20 +2240,30 @@ const mirrorStatus = (
       : undefined;
   if (landedTip) {
     fork = landedTip;
-    ({ missing, extraCount } = compareWithExtracted(
+    ({ missing, extraCount, extra } = compareWithExtracted(
       sourceCommits,
       extracted,
       fork,
     ));
   }
+  const { held, unpaired } = splitExtras(extra, missing, true);
   const pull = pulls?.get(extracted);
-  const stale =
-    landedTip !== undefined || (on !== undefined && tipOf(on) !== fork);
+  const onOldCopy = on !== undefined && tipOf(on) !== fork;
+  const onOldBase = on === undefined && !landedTip && fork !== tipOf(base);
+  const stale = landedTip !== undefined || onOldCopy || onOldBase;
+  const origin = originState(extracted, {
+    gone: 'stack-plan cut --merged',
+    newWork: (remote, fastForward) =>
+      fastForward
+        ? `git branch -f ${extracted} ${remote}`
+        : `compare by hand: git range-diff ${remote}...${extracted}`,
+  });
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
     ...(landedTip ? [`on landed commits`] : []),
-    ...(on !== undefined && tipOf(on) !== fork ? [`on an old ${on}`] : []),
+    ...(onOldCopy ? [`on an old ${on}`] : []),
+    ...(onOldBase ? [`on an old ${base}`] : []),
     missing.length
       ? `${countOf(missing.length, 'commit')} behind`
       : stale
@@ -2197,8 +2272,19 @@ const mirrorStatus = (
     ...(extraCount
       ? [`${countOf(extraCount, 'commit')} only on ${extracted}`]
       : []),
+    ...(origin?.parts ?? []),
   ];
-  return `${MIRROR_STATUS_PREFIX}${parts.join(' · ')}`;
+  // Origin's new work comes into the copy first, the copy's into the source next, and a push goes last.
+  const command = origin?.first
+    ? origin.command
+    : unpaired.length && !held
+      ? `stack-plan extract --from-copy ${source}`
+      : missing.length || extraCount || landedTip || onOldCopy
+        ? 'stack-plan extract'
+        : onOldBase
+          ? 'stack-plan extract --rebase'
+          : origin?.command;
+  return `${MIRROR_STATUS_PREFIX}${parts.join(' · ')}${command ? ` → ${command}` : ''}`;
 };
 
 // Copies each __ branch's commits onto the branch named without the prefix, off the stack; --apply moves those refs.
@@ -2313,15 +2399,9 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       }
       let sourceVersionOf = new Map<string, Commit>();
       if (extraCount) {
-        // Commits the base holds are lower copies that landed; only the rest is work to bring into the source.
-        const unlanded = extra.reverse().filter((sha) => {
-          const merged = mergeTree(`${sha}^`, base, sha);
-          return !merged.ok || merged.tree !== treeOf(base);
-        });
-        const held = extraCount - unlanded.length;
-        if (!held && !landedOnly)
-          sourceVersionOf = sourceVersionsByCopySha(unlanded, missing);
-        const unpaired = unlanded.filter((sha) => !sourceVersionOf.has(sha));
+        const split = splitExtras(extra, missing, !landedOnly);
+        const { held, unpaired } = split;
+        sourceVersionOf = split.sourceVersionOf;
         if (held || unpaired.length) {
           findings++;
           const alsoHeld = held ? `; ${held} more ${base} already holds` : '';
@@ -3382,6 +3462,11 @@ const exportPlan = () => {
   const lastStops = existsSync(planPath())
     ? readHeader(STOPS_PREFIX)
     : undefined;
+  const baseAhead = Number(
+    git('rev-list', '--count', `${forkOf(wip)}..${base}`).trim(),
+  );
+  // sync keeps a stack that has a branch on origin on origin's base, so it moves only an unpushed one onto the tip.
+  const unpushed = !current.some((branch) => remoteOf(branch));
   const out = [
     `# stack-plan for ${wip} on ${base}, exported ${new Date().toISOString()}`,
     `${EXPORTED_AT_PREFIX}${tipOf(wip)}`,
@@ -3405,6 +3490,12 @@ const exportPlan = () => {
       ? [
           '# A fixup!, squash! or amend! commit folds into the commit its subject names, after that',
           `# commit, wherever it goes${full ? '' : '; its # fold line shows where, and save ignores it'}.`,
+        ]
+      : []),
+    `# A line ending in → <command> is out of sync; the command's check shows what it would do.`,
+    ...(baseAhead
+      ? [
+          `${BASE_STATUS_PREFIX}${base} has ${countOf(baseAhead, 'commit')} the stack lacks${unpushed ? ' → stack-plan sync' : ", and sync keeps the stack on origin's base"}`,
         ]
       : []),
     '',
@@ -3440,6 +3531,17 @@ const exportPlan = () => {
     .slice(firstSourceAt, firstSourceAt + sources.length)
     .some((branch) => !isExtractSource(branch));
 
+  const originStatus = (branch: string) => {
+    if (!branchExists(branch)) return undefined;
+    const origin = originState(branch, {
+      gone: 'stack-plan sync',
+      newWork: () => 'stack-plan sync',
+    });
+    return origin
+      ? `${ORIGIN_STATUS_PREFIX}${origin.parts.join(' · ')} → ${origin.command}`
+      : undefined;
+  };
+
   // Marked as apply's todo marks them, so the file shows what the notes and saved order would move.
   branches.forEach((branch, i) => {
     const marker = branchMarker(branch, current, branches);
@@ -3450,7 +3552,7 @@ const exportPlan = () => {
           own.get(branch) ?? [],
           pulls,
         )
-      : undefined;
+      : originStatus(branch);
     const ownCommits = (own.get(branch) ?? []).filter(
       (commit) => !leaving.has(commit.sha),
     );

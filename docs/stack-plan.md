@@ -107,6 +107,19 @@ Export also asks `gh` for the open pull requests and writes `# --- PRs stop here
 
 Branches named with a `__` prefix are extract sources, which step 8 describes. Export writes a `# mirror:` line above each one, giving the state of its extracted copy, and `# --- Other stacks stop here ---` below the last one. It warns about a PR branch above a `__` branch, because pushing it would carry that branch's commits, and about `__` branches that do not form one block.
 
+#### Getting back in sync
+
+Where something is out of sync, export ends its comment line with `→ <command>`, the command that brings it back. It names the check form, without `--apply`, so the check shows what would happen and prints the apply line itself. Export does not fetch, so what it says about origin is as of your last fetch.
+
+- `# base:` in the header appears when `--base` has commits the stack lacks. Its command is `stack-plan sync` when no stack branch is on origin. Otherwise the line says that sync keeps the stack on origin's base and names no command, because sync moves only an unpushed stack onto the tip.
+- `# origin:` above a branch without the prefix appears when the branch and its origin copy differ. It counts the commits on each side. Origin commits with no local counterpart by `git patch-id` are new work, such as a review fix pushed on GitHub, and `stack-plan sync` brings them in. Where origin only holds older versions of local commits, the command is `git push --force-with-lease`. Where only the local side moved, it is a plain `git push`. A branch whose upstream origin deleted also gets `stack-plan sync`, which cuts it.
+- `# mirror:` names one command per copy, in the order the copy needs them:
+  1. Origin has new work on the copy: `git branch -f <copy> <origin copy>` when the copy is behind it, and `git range-diff` to compare by hand when both moved.
+  2. The copy holds commits the source lacks, with no counterpart and none the base holds: `stack-plan extract --from-copy <__branch>`.
+  3. The copy does not exist, is behind, has extra commits a plain `extract` rebuilds, sits on landed commits, or sits on an old lower copy: `stack-plan extract`.
+  4. The copy sits directly on an older base, shown as `on an old <base>`: `stack-plan extract --rebase`.
+  5. The copy differs from its origin copy only on the local side: the `git push` for it, as for `# origin:`. A copy whose origin branch was deleted gets `stack-plan cut --merged`.
+
 #### Full mode
 
 `stack-plan mode full` makes every later export list each commit since the base, not only the ones waiting on the wip branch. The file then reads like a complete rebase todo: reorder picks within a branch, move a commit from one branch to another, or out of the stack onto the wip branch. `stack-plan mode short` switches back, and `stack-plan mode` alone shows which one is active. The mode lives in git config as `stackplan.mode`.
