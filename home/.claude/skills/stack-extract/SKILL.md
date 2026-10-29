@@ -1,7 +1,7 @@
 ---
 name: stack-extract
 description: Find the ready stack branches that could leave the stack as pull requests of their own, check that each still builds without the branches below it, then mark them as __ branches and extract them on the user's word. Typed only, because typing it approves the worktree operations, checks, renames and extract its scripts perform.
-argument-hint: <last-ready-branch> | mark | extract
+argument-hint: <last-ready-branch> | no-checks <last-ready-branch> | mark | extract
 disable-model-invocation: true
 ---
 
@@ -9,11 +9,12 @@ disable-model-invocation: true
 
 Find out which branches in the stack can become `__` branches, the extract sources that `stack-plan extract` copies onto the base as pull requests of their own. `stack-plan extractable` answers that for the text: whether each branch's commits apply without the branches below it. This skill adds what the text cannot show: whether the code still builds there, and what the change uses from other branches. `/repos/MyConfig/docs/stack-plan.md` → "8. Extract branches that need not be stacked" describes the commands.
 
-## The three modes
+## The four modes
 
 | Invocation | Does |
 | --- | --- |
 | `/stack-extract <last-ready-branch>` | Steps 1 to 3 and the report. Changes nothing in the stack |
+| `/stack-extract no-checks <last-ready-branch>` | Steps 1 and 2 and the report, without step 3's build checks. Changes nothing in the stack |
 | `/stack-extract mark`, or the user's word after the report | Step 4: renames the branches the report listed to their `__` names and exports the plan with them in place |
 | `/stack-extract extract` | Step 5: creates or moves forward the extracted copies |
 
@@ -23,7 +24,7 @@ Find out which branches in the stack can become `__` branches, the extract sourc
 
 ## What typing this command approves
 
-**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, `stack-plan needs` as step 2 gives it, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n`, `stack-plan extract --apply`, and writing or deleting `stack-extract.md` notes as step 4 gives it. `generate-branchcommands.sh` is the user's to run, never yours. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
+**The user typing `/stack-extract` approves what this skill's scripts and the mode's `stack-plan` command do, and nothing else**: adding, cleaning, moving and removing one scratch worktree, linking the main checkout's `node_modules` into it, saving results under `.agent-context/.tmp/stack-extract-results/`, running the repository's own npm scripts inside that worktree, `stack-plan needs` as step 2 gives it, and, in the modes that name them, `stack-plan mark`, `stack-plan preview -n`, `stack-plan extract --apply`, and writing or deleting `stack-extract.md` notes as step 4 gives it. `generate-branchcommands.sh` is the user's to run, never yours. In `no-checks` mode, open no worktree and run no npm scripts. Run `stack-plan` as `node /home/torgst/scripts/stack-plan.mts <command>`. Never push, and never create a pull request.
 
 - Run each script as `node <this skill's base directory>/scripts/<script> <arguments>`, with the absolute path printed when this skill loaded.
 - **Never install dependencies.** Where a lockfile differs from the main checkout's, results for that package may not match the commit: say so in the report, and do not install.
@@ -62,7 +63,7 @@ For each one, check that it exists at the replay sha: `git cat-file -e <sha>:<pa
 - A **soft dependency** is one the candidate builds without: a relative link or the heading its anchor names, a log line, guard or command a document says exists, a config key, an environment variable, a script name or a CLI flag. **It never changes the stack.** Run no `stack-plan needs` for it, and never hold the candidate back for it. The candidate leaves as its own pull request on the base, and step 4 writes a merge-after note for its pull request body. The rows below for its own chain still apply to it, and so does the row for a branch above the cut, because that branch has no pull request to merge first.
 - A **build dependency** is everything else, such as an import, a function, a type, a component, a migration or a fixture. The table below sorts it.
 
-Step 3 corrects a wrong call. A candidate whose checks fail on something a soft dependency adds had a build dependency after all, and the table sorts it.
+Step 3 corrects a wrong call. A candidate whose checks fail on something a soft dependency adds had a build dependency after all, and the table sorts it. In `no-checks` mode nothing corrects it, so a wrong call shows up as a CI failure on the extracted pull request.
 
 Sort each build dependency by where it points, because that decides what the report does with it:
 
@@ -77,6 +78,8 @@ Sort each build dependency by where it points, because that decides what the rep
 | A member of another chain, above it in the stack | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, and the needed branch would have to sit below it. It can leave once the other chain has merged |
 
 ## 3. Check that each candidate builds
+
+**Skip this step in `no-checks` mode**, and go from step 2 straight to the report.
 
 1. Work out the checks from the repository's CI definitions and `package.json` scripts. Keep typecheck and lint. Leave tests out unless the user asked for them, and list them under "Not covered".
    - **Where a script only chains others with `&&`, name its parts instead.** The chain stops at its first failing step, so an error the base already has in that step hides every step after it. `checks.mts` warns about a chain it is given, and names the parts.
@@ -106,12 +109,12 @@ Sort each build dependency by where it points, because that decides what the rep
 The report answers three questions, in this order, in its header:
 
 1. **Which chains can be posted now**, each as its members in order. A stand-alone branch is a chain of one. A chain that opens with `__` branches is posted on the extracted copy of the last of them, so name that copy as its base. A chain whose build fails or that step 2 holds back is not among them. A candidate with soft dependencies only is a chain of its own, and the line also names the branches it must merge after.
-2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line.
+2. **Which candidates wait, and for what**: each one held back for depending on a chain above it, with the chain it waits for, and each red build with its first error line. In `no-checks` mode there are no builds to report.
 3. **What happens next**: the `stack-plan mark` line below, and that the user's word or `/stack-extract mark` runs it.
 
 - **Body:** one numbered item per chain, giving each step 2 finding with the branch it points at, its kind, and how the table above sorted it. Name each need `candidates.json` lists under `declared`, with what it rests on, because the text does not show it and the user did not watch it being declared. A declared need that rests only on soft dependencies stacks a branch that step 2 would leave on its own, so say so, and give the `stack-plan needs <candidate> --clear <needs to keep>` line that forgets it. A clean chain gets one line.
 - **The mark line:** `stack-plan mark` followed by every branch of the chains in answer 1, in stack order, leaving out the `__` branches. Step 4 runs exactly this line.
-- **Not covered:** skipped checks, setup gaps, known worktree failures, lockfile warnings, and anything step 2 could not settle.
+- **Not covered:** in `no-checks` mode, first the line "Build checks not run (`no-checks`)". Then skipped checks, setup gaps, known worktree failures, lockfile warnings, and anything step 2 could not settle.
 
 ## 4. Mark
 
