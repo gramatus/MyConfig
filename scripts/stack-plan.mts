@@ -2234,6 +2234,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const rebuilt: string[] = [];
   const plannedTip = new Map<string, string>();
   let findings = 0;
+  const takeable: string[] = [];
   const reportConflict = (
     label: string,
     onto: string,
@@ -2325,6 +2326,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           findings++;
           const alsoHeld = held ? `; ${held} more ${base} already holds` : '';
           if (unpaired.length) {
+            if (!held) takeable.push(source);
             attention(
               `${label}  has ${countOf(unpaired.length, 'commit')} neither ${source} nor ${base} holds${alsoHeld}; bring them into ${source} first:`,
             );
@@ -2431,16 +2433,20 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   else if (landedOnly) good('no extracted copy sits on landed commits');
   else good('every extracted branch is up to date');
   const applyCommand = `stack-plan extract --apply${rebaseCopies ? ' --rebase' : ''}`;
+  const takeFirst = takeable.length
+    ? `First: stack-plan extract --from-copy ${takeable.join(' ')}, then run extract again`
+    : undefined;
   // verify goes on to tidy after this, so a finding must not end the process there.
   if (!apply) {
-    if (moves.length)
+    if (takeFirst) console.log(takeFirst);
+    else if (moves.length)
       console.log(`To do it: ${applyCommand}${findings ? ' -f' : ''}`);
     if (findings && !landedOnly) process.exit(1);
     return;
   }
   if (findings && !rest.includes('--anyway')) {
     console.log(
-      `\nNo branch moved. To move the clean ones anyway: ${applyCommand} -f`,
+      `\nNo branch moved. ${takeFirst ?? `To move the clean ones anyway: ${applyCommand} -f`}`,
     );
     if (!landedOnly) process.exit(1);
     return;
