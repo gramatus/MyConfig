@@ -29,6 +29,8 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 
 To move a commit that sits in the wrong stack branch, add a `pick` line for it above the right branch's `update-ref`. In full mode its line is already there, so move that line instead.
 
+To cherry-pick a commit from outside the stack into a branch, add a `pick` line for it above that branch's `update-ref`. "Adopting a commit from outside the stack" under step 2 has the rest.
+
 To have the next `apply` pause somewhere with a reminder, add a `stop <message>` line there. Right above a branch's `update-ref`, it pauses at the end of that branch. "Stops" under step 2 has the rest.
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
@@ -98,6 +100,7 @@ Move `pick` lines, and `update-ref` lines when the stack itself should change:
 - The order of the `update-ref` lines is the stack order. Moving one moves that branch, and its own commits go with it as a block.
 - An `update-ref` line naming a branch that does not exist adds that branch to the stack, with the picks above it or empty. The rebase creates it.
 - A `pick` line you add by hand, for a commit already in a stack branch, moves that commit. Above another branch's `update-ref`, it goes to the end of that branch. In the wip section, it leaves the stack and lands on wip, below the waiting commits. This is the way to fix a commit that landed in the wrong branch without switching to full mode. Its position inside the new branch is always the end, so use full mode when it has to go elsewhere.
+- A `pick` line for a commit outside the stack adopts it: `apply` cherry-picks it into that branch, as a rebase todo would. "Adopting a commit from outside the stack" below has the details.
 
 A move of a commit already in the stack is saved as a note, like a placement, and export shows it in its new section with `>>> [moved]`. From then on the file must keep its line, as for a waiting commit. To cancel the move, put the line back in its own branch or below the untagged marker.
 
@@ -184,6 +187,30 @@ Git runs the first `exec` when the rebase reaches the stop, whoever ran the reba
 Git records no rewrite for a commit amended at a `break`, so the amended commit loses its placement note. That only shows for a commit staying on wip, which the next export lists as untagged again.
 
 A stop is one-shot. Once a rebase has got past it and `verify` passes, `verify` removes it. An aborted rebase keeps it for the next `apply`. `cut`, `sync` and `extract` build their own todos and ignore stops.
+
+#### Adopting a commit from outside the stack
+
+A rebase todo can pick any commit, and so can the plan. Give a `pick` line the SHA of a commit that is not in `<base>..wip`, such as one on another branch, in another worktree or on no branch at all. `apply` then cherry-picks it into the branch whose `update-ref` follows the line, or onto wip when the line sits in the wip section:
+
+```text
+pick e82d277da test(alz): cover the alz_links.yml rules
+update-ref refs/heads/__feat/alz-deep-links
+```
+
+`save` stores each adoption as the multi-valued git config key `branch.<name>.stackAdopt`, holding the full SHAs in file order. `git branch -m` moves it along, as it does for `needs`, so `mark` and `unmark` carry it too. A note would not work here: the commits from before each rebase keep copies of their notes, and those also sit outside `<base>..wip`. Export writes each adoption back as `pick <sha> >>> [adopted] <subject>`, and deleting the line and saving again cancels it.
+
+`save` refuses an outside commit that git could not pick, or that would only repeat what is there:
+
+- one the base already holds
+- a root commit or a merge commit
+- one whose `git patch-id` matches a commit already in the stack
+- one listed as `fixup` or `squash`, because only `pick` adopts
+- one below the untagged marker, since an outside commit has nothing to untag
+- a `stop` right after it, which would sit on a commit the rebase replaces. Put the stop right above the `update-ref` instead.
+
+In short mode an adopted commit goes at the end of its branch, after the picks moving in. In full mode it goes where its line is. Either way it counts as a change to its branch, so the rebase starts low enough to reach it. The original is left where it is: adopting is a cherry-pick, not a move. An adoption onto wip lands on top of the waiting commits, and the next export lists its copy as untagged.
+
+`apply` records the adoptions in the plan's `# adopted:` line, which export carries over like `# folded:`. `verify` counts their range-diff entries as `adopted` rather than added. It pairs them by `git patch-id`, or by subject where a conflict resolution changed the patch. The tree may differ from the pre-rebase tip, but only in files the adopted commits change. Once `verify` passes it removes the config keys, so an adoption is one-shot like a stop. An aborted rebase keeps them for the next `apply`. `cut`, `sync` and `extract` ignore adoptions.
 
 ### 3. Save
 
@@ -335,7 +362,7 @@ Some branches in a stack do not depend on the branches below them, and could be 
 
 `stack-plan extractable` finds the candidates. It tests each branch above the PR branches and the `__` block, and changes nothing. A branch is a candidate when two in-memory replays are clean:
 
-- Its own commits replayed onto `--base`. When that conflicts, it adds the branches below that change the conflicting files and tries again, so a branch that needs another one is reported together with it. A needed branch that has a PR makes the branch no candidate. A needed branch in the `__` block becomes the bottom of the branch's chain, so the branch stacks on that branch's extracted copy. The output shows that member as `marked already`, `--json` gives it `marked: true`, and the `mark` line leaves it out. The chain is the whole `__` chain that branch sits in, as `extract` works it out, so the branch goes on the copy of that chain's top member.
+- Its own commits replayed onto `--base`. When that conflicts, it adds the branches below that change the conflicting files and tries again, so a branch that needs another one is reported together with it. A needed branch that has a PR makes the branch no candidate, and the reason ends with the `stack-plan mark` line that marks that PR branch and every one below it, so the branch can stack on it. A needed branch in the `__` block becomes the bottom of the branch's chain, so the branch stacks on that branch's extracted copy. The output shows that member as `marked already`, `--json` gives it `marked: true`, and the `mark` line leaves it out. The chain is the whole `__` chain that branch sits in, as `extract` works it out, so the branch goes on the copy of that chain's top member.
 - The stack replayed with the branch, and any branches it needs, moved to just above the PR branches and the `__` block. That is the todo a `preview` of the move would run.
 
 Candidates that need each other form a chain, and the output groups them that way. It lists the branches that stand alone first, then each chain in stack order with what each member needs, then the branches that cannot leave. A chain is extracted as one stack in that order, so keep its members in that order in the `__` block. A chain shaped like a tree is flattened: a member that needs only the bottom branch still sits on the member below it. It ends with the `stack-plan mark` line that marks the candidates. A clean replay only shows that the text applies, not that the code still builds: a branch can still call something a branch below it adds. Each candidate's line ends with `replays to <sha>`, the in-memory commit its replay onto the base ends at. `--json` prints the same result as JSON, with each chain member's start and replay commits. `--upto <branch>` tests only the branches up to and including `<branch>`, and lists the ones above it as not tested, under `untested` in the JSON. A branch above the cut can need two branches below it that need nothing from each other. Without `--upto`, its chain joins them, and the replay commit of the upper one then holds the lower one's change too. The `/stack-extract` skill checks that commit out in a scratch worktree, runs the typecheck and build there, and reads the change for what it uses from below.
@@ -349,9 +376,13 @@ The `__` branches go in one block directly above the branches that have PRs. `st
 - It saves the order with the marked branches as one block directly above the PR branches and any `__` block already there, in stack order, so each chain keeps its order.
 - It exports the plan, keeping the earlier file as `stackplan.txt.bak`.
 
-It refuses a branch that is not in the stack, already has the prefix, has a PR, or whose `__` name is taken. `-n` prints the renames and the moves without making them. Then run `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
+It refuses a branch that is not in the stack, already has the prefix, or whose `__` name is taken.
 
-`stack-plan unmark <__branch>...` takes a branch back into the main stack. It deletes the extracted copy, renames the branch to its name without the prefix, and saves the order with it directly above the `__` block, as the bottom of the main stack. It carries the notes and the saved order along as `mark` does, then exports the plan. The copy is deleted only when it holds exactly the source's commits, matched by `git patch-id`, so run `extract --apply` first when the copy is behind. It refuses a copy with an open PR, a copy holding commits the source lacks, and a copy that another `__` branch's copy sits on, unless that branch is unmarked too. A copy on origin is left there, and the output names it. `-n` shows the deletions, renames and moves without making them. Then run `preview`, `apply` and `verify`.
+A branch with a PR can be marked from the bottom of the stack up. Every branch below it must be a PR branch marked in the same call, or a `__` branch whose copy sits at its tip. Such a branch keeps its place in the stack, and `mark` creates its copy at the branch's tip, so the copy is the same commits and the PR goes on without a push. The upstream moves to the copy, because `git branch -m` takes it to the `__` name. `extract` then reports the copy as up to date, and branches that need it stack on it like on any `__` branch.
+
+`-n` prints the renames and the moves without making them. Then run `preview`, `apply` and `verify`. The preview also tells you whether the branch depended on something it now sits below, because that shows as a conflict. It cannot tell whether the branch depends on the PR branches that stay below it. `extract` checks that part.
+
+`stack-plan unmark <__branch>...` takes a branch back into the main stack. It deletes the extracted copy, renames the branch to its name without the prefix, and saves the order with it directly above the `__` block, as the bottom of the main stack. It carries the notes and the saved order along as `mark` does, then exports the plan. The copy is deleted only when it holds exactly the source's commits, matched by `git patch-id`, so run `extract --apply` first when the copy is behind. A copy with an open PR is deleted only when it sits at the source's tip, as `mark` leaves a PR branch's copy. The renamed source then takes the PR back with the upstream, and keeps its place in the stack. It refuses any other copy with an open PR, a copy holding commits the source lacks, and a copy that another `__` branch's copy sits on, unless that branch is unmarked too. A copy on origin is left there, and the output names it. `-n` shows the deletions, renames and moves without making them. Then run `preview`, `apply` and `verify`.
 
 `extract` changes nothing without `--apply`. It works through the `__` branches from the bottom up:
 
@@ -417,4 +448,5 @@ Given `__` branches, `cut` drops only those, wherever they sit, rather than ever
 - The notes: `refs/notes/target`, shared across worktrees. Notes stay local, because the default push refspec leaves `refs/notes/*` out.
 - The stack order: `stackplan.order` and, while a branch waits to be created, `stackplan.new`, in the repository's git config.
 - The stops: `branch.<name>.stackStop` in the repository's git config for a stop at a branch's end, and `refs/notes/stackplan-stop` for a stop after a commit.
+- The adoptions: `branch.<name>.stackAdopt` in the repository's git config, until the `verify` after they are picked in.
 - The script: [`scripts/stack-plan.mts`](../scripts/stack-plan.mts), with `scripts/stack-plan` linking to it.

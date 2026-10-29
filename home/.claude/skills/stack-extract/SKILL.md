@@ -74,7 +74,7 @@ Sort each build dependency by where it points, because that decides what the rep
 | A branch above the cut | A finding. The document is ahead of the code until that branch merges, and it holds nothing back |
 | A member of another chain, below it in the stack | **The candidate joins that chain.** Run `stack-plan needs <candidate> <member>`, then run step 1 again, so the chains, ranges and checks all come from the joined chain. Each change stays the same text, so this step's findings still hold |
 | A `__` branch | **The candidate stacks on it.** Run `stack-plan needs <candidate> <__branch>`, then run step 1 again. The chain then opens with the whole `__` chain that branch sits in, and the candidate's pull request goes on the extracted copy of that chain's top member |
-| A branch with a PR | **Hold the candidate back.** It can leave once that pull request has merged |
+| A branch with a PR | **The candidate can stack on it once it is marked.** Give `stack-plan mark` with that branch and every PR branch below it under answer 2, as what the candidate waits for. Once the user has run it, step 1 again finds the candidate on the `__` branch. A `✗` line whose reason ends in such a `mark` line is the same case, found by the text |
 | A member of another chain, above it in the stack | **Hold the candidate back**, with every member above it in its chain. A pull request has one base, and the needed branch would have to sit below it. It can leave once the other chain has merged |
 
 ## 3. Check that each candidate builds
