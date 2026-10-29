@@ -2318,6 +2318,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const merged = pullRequests('merged');
   const moves: { extracted: string; tip: string; oldTip: string }[] = [];
   const rebuilt: string[] = [];
+  const forcePushes: string[] = [];
   const plannedTip = new Map<string, string>();
   let findings = 0;
   const takeable: string[] = [];
@@ -2470,14 +2471,16 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         const replaced = replaces
           ? `, ${countOf(sourceVersionOf.size, 'commit')} replaced by ${source}'s version`
           : '';
+        const pushed = remoteOf(extracted) !== undefined;
         good(
-          `${label}  rebuilt${where}${off}${replaced}${added ? `, ${added}` : ''}; needs a force push`,
+          `${label}  rebuilt${where}${off}${replaced}${added ? `, ${added}` : ''}${pushed ? '; needs a force push' : ''}`,
         );
         for (const [copySha, sourceVersion] of sourceVersionOf)
           console.log(
             `  ${yellow(copySha.slice(0, 10))} → ${commitLine(sourceVersion).trimStart()}`,
           );
         rebuilt.push(extracted);
+        if (pushed) forcePushes.push(extracted);
       } else good(`${label}  ${added}`);
       moves.push({ extracted, tip: replay.tip, oldTip });
       plannedTip.set(extracted, replay.tip);
@@ -2543,9 +2546,9 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     );
     good(`${cyan(move.extracted)}  now at ${yellow(move.tip.slice(0, 10))}`);
   }
-  if (rebuilt.length)
+  if (forcePushes.length)
     attention(
-      `rebuilt, so a plain push is refused: git push --force-with-lease origin ${rebuilt.join(' ')}`,
+      `rebuilt, so a plain push is refused: git push --force-with-lease origin ${forcePushes.join(' ')}`,
     );
 };
 
