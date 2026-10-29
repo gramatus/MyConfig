@@ -577,13 +577,19 @@ const readStack = (wip: string) => {
     .split('\x1e')
     .map((record) => record.trim())
     .filter(Boolean);
-  const line: Commit[] = records.map((record) => {
-    const [sha, subject, refs, note] = record.split('\x1f');
-    const branches = refs
-      ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, ''))
-      : [];
-    const stack = branches
-      .filter((branch) => branch !== wip)
+  const fields = records.map((record) => record.split('\x1f'));
+  const refsOf = (refs: string) =>
+    refs ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, '')) : [];
+  // A copy mark kept at a PR branch's tip sits on stack commits, but it is off the stack like any copy.
+  const sources = new Set(
+    fields.flatMap(([, , refs]) => refsOf(refs)).filter(isExtractSource),
+  );
+  const line: Commit[] = fields.map(([sha, subject, refs, note]) => {
+    const stack = refsOf(refs)
+      .filter(
+        (branch) =>
+          branch !== wip && !sources.has(`${EXTRACT_SOURCE_PREFIX}${branch}`),
+      )
       .sort((a, b) => rank(a) - rank(b));
     return { sha, subject, branches: stack, note: note?.trim() ?? '' };
   });
