@@ -580,16 +580,19 @@ const readStack = (wip: string) => {
   const fields = records.map((record) => record.split('\x1f'));
   const refsOf = (refs: string) =>
     refs ? refs.split(', ').map((ref) => ref.replace(/^HEAD -> /, '')) : [];
-  // A copy mark kept at a PR branch's tip sits on stack commits, but it is off the stack like any copy.
-  const sources = new Set(
-    fields.flatMap(([, , refs]) => refsOf(refs)).filter(isExtractSource),
+  const sourceAt = new Map(
+    fields.flatMap(([, , refs], i) =>
+      refsOf(refs)
+        .filter(isExtractSource)
+        .map((source) => [source, i] as const),
+    ),
   );
-  const line: Commit[] = fields.map(([sha, subject, refs, note]) => {
+  const line: Commit[] = fields.map(([sha, subject, refs, note], i) => {
+    // A copy kept at its source's tip stays at or below it, off the stack.
+    const isCopy = (branch: string) =>
+      i <= (sourceAt.get(`${EXTRACT_SOURCE_PREFIX}${branch}`) ?? -1);
     const stack = refsOf(refs)
-      .filter(
-        (branch) =>
-          branch !== wip && !sources.has(`${EXTRACT_SOURCE_PREFIX}${branch}`),
-      )
+      .filter((branch) => branch !== wip && !isCopy(branch))
       .sort((a, b) => rank(a) - rank(b));
     return { sha, subject, branches: stack, note: note?.trim() ?? '' };
   });
