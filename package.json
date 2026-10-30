@@ -8,11 +8,13 @@
   "scripts": {
     "lint": "eslint --max-warnings 0 scripts home/.claude/skills",
     "lint:fix": "eslint --fix scripts home/.claude/skills",
+    "lint:path": "eslint --max-warnings 0 --no-warn-ignored",
     "typecheck": "npm run typecheck:scripts && npm run typecheck:skills",
     "typecheck:scripts": "tsc -p scripts",
     "typecheck:skills": "tsc -p .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "format:path": "prettier --write",
     "test": "node --test \"scripts/*.test.mts\"",
     "test:path": "node --test",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
