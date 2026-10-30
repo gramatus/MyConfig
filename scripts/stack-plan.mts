@@ -2426,6 +2426,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const moves: { extracted: string; tip: string; oldTip: string }[] = [];
   const backAtTip: string[] = [];
   const rebuilt: string[] = [];
+  const leftForExtract: string[] = [];
   const forcePushes: string[] = [];
   const plannedTip = new Map<string, string>();
   let findings = 0;
@@ -2527,7 +2528,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       }
       let sourceVersionOf = new Map<string, Commit>();
       if (extraCount) {
-        const split = splitExtras(extra, missing, !landedOnly);
+        const split = splitExtras(extra, missing, true);
         const { held, unpaired } = split;
         sourceVersionOf = split.sourceVersionOf;
         if (held || unpaired.length) {
@@ -2543,6 +2544,18 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
             attention(
               `${label}  sits on ${countOf(held, 'commit')} ${base} already holds, mixed in with its own; compare by hand`,
             );
+          return;
+        }
+        // verify applies without a check first, so replacing commits waits for extract.
+        if (landedOnly) {
+          attention(
+            `${label}  has ${countOf(sourceVersionOf.size, 'commit')} that ${source} holds another version of; to compare and replace them: stack-plan extract`,
+          );
+          for (const [copySha, sourceVersion] of sourceVersionOf)
+            console.log(
+              `  ${yellow(copySha.slice(0, 10))} → ${commitLine(sourceVersion).trimStart()}`,
+            );
+          leftForExtract.push(extracted);
           return;
         }
         const replacing = new Set(sourceVersionOf.values());
@@ -2667,8 +2680,11 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     good(
       `${branchCount} to create or move forward${rebuilt.length ? `, ${rebuilt.length} of them rebuilt` : ''}`,
     );
-  else if (landedOnly) good('no extracted copy sits on landed commits');
-  else good('every extracted branch is up to date');
+  else if (!landedOnly) good('every extracted branch is up to date');
+  else if (!leftForExtract.length)
+    good('no extracted copy sits on landed commits');
+  if (leftForExtract.length)
+    attention(`left for stack-plan extract: ${leftForExtract.join(', ')}`);
   const applyCommand = `stack-plan extract --apply${rebaseCopies ? ' --rebase' : ''}`;
   const takeFirst = takeable.length
     ? `First: stack-plan extract --from-copy ${takeable.join(' ')}, then run extract again`
