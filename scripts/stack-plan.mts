@@ -2290,8 +2290,11 @@ const mirrorStatus = (
   pulls?: Map<string, PullRequest>,
 ) => {
   const extracted = extractedNameOf(source);
-  if (!branchExists(extracted))
-    return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted → stack-plan extract`;
+  if (!branchExists(extracted)) {
+    const pull = pulls?.get(extracted);
+    const atTip = pull ? ` · PR #${pull.number}, goes back at the tip` : '';
+    return `${MIRROR_STATUS_PREFIX}${extracted} · not extracted${atTip} → stack-plan extract`;
+  }
   const found = extractedForkOf(extracted, sourcesBelow.map(extractedNameOf));
   const { on } = found;
   let { fork } = found;
@@ -2397,7 +2400,13 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   }
   const chains = mergeGroups(groups, branches);
   const merged = pullRequests('merged');
+  const open = openPullRequests();
+  if (!open)
+    attention(
+      'could not list PRs with gh, so a missing copy with a PR is replayed rather than put back at its tip',
+    );
   const moves: { extracted: string; tip: string; oldTip: string }[] = [];
+  const backAtTip: string[] = [];
   const rebuilt: string[] = [];
   const forcePushes: string[] = [];
   const plannedTip = new Map<string, string>();
@@ -2594,6 +2603,26 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       return;
     }
     if (landedOnly) return;
+    // A copy with an open PR goes back at its source's tip, as mark made it, since a replay would give the PR new SHAs.
+    const openPull = open?.get(extracted);
+    if (openPull) {
+      const belowCopy =
+        below && isExtractSource(below) ? extractedNameOf(below) : '';
+      if (below && plannedTip.get(belowCopy) !== tipOf(below)) {
+        findings++;
+        bad(
+          `${label}  has PR #${openPull.number}, but ${below} has no copy at its tip to sit on; make it by hand`,
+        );
+        return;
+      }
+      good(
+        `${label}  new at ${source}'s tip, so PR #${openPull.number} keeps its commits`,
+      );
+      moves.push({ extracted, tip: tipOf(source), oldTip: '' });
+      plannedTip.set(extracted, tipOf(source));
+      backAtTip.push(extracted);
+      return;
+    }
     const blocker = blockerOf.get(source);
     if (blocker) {
       findings++;
@@ -2652,6 +2681,14 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       move.oldTip,
     );
     good(`${cyan(move.extracted)}  now at ${yellow(move.tip.slice(0, 10))}`);
+  }
+  // The PR's branch tracks origin again, as mark leaves it.
+  for (const extracted of backAtTip) {
+    const remote = `origin/${extracted}`;
+    if (
+      gitSucceeds('show-ref', '--verify', '--quiet', `refs/remotes/${remote}`)
+    )
+      git('branch', `--set-upstream-to=${remote}`, extracted);
   }
   if (forcePushes.length)
     attention(
