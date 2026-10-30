@@ -6,14 +6,6 @@
 // is set and node strips the types at run time. This exists only so the editor is quiet
 // and honest.
 //
-// It borrows the toolchain rather than adding one, the same way
-// .agent-harness/scripts/tsconfig.json does. This repository has no package.json and no
-// node_modules of its own, and typescript + @types/node are already sitting in the agent
-// harness's hook tooling, reached here through the .claude/hooks symlink. The cost is a
-// dependency on the harness being checked out — if `.agent-harness/` is missing, these
-// paths dangle and the node types go unresolved again. The devcontainer's postStart
-// clones it on every start, and CLAUDE.md already treats its absence as a stop condition.
-//
 // `include` is deliberately non-recursive: scripts/ holds a `scripts -> .` self-symlink
 // (gitignored, line 6 of .gitignore), and a `**/*` glob would descend it forever.
 {
@@ -40,8 +32,7 @@
 
     "strict": true,
 
-    "types": ["node"],
-    "typeRoots": ["../.claude/hooks/node_modules/@types"]
+    "types": ["node"]
   },
   "include": ["*.mts", "*.mjs"]
 }

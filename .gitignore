@@ -5,6 +5,7 @@ tmux-*/
 packer_compiled.lua
 squashfs-root/
 lazy-lock.json
+/node_modules/
 
 # Stuff from the agent harness that don't belong here
 .github/instructions/alz-ai.instructions.md

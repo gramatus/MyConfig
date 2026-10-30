@@ -1,4 +1,4 @@
-// Editor diagnostics for the skills' .mts scripts; scripts/tsconfig.json says why and what it borrows.
+// Editor diagnostics for the skills' .mts scripts; scripts/tsconfig.json says why.
 // Sited here rather than in home/, because home/ mirrors the install destination and nothing else.
 {
   "compilerOptions": {
@@ -10,8 +10,7 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "strict": true,
-    "types": ["node"],
-    "typeRoots": [".claude/hooks/node_modules/@types"]
+    "types": ["node"]
   },
   "include": ["home/.claude/skills/*/scripts/*.mts"]
 }

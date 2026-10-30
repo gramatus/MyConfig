@@ -1,17 +1,32 @@
 {
   "name": "myconfig",
   "private": true,
-  "description": "Check scripts only. No dependencies of its own: the binaries are borrowed from the agent harness's hook tooling.",
+  "description": "Check tooling for the scripts and skills in this repository.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
-    "lint": ".claude/hooks/node_modules/.bin/eslint --max-warnings 0 scripts home/.claude/skills",
-    "lint:fix": ".claude/hooks/node_modules/.bin/eslint --fix scripts home/.claude/skills",
+    "lint": "eslint --max-warnings 0 scripts home/.claude/skills",
+    "lint:fix": "eslint --fix scripts home/.claude/skills",
     "typecheck": "npm run typecheck:scripts && npm run typecheck:skills",
-    "typecheck:scripts": ".claude/hooks/node_modules/.bin/tsc -p scripts",
-    "typecheck:skills": ".claude/hooks/node_modules/.bin/tsc -p .",
-    "format": ".claude/hooks/node_modules/.bin/prettier --write .",
-    "format:check": ".claude/hooks/node_modules/.bin/prettier --check .",
+    "typecheck:scripts": "tsc -p scripts",
+    "typecheck:skills": "tsc -p .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "node --test \"scripts/*.test.mts\"",
     "test:path": "node --test",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-simple-import-sort": "^13.0.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "prettier": "^3.8.1",
+    "typescript": "^6.0.0"
   }
 }
