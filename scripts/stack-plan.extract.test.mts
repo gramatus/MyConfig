@@ -284,6 +284,80 @@ test("extract --from-copy puts the copy's version of a commit in place of the so
   assert.equal(repo.git('show', 'wip:a.txt'), 'copy version\n');
 });
 
+test("extract leaves a copy alone whose commit differs from the source's only in context lines a branch below the source changed", (t) => {
+  const repo = makeRepo(t);
+  const original = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
+  const edited = (from: string[], at: number) =>
+    from.map((line, i) => (i === at - 1 ? `${line}, edited` : line));
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  repo.commit('initial', { 'f.txt': text(original) });
+  repo.git('checkout', '-q', '-b', 'wip');
+  repo.commit('edit line 3', { 'f.txt': text(edited(original, 3)) });
+  repo.git('branch', 'p0');
+  repo.commit('edit line 5', {
+    'f.txt': text(edited(edited(original, 3), 5)),
+  });
+  repo.git('branch', '__a');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+  applied(repo);
+  const copyTip = tip(repo, 'a');
+
+  const run = applied(repo);
+
+  assert.match(
+    output(run),
+    /__a → a {2}up to date; 1 commit differs from __a's version only in context/,
+  );
+  assert.equal(tip(repo, 'a'), copyTip);
+});
+
+test('extract rebuilds on main a copy left on its lower copy after that lower copy landed and its source was cut', (t) => {
+  const repo = chainedStack(t);
+  applied(repo);
+  const upperBefore = tip(repo, 'upper');
+  landOnMain(repo, 'add shared (#1)', { 'shared.txt': 'one\n' });
+  const cut = repo.stackPlan('cut', '__lower', '--apply', '-b', 'main');
+  assert.equal(cut.status, 0, output(cut));
+  // As if the cut's own rebuild had not run, which leaves extract to find the landed commits.
+  repo.git('branch', '-f', 'upper', upperBefore);
+
+  const run = applied(repo);
+
+  assert.match(output(run), /__upper → upper {2}rebuilt.*off landed commits/);
+  assert.equal(parentOf(repo, 'upper'), tip(repo, 'main'));
+  assert.equal(repo.git('show', 'upper:shared.txt'), 'two\n');
+});
+
+test('extract --from-copy refuses when the branch above would conflict with the copy commit it takes, names -f, and rewrites nothing', (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: 'p1', subject: 'edit a', files: { 'a.txt': 'a, p1\n' } },
+  ]);
+  applied(repo);
+  repo.git('checkout', '-q', 'a');
+  repo.commit('address review', { 'a.txt': 'a, fixed\n' });
+  repo.git('checkout', '-q', 'wip');
+  const wipTip = tip(repo, 'wip');
+
+  const run = repo.stackPlan(
+    'extract',
+    '--from-copy',
+    '__a',
+    '--apply',
+    '-b',
+    'main',
+  );
+
+  assert.equal(run.status, 1, output(run));
+  assert.match(output(run), /1 conflict, in 1 of \d+ picks/);
+  assert.match(
+    output(run),
+    /Nothing rewritten\. To take them anyway: stack-plan extract --from-copy __a --apply -f/,
+  );
+  assert.equal(tip(repo, 'wip'), wipTip);
+});
+
 test('extract --rebase rebuilds a copy left on an older main onto its current tip', (t) => {
   const repo = standaloneStack(t);
   applied(repo);
