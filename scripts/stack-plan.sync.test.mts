@@ -101,6 +101,24 @@ test('sync --apply brings in a review fix pushed on GitHub, and verify counts it
   assert.match(output(run), /1 from origin/);
 });
 
+test('sync refuses when a review fix pushed to a lower PR branch leaves the PR above it on the old tip, because origin has no one line to sync onto', (t) => {
+  const repo = pushedStack(t);
+  setOnOrigin(repo, 'p1', 'p1', [], {
+    subject: 'address review',
+    files: { 'review.txt': 'fix\n' },
+  });
+  const wipTip = tip(repo, 'wip');
+
+  const run = synced(repo, '--apply');
+
+  assert.equal(run.status, 1, output(run));
+  assert.match(
+    output(run),
+    /origin\/p2 does not sit on origin\/p1; origin's stack is not one line/,
+  );
+  assert.equal(tip(repo, 'wip'), wipTip);
+});
+
 test('sync keeps a local commit origin lacks on top of its branch, listed as kept local', (t) => {
   const repo = pushedStack(t);
   mergeBottomOnGitHub(repo);
