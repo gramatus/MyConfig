@@ -35,6 +35,9 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
 
+    // Node resolves an import only by its real file name, so the tests import `.mts` paths.
+    "allowImportingTsExtensions": true,
+
     "strict": true,
 
     "types": ["node"],
