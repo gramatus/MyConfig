@@ -2063,12 +2063,30 @@ const originState = (branch: string, commands: OriginCommands) => {
   return { parts, command, first: newWork };
 };
 
+// The reflog finds where a lower copy stood before an amend or rebase rewrote it; the merge-base then falls one rewrite short.
+const forkPointOf = (below: string, extracted: string) => {
+  const mergeBase = git('merge-base', below, extracted).trim();
+  try {
+    const forkPoint = git(
+      'merge-base',
+      '--fork-point',
+      below,
+      extracted,
+    ).trim();
+    return forkPoint && isAncestor(mergeBase, forkPoint)
+      ? forkPoint
+      : mergeBase;
+  } catch {
+    return mergeBase;
+  }
+};
+
 // Where an extracted branch's own commits start: the latest point it shares with the base or a lower extracted copy.
 const extractedForkOf = (extracted: string, extractedBelow: string[]) => {
   let fork = git('merge-base', base, extracted).trim();
   let on: string | undefined;
   for (const below of extractedBelow.filter(branchExists)) {
-    const forkOnBelow = git('merge-base', below, extracted).trim();
+    const forkOnBelow = forkPointOf(below, extracted);
     if (forkOnBelow !== fork && isAncestor(fork, forkOnBelow)) {
       fork = forkOnBelow;
       on = below;
