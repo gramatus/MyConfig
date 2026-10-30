@@ -2499,6 +2499,13 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         : replayOnto(missing, oldTip);
       if (!replay.ok)
         return reportConflict(label, rebuildOn ?? extracted, replay);
+      // A rebuild in place that ends on the copy's own files changes only SHAs, and a force push would rerun CI for nothing.
+      if (!rebuildOn && rebuildStart && treeOf(replay.tip) === treeOf(oldTip)) {
+        good(
+          `${label}  up to date; ${countOf(sourceVersionOf.size, 'commit')} ${sourceVersionOf.size === 1 ? 'differs' : 'differ'} from ${source}'s version only in context`,
+        );
+        return;
+      }
       const added = missing.length
         ? `+${countOf(missing.length, 'commit')}`
         : '';
