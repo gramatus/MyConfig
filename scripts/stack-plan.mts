@@ -2289,8 +2289,7 @@ const copyCommit = (sha: string, tree: string, parent: string) => {
 };
 
 type ExtractReplay =
-  | { ok: true; tip: string }
-  | { ok: false; commit: Commit; files: string[] };
+  { ok: true; tip: string } | { ok: false; commit: Commit; files: string[] };
 
 // Writes real commits, and stops at the first conflict rather than guessing past it.
 const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
@@ -4954,7 +4953,10 @@ const shortRebase = (wip: string, planned?: Planned): Rebase | undefined => {
   printByBranch([...order, wip], (commit) => commit.note, [...moves, ...toWip]);
   printAdoptions([...order, wip], adopted);
   for (const [sha, { into }] of folding)
-    printFold(line.find((commit) => commit.sha === sha)!, into);
+    printFold(
+      line.find((commit) => commit.sha === sha)!,
+      into,
+    );
   printOrderChanges(branches, order);
   console.log(
     `${bold('base')}  ${first === 0 ? forkLabel(rebaseBase) : cyan(rebaseBase)}`,
@@ -5072,7 +5074,10 @@ const fullRebase = (
     .flat()
     .map((commit) => commit.sha);
   for (const [sha, target] of foldedInto)
-    printFold(line.find((commit) => commit.sha === sha)!, target);
+    printFold(
+      line.find((commit) => commit.sha === sha)!,
+      target,
+    );
   warnUnmatched(foldsBySubject(line).unmatched);
   printOrderChanges(branches, order);
   console.log(

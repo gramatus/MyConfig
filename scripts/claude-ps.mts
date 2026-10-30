@@ -338,7 +338,7 @@ const claimed = new Set(sessions.map((s) => s.transcript).filter(Boolean));
 // Walking up from this script finds the session running it, so it never lands in a
 // kill list you are about to paste.
 let self: Session | undefined;
-for (let pid = process.pid; pid > 1; ) {
+for (let pid = process.pid; pid > 1;) {
   const match = sessions.find((s) => s.pid === pid);
   if (match) {
     self = match;
