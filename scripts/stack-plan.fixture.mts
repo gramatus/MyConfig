@@ -1,6 +1,13 @@
 // Throwaway git repositories for stack-plan's tests, sealed off from the user's own git setup.
+import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { TestContext } from 'node:test';
@@ -173,3 +180,35 @@ export const landOnMain = (
   repo.commit(subject, files);
   repo.git('checkout', '-q', 'wip');
 };
+
+export const planPath = (repo: Repo) =>
+  join(repo.dir, '.agent-context/active-work-context/stackplan.txt');
+
+/** Exports the plan, then rewrites its lines with `edit`, as a person editing stackplan.txt would. */
+export const editPlan = (repo: Repo, edit: (lines: string[]) => string[]) => {
+  const exported = repo.stackPlan('export', '-b', 'main');
+  assert.equal(exported.status, 0, `${exported.stdout}\n${exported.stderr}`);
+  const lines = readFileSync(planPath(repo), 'utf8').split('\n');
+  writeFileSync(planPath(repo), edit(lines).join('\n'));
+};
+
+export const isPickOf = (sha: string) => (line: string) =>
+  line.startsWith(`pick ${sha.slice(0, 7)}`);
+
+/** Puts `line` right above the line `target` matches, taking it out of where it was if it was there. */
+export const placeAbove = (
+  lines: string[],
+  line: string,
+  target: (line: string) => boolean,
+) => {
+  const rest = lines.filter((candidate) => candidate !== line);
+  rest.splice(rest.findIndex(target), 0, line);
+  return rest;
+};
+
+export const pickAbove = (sha: string, branch: string) => (lines: string[]) =>
+  placeAbove(
+    lines,
+    lines.find(isPickOf(sha)) ?? `pick ${sha}`,
+    (line) => line === `update-ref refs/heads/${branch}`,
+  );
