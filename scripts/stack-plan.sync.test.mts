@@ -166,6 +166,25 @@ test('sync reports a stack that already matches origin as having nothing to sync
   );
 });
 
+test('sync --no-fetch uses the remote-tracking refs as they are, so a fix pushed since the last fetch waits for a plain sync', (t) => {
+  const repo = pushedStack(t);
+  const clone = repo.cloneOrigin();
+  clone.git('checkout', '-q', 'p2');
+  clone.commit('address review', { 'review.txt': 'fix\n' });
+  clone.git('push', '-q', 'origin', 'p2');
+
+  const unfetched = synced(repo, '--no-fetch');
+  const fetched = synced(repo);
+
+  assert.equal(unfetched.status, 0, output(unfetched));
+  assert.match(
+    output(unfetched),
+    /the stack is already in line with origin; nothing to sync/,
+  );
+  assert.equal(fetched.status, 0, output(fetched));
+  assert.match(output(fetched), /p2 {2}origin\/p2 {2}1 new from origin/);
+});
+
 test('sync refuses an origin stack holding a merge commit, which the rebase cannot replay', (t) => {
   const repo = pushedStack(t);
   repo.git('checkout', '-q', '--detach', 'main');

@@ -37,6 +37,8 @@ export type Repo = {
   addOrigin: () => void;
   /** What the gh stub lists for `gh pr list --state <state>`; a state never set lists none. */
   setPullRequests: (state: 'open' | 'merged', rows: PullRequestRow[]) => void;
+  /** A second clone of origin, whose pushes leave this repository's remote-tracking refs behind until a fetch. */
+  cloneOrigin: () => Pick<Repo, 'dir' | 'git' | 'commit'>;
 };
 
 const GH_STUB = `#!/bin/sh
@@ -92,24 +94,29 @@ export const makeRepo = (t: TestContext): Repo => {
     GIT_SEQUENCE_EDITOR: 'true',
     NO_COLOR: '1',
   };
-  const git = (...args: string[]) =>
-    execFileSync('git', args, {
-      cwd: dir,
-      env,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  const gitIn =
+    (cwd: string) =>
+    (...args: string[]) =>
+      execFileSync('git', args, {
+        cwd,
+        env,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+  const commitIn =
+    (cwd: string) => (subject: string, files: Record<string, string>) => {
+      for (const [path, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(cwd, path)), { recursive: true });
+        writeFileSync(join(cwd, path), text);
+      }
+      gitIn(cwd)('add', '-A');
+      gitIn(cwd)('commit', '-q', '-m', subject);
+      return gitIn(cwd)('rev-parse', 'HEAD').trim();
+    };
+  const git = gitIn(dir);
+  const commit = commitIn(dir);
   git('init', '-q');
   writeFileSync(join(dir, '.git/info/exclude'), '.agent-context/\n');
-  const commit = (subject: string, files: Record<string, string>) => {
-    for (const [path, text] of Object.entries(files)) {
-      mkdirSync(dirname(join(dir, path)), { recursive: true });
-      writeFileSync(join(dir, path), text);
-    }
-    git('add', '-A');
-    git('commit', '-q', '-m', subject);
-    return git('rev-parse', 'HEAD').trim();
-  };
   const stackPlan = (...args: string[]) => {
     const result = spawnSync(process.execPath, [SCRIPT, ...args], {
       cwd: dir,
@@ -129,7 +136,22 @@ export const makeRepo = (t: TestContext): Repo => {
   };
   const setPullRequests = (state: 'open' | 'merged', rows: PullRequestRow[]) =>
     writeFileSync(join(pulls, `${state}.json`), JSON.stringify(rows));
-  return { dir, git, commit, stackPlan, addOrigin, setPullRequests };
+  const cloneOrigin = () => {
+    const clone = join(root, 'clone');
+    execFileSync('git', ['clone', '-q', join(root, 'origin.git'), clone], {
+      env,
+    });
+    return { dir: clone, git: gitIn(clone), commit: commitIn(clone) };
+  };
+  return {
+    dir,
+    git,
+    commit,
+    stackPlan,
+    addOrigin,
+    setPullRequests,
+    cloneOrigin,
+  };
 };
 
 export type Layer = {
