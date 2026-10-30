@@ -127,7 +127,7 @@ const USAGE = [
   '               copy; -n only shows what it would do',
   '  unmark <__branch>...  undo mark: delete each extracted copy once it matches its source, rename the source back,',
   '               move it to just above the __ block and export the plan; a copy with a PR at the tip hands the PR',
-  '               back and stays put; -n only shows what it would do',
+  '               back and stays put; -f deletes a copy that differs from its source; -n only shows what it would do',
   '  needs <branch> <needed>...  record that the branch needs the others below it, which extractable and extract',
   '               then chain it with; --clear forgets what it recorded, and naming no others shows it',
   '  mode [full|short]  show or set what export lists: full is every commit, short only the waiting ones',
@@ -158,7 +158,7 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   extract: ['--base', '--apply', '--anyway', '--from-copy', '--rebase'],
   extractable: ['--base', '--json', '--upto'],
   mark: ['--base', '--dry-run'],
-  unmark: ['--base', '--dry-run'],
+  unmark: ['--base', '--dry-run', '--anyway'],
   needs: ['--base', '--clear'],
   mode: ['full', 'short'],
 };
@@ -2100,6 +2100,35 @@ const landedForkOf = (
   return merged.ok && merged.tree === treeOf(base) ? landedTip : undefined;
 };
 
+// Where a copy's own commits start when the lower copy it sat on is deleted: past the run matching that copy's source.
+const chainForkOf = (
+  extracted: string,
+  fork: string,
+  sourcesBelow: string[],
+) => {
+  const idOfSha = patchIdsIn(`${fork}..${extracted}`);
+  const line = commitsIn(`${fork}..${extracted}`);
+  const runLength = (ids: Set<string>) => {
+    let end = 0;
+    while (end < line.length && ids.has(idOfSha.get(line[end].sha) ?? ''))
+      end++;
+    return end;
+  };
+  let found: { end: number; on: string } | undefined;
+  for (const source of sourcesBelow) {
+    const copy = extractedNameOf(source);
+    if (branchExists(copy)) continue;
+    const end = runLength(new Set(patchIdsIn(`${base}..${source}`).values()));
+    if (end > (found?.end ?? 0) && end < line.length) found = { end, on: copy };
+  }
+  if (!found) return undefined;
+  const chainTip = line[found.end - 1].sha;
+  // A run the base already holds is landedForkOf's case.
+  const merged = mergeTree(fork, base, chainTip);
+  if (merged.ok && merged.tree === treeOf(base)) return undefined;
+  return { fork: chainTip, on: found.on };
+};
+
 const replaysOf = (commits: Commit[]): Replay[] =>
   commits.map((commit) => ({ commit, fold: false }));
 
@@ -2283,11 +2312,25 @@ const mirrorStatus = (
       fork,
     ));
   }
+  const chained =
+    on === undefined && extraCount && !landedTip
+      ? chainForkOf(extracted, fork, sourcesBelow)
+      : undefined;
+  if (chained) {
+    fork = chained.fork;
+    ({ missing, extraCount, extra } = compareWithExtracted(
+      sourceCommits,
+      extracted,
+      fork,
+    ));
+  }
   const { held, unpaired } = splitExtras(extra, missing, true);
   const pull = pulls?.get(extracted);
   const onOldCopy = on !== undefined && tipOf(on) !== fork;
-  const onOldBase = on === undefined && !landedTip && fork !== tipOf(base);
-  const stale = landedTip !== undefined || onOldCopy || onOldBase;
+  const onOldBase =
+    on === undefined && !landedTip && !chained && fork !== tipOf(base);
+  const stale =
+    landedTip !== undefined || chained !== undefined || onOldCopy || onOldBase;
   const origin = originState(extracted, {
     gone: 'stack-plan cut --merged',
     newWork: (remote, fastForward) =>
@@ -2299,6 +2342,7 @@ const mirrorStatus = (
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
     ...(landedTip ? [`on landed commits`] : []),
+    ...(chained ? [`on a missing ${chained.on}`] : []),
     ...(onOldCopy ? [`on an old ${on}`] : []),
     ...(onOldBase ? [`on an old ${base}`] : []),
     missing.length
@@ -2316,7 +2360,7 @@ const mirrorStatus = (
     ? origin.command
     : unpaired.length && !held
       ? `stack-plan extract --from-copy ${source}`
-      : missing.length || extraCount || landedTip || onOldCopy
+      : missing.length || extraCount || landedTip || chained || onOldCopy
         ? 'stack-plan extract'
         : onOldBase
           ? 'stack-plan extract --rebase'
@@ -2416,8 +2460,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         extracted,
         sources.slice(0, i).map(extractedNameOf),
       );
-      const { on } = forkFound;
-      let { fork } = forkFound;
+      let { on, fork } = forkFound;
       let { missing, extraCount, extra } = compareWithExtracted(
         commits,
         extracted,
@@ -2429,6 +2472,26 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           : undefined;
       if (landedTip) {
         fork = landedTip;
+        ({ missing, extraCount, extra } = compareWithExtracted(
+          commits,
+          extracted,
+          fork,
+        ));
+      }
+      const chained =
+        on === undefined && extraCount && !landedTip
+          ? chainForkOf(extracted, fork, sources.slice(0, i))
+          : undefined;
+      if (chained) {
+        // The missing copy is made earlier in this run, and this one is rebuilt on it.
+        if (!plannedTip.has(chained.on)) {
+          findings++;
+          bad(
+            `${label}  sits on ${chained.on}, which is missing and could not be made; see above`,
+          );
+          return;
+        }
+        ({ fork, on } = chained);
         ({ missing, extraCount, extra } = compareWithExtracted(
           commits,
           extracted,
@@ -2717,7 +2780,12 @@ const takenFromCopy = (
   sourcesBelow: string[],
 ) => {
   const copy = extractedNameOf(source);
-  const { fork } = extractedForkOf(copy, sourcesBelow.map(extractedNameOf));
+  const found = extractedForkOf(copy, sourcesBelow.map(extractedNameOf));
+  const chained =
+    found.on === undefined
+      ? chainForkOf(copy, found.fork, sourcesBelow)
+      : undefined;
+  const fork = chained?.fork ?? found.fork;
   const { missing, extra } = compareWithExtracted(commits, copy, fork);
   const landed = extra.filter((sha) => {
     const merged = mergeTree(`${sha}^`, base, sha);
@@ -3246,6 +3314,7 @@ const unmarkBranches = (names: string[]) => {
   const toDelete: string[] = [];
   // A copy at its source's tip, as mark keeps for a PR branch, hands its PR back to the renamed source.
   const handsBack = new Map<string, string>();
+  const forced = new Map<string, string>();
   const problems = names.flatMap((name) => {
     if (!branches.includes(name)) return [`${name} is not a stack branch`];
     if (!isExtractSource(name)) return [`${name} is not an extract source`];
@@ -3280,11 +3349,21 @@ const unmarkBranches = (names: string[]) => {
         : undefined;
     if (landedTip)
       compared = compareWithExtracted(commits, extracted, landedTip);
+    const chained =
+      on === undefined && compared.extraCount && !landedTip
+        ? chainForkOf(extracted, fork, sources.slice(0, at))
+        : undefined;
+    if (chained)
+      compared = compareWithExtracted(commits, extracted, chained.fork);
     const found: string[] = [];
-    if (compared.missing.length || compared.extraCount)
-      found.push(
-        `${extracted} does not hold the same commits as ${name}: ${countOf(compared.missing.length, 'commit')} missing from it, ${countOf(compared.extraCount, 'commit')} only on it`,
-      );
+    if (compared.missing.length || compared.extraCount) {
+      const counts = `${countOf(compared.missing.length, 'commit')} missing from it, ${countOf(compared.extraCount, 'commit')} only on it`;
+      if (rest.includes('--anyway')) forced.set(extracted, counts);
+      else
+        found.push(
+          `${extracted} does not hold the same commits as ${name}: ${counts}; to delete it anyway: -f`,
+        );
+    }
     // A copy chained on this one would lose its base with it.
     for (const above of sources.slice(at + 1).filter((s) => !nameOf.has(s))) {
       const aboveCopy = extractedNameOf(above);
@@ -3323,8 +3402,12 @@ const unmarkBranches = (names: string[]) => {
       : remote
         ? `; ${remote} stays`
         : '';
+    const counts = forced.get(extracted);
+    const why = counts
+      ? ` despite ${counts}; to restore it: git branch ${extracted} ${tipOf(extracted)}`
+      : ', it holds the same commits as its source';
     console.log(
-      `${cyan(extracted)}  ${dryRun ? 'would be deleted' : 'deleted'}, it holds the same commits as its source${stays}`,
+      `${cyan(extracted)}  ${dryRun ? 'would be deleted' : 'deleted'}${why}${stays}`,
     );
   }
   for (const [name, plain] of nameOf)
@@ -3335,7 +3418,9 @@ const unmarkBranches = (names: string[]) => {
     );
   printOrderChanges(branches.map(renamed), unmarkedOrder);
   if (dryRun) {
-    console.log(`To do it: stack-plan unmark ${names.join(' ')}`);
+    console.log(
+      `To do it: stack-plan unmark ${names.join(' ')}${forced.size ? ' -f' : ''}`,
+    );
     return;
   }
 

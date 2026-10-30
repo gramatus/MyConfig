@@ -192,10 +192,13 @@ _stack_plan() {
         return
     fi
     if [[ $words[2] == mark || $words[2] == unmark ]]; then
+        local -a markflags=()
+        [[ $words[2] == unmark ]] && markflags=('(-f --anyway)'{-f,--anyway}'[delete a copy that differs from its source]')
         shift words
         (( CURRENT-- ))
         _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
             '(-n --dry-run)'{-n,--dry-run}'[show the renames without making them]' \
+            $markflags \
             '*:branch:_stack_plan_refs'
         return
     fi
