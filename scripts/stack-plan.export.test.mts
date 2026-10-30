@@ -103,6 +103,47 @@ test("export records wip's tip as exported-at and carries the last rebase's pre-
   assert.equal(header(repo, '# pre-rebase: '), beforeRebase);
 });
 
+/** `p1` and `p2` are pushed as PR branches, then a review fix is pushed to origin's `p1` alone, as on GitHub. */
+const fixPushedBelow = (t: TestContext) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: 'p1', subject: 'add one', files: { 'one.txt': 'one\n' } },
+    { branch: 'p2', subject: 'add two', files: { 'two.txt': 'two\n' } },
+  ]);
+  repo.addOrigin();
+  repo.git('push', '-q', '-u', 'origin', 'main', 'p1', 'p2');
+  repo.git('checkout', '-q', '--detach', 'p1');
+  repo.commit('address review', { 'review.txt': 'fix\n' });
+  repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/p1');
+  return repo;
+};
+
+test('export tells a branch with a fix on origin to rebase the PR above onto it first, while that PR still sits on the old commits, since sync refuses an origin stack that is not one line', (t) => {
+  const repo = fixPushedBelow(t);
+  repo.git('checkout', '-q', 'wip');
+
+  run(repo, 'export');
+
+  assert.equal(
+    lineAbove(repo, 'p1'),
+    "# origin: 1 commit only on origin/p1 → rebase p2's PR onto origin/p1 on GitHub first, then stack-plan sync",
+  );
+});
+
+test('export names sync for a branch with a fix on origin once the PR above sits on it', (t) => {
+  const repo = fixPushedBelow(t);
+  repo.git('cherry-pick', tip(repo, 'p2'));
+  repo.git('push', '-q', '-f', 'origin', 'HEAD:refs/heads/p2');
+  repo.git('checkout', '-q', 'wip');
+
+  run(repo, 'export');
+
+  assert.equal(
+    lineAbove(repo, 'p1'),
+    '# origin: 1 commit only on origin/p1 → stack-plan sync',
+  );
+});
+
 test('export names extract on the mirror line of a __ branch with no copy, and ends the __ block with the other-stacks marker', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [

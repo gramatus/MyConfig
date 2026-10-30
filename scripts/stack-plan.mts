@@ -3824,11 +3824,21 @@ const exportPlan = () => {
     .slice(firstSourceAt, firstSourceAt + sources.length)
     .some((branch) => !isExtractSource(branch));
 
+  // sync refuses an origin stack that is not one line, as when a fix was pushed below a PR that was not rebased onto it.
+  const syncFor = (branch: string, remote: string) => {
+    const above = current
+      .slice(current.indexOf(branch) + 1)
+      .find((candidate) => remoteOf(candidate));
+    const aboveRemote = above && remoteOf(above);
+    return aboveRemote && !isAncestor(remote, aboveRemote)
+      ? `rebase ${above}'s PR onto ${remote} on GitHub first, then stack-plan sync`
+      : 'stack-plan sync';
+  };
   const originStatus = (branch: string) => {
     if (!branchExists(branch)) return undefined;
     const origin = originState(branch, {
       gone: 'stack-plan sync',
-      newWork: () => 'stack-plan sync',
+      newWork: (remote) => syncFor(branch, remote),
     });
     return origin
       ? `${ORIGIN_STATUS_PREFIX}${origin.parts.join(' · ')} → ${origin.command}`
