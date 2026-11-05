@@ -2345,6 +2345,14 @@ const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
   return { ok: true, tip };
 };
 
+const copyOriginCommands = (extracted: string): OriginCommands => ({
+  gone: 'stack-plan cut --merged',
+  newWork: (remote, fastForward) =>
+    fastForward
+      ? `git branch -f ${extracted} ${remote}`
+      : `compare by hand: git range-diff ${remote}...${extracted}`,
+});
+
 const ownCommitsWithSourceVersions = (
   fork: string,
   extracted: string,
@@ -2428,13 +2436,7 @@ const mirrorStatus = (
     on === undefined && !landedTip && !chained && fork !== tipOf(base);
   const stale =
     landedTip !== undefined || chained !== undefined || onOldCopy || onOldBase;
-  const origin = originState(extracted, {
-    gone: 'stack-plan cut --merged',
-    newWork: (remote, fastForward) =>
-      fastForward
-        ? `git branch -f ${extracted} ${remote}`
-        : `compare by hand: git range-diff ${remote}...${extracted}`,
-  });
+  const origin = originState(extracted, copyOriginCommands(extracted));
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
@@ -2505,6 +2507,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const rebuilt: string[] = [];
   const leftForExtract: string[] = [];
   const forcePushes: string[] = [];
+  const landedCopies = new Set<string>();
   const plannedTip = new Map<string, string>();
   let findings = 0;
   const takeable: string[] = [];
@@ -2549,6 +2552,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     else if (found && !found.landed)
       attention(`${label}  ${notAllMerged(found)}`);
     if (pull || (landed.ok && landed.tree === treeOf(base))) {
+      landedCopies.add(extracted);
       if (branchExists(extracted)) plannedTip.set(extracted, tipOf(extracted));
       const how = pull
         ? `#${pull.number} merged on GitHub`
@@ -2768,11 +2772,33 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
   const takeFirst = takeable.length
     ? `First: stack-plan extract --from-copy ${takeable.join(' ')}, then run extract again`
     : undefined;
+  const listOriginCommands = () => {
+    const copies = landedOnly
+      ? forcePushes
+      : sources
+          .map(extractedNameOf)
+          .filter((copy) => branchExists(copy) && !landedCopies.has(copy));
+    const commands = copies.map((copy) => {
+      // A rebuild's new patch-ids would read as new work on origin.
+      if (forcePushes.includes(copy))
+        return `git push --force-with-lease origin ${copy}`;
+      if (!remoteOf(copy) && !upstreamGone(copy))
+        return `git push -u origin ${copy}`;
+      return originState(copy, copyOriginCommands(copy))?.command;
+    });
+    const distinctCommands = new Set(
+      commands.filter((command) => command !== undefined),
+    );
+    if (!distinctCommands.size) return;
+    console.log('\nTo bring origin in line:');
+    for (const command of distinctCommands) console.log(`  ${command}`);
+  };
   // verify goes on to tidy after this, so a finding must not end the process there.
   if (!apply) {
     if (takeFirst) console.log(takeFirst);
     else if (moves.length)
       console.log(`To do it: ${applyCommand}${findings ? ' -f' : ''}`);
+    else if (!findings && !landedOnly) listOriginCommands();
     if (findings && !landedOnly) process.exit(1);
     return;
   }
@@ -2803,10 +2829,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     )
       git('branch', `--set-upstream-to=${remote}`, extracted);
   }
-  if (forcePushes.length)
-    attention(
-      `rebuilt, so a plain push is refused: git push --force-with-lease origin ${forcePushes.join(' ')}`,
-    );
+  listOriginCommands();
 };
 
 type TakenBranch = {

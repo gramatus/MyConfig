@@ -122,6 +122,87 @@ test('extract reports an existing copy with no new source commits as up to date 
   assert.equal(tip(repo, 'a'), oldTip);
 });
 
+const pushed = (repo: Repo, ...copies: string[]) => {
+  repo.git('push', '-q', 'origin', ...copies);
+  repo.git('fetch', '-q', 'origin');
+};
+
+test('extract --apply lists the first push for a new copy', (t) => {
+  const repo = standaloneStack(t);
+  repo.addOrigin();
+
+  const run = applied(repo);
+
+  assert.match(
+    output(run),
+    /To bring origin in line:\n {2}git push -u origin a\n/,
+  );
+});
+
+test('extract --apply lists a plain push for a pushed copy that moved forward', (t) => {
+  const repo = standaloneStack(t);
+  repo.addOrigin();
+  applied(repo);
+  pushed(repo, 'a');
+  addToLayer(repo, '__a', [], 'more a', { 'a.txt': 'a\nmore\n' });
+
+  const run = applied(repo);
+
+  assert.match(output(run), /\n {2}git push origin a\n/);
+});
+
+test('extract --apply lists a plain push for the lower copy and a force push for the rebuilt copy on it', (t) => {
+  const repo = chainedStack(t);
+  repo.addOrigin();
+  applied(repo);
+  pushed(repo, 'lower', 'upper');
+  addToLayer(repo, '__lower', ['__upper'], 'more lower', {
+    'lower.txt': 'more\n',
+  });
+
+  const run = applied(repo);
+
+  assert.match(output(run), /\n {2}git push origin lower\n/);
+  assert.match(output(run), /\n {2}git push --force-with-lease origin upper\n/);
+});
+
+test('extract still lists the push for a copy the last --apply moved and nobody pushed, with or without --apply', (t) => {
+  const repo = standaloneStack(t);
+  repo.addOrigin();
+  applied(repo);
+  pushed(repo, 'a');
+  addToLayer(repo, '__a', [], 'more a', { 'a.txt': 'a\nmore\n' });
+  applied(repo);
+
+  const check = repo.stackPlan('extract', '-b', 'main');
+  const again = applied(repo);
+
+  assert.match(output(check), /\n {2}git push origin a\n/);
+  assert.match(output(again), /\n {2}git push origin a\n/);
+});
+
+test('extract lists no command for a copy that matches origin', (t) => {
+  const repo = standaloneStack(t);
+  repo.addOrigin();
+  applied(repo);
+  pushed(repo, 'a');
+
+  const run = applied(repo);
+
+  assert.doesNotMatch(output(run), /To bring origin in line/);
+});
+
+test('extract names no push for a landed copy, which is left for cut', (t) => {
+  const repo = standaloneStack(t);
+  repo.addOrigin();
+  applied(repo);
+  landOnMain(repo, 'add a (#1)', { 'a.txt': 'a\n' });
+
+  const run = applied(repo);
+
+  assert.doesNotMatch(output(run), /git push/);
+});
+
 test('extract refuses a copy holding a commit the source lacks, names --from-copy, and moves nothing', (t) => {
   const repo = standaloneStack(t);
   applied(repo);

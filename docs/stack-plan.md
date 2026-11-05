@@ -399,6 +399,8 @@ An extracted copy that sits directly on the base only moves forward, so it stays
 
 The replay writes real commits, keeping each commit's author, author date and message, and stops at the first conflict. It signs every commit it writes, and fails when git has no signing key, because the org requires signed commits. `--apply` then moves each extracted copy with `git update-ref`, which refuses if the branch was created or moved since the check. It runs no rebase and leaves the worktree and the stack alone, so the agents need not be idle. `-f` (`--anyway`) moves the branches that came out clean despite a finding elsewhere. Run it again whenever a `__` branch gets new commits; a second run adds only what is new.
 
+`--apply` ends with `To bring origin in line:` and one command per copy that differs from origin, including copies this run left alone: `git push -u origin <copy>` for one never pushed, `git push origin <copy>` for one that moved forward, and `git push --force-with-lease origin <copy>` for a rebuilt one. Where origin holds new work or its branch was deleted, the line is the command the `# mirror:` line names instead of a push. The check prints the same list when it has nothing to move. Copies whose `__` branch has landed are left out.
+
 #### When the copy should win
 
 ```shell
