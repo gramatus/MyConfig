@@ -2345,6 +2345,15 @@ const replayOnto = (commits: Commit[], start: string): ExtractReplay => {
   return { ok: true, tip };
 };
 
+const ownCommitsWithSourceVersions = (
+  fork: string,
+  extracted: string,
+  sourceVersionOf: Map<string, Commit>,
+) =>
+  commitsIn(`${fork}..${extracted}`).map(
+    (commit) => sourceVersionOf.get(commit.sha) ?? commit,
+  );
+
 /** Returns the comment line export writes above a __ branch: the state of its extracted copy, and the command that brings it back in sync. */
 const mirrorStatus = (
   source: string,
@@ -2390,9 +2399,31 @@ const mirrorStatus = (
       fork,
     ));
   }
-  const { held, unpaired } = splitExtras(extra, missing, true);
+  const { held, unpaired, sourceVersionOf } = splitExtras(extra, missing, true);
   const pull = pulls?.get(extracted);
   const onOldCopy = on !== undefined && tipOf(on) !== fork;
+  if (
+    sourceVersionOf.size &&
+    !unpaired.length &&
+    !landedTip &&
+    !chained &&
+    !onOldCopy
+  ) {
+    const replacing = new Set(sourceVersionOf.values());
+    // replayOnto signs each commit, and export must not ask for a key.
+    const rebuild = simulateRebase(
+      replaysOf([
+        ...ownCommitsWithSourceVersions(fork, extracted, sourceVersionOf),
+        ...missing.filter((commit) => !replacing.has(commit)),
+      ]),
+      fork,
+      extracted,
+    );
+    if (!rebuild.conflicts.length && rebuild.sameTree) {
+      missing = [];
+      extraCount = 0;
+    }
+  }
   const onOldBase =
     on === undefined && !landedTip && !chained && fork !== tipOf(base);
   const stale =
@@ -2639,12 +2670,14 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         }
       }
       const rebuildStart = rebuildOn ? start : replaces ? fork : undefined;
-      const ownCommits = () =>
-        commitsIn(`${fork}..${extracted}`).map(
-          (commit) => sourceVersionOf.get(commit.sha) ?? commit,
-        );
       const replay = rebuildStart
-        ? replayOnto([...ownCommits(), ...missing], rebuildStart)
+        ? replayOnto(
+            [
+              ...ownCommitsWithSourceVersions(fork, extracted, sourceVersionOf),
+              ...missing,
+            ],
+            rebuildStart,
+          )
         : replayOnto(missing, oldTip);
       if (!replay.ok)
         return reportConflict(label, rebuildOn ?? extracted, replay);

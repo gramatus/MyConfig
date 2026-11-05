@@ -183,3 +183,63 @@ test('export shows an extracted copy as up to date, then as behind with the extr
     '# mirror: a · 1 commit behind → stack-plan extract',
   );
 });
+
+/** `__a` edits a line next to the one `p0` below it edits, so its extracted copy on main differs from it only in context. */
+const copyDiffersInContext = (t: TestContext) => {
+  const repo = makeRepo(t);
+  const original = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
+  const edited = (from: string[], at: number) =>
+    from.map((line, i) => (i === at - 1 ? `${line}, edited` : line));
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  repo.commit('initial', { 'f.txt': text(original) });
+  repo.git('checkout', '-q', '-b', 'wip');
+  repo.commit('edit line 3', { 'f.txt': text(edited(original, 3)) });
+  repo.git('branch', 'p0');
+  repo.commit('edit line 5', {
+    'f.txt': text(edited(edited(original, 3), 5)),
+  });
+  repo.git('branch', '__a');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+  run(repo, 'extract', '--apply');
+  return repo;
+};
+
+test("export shows a copy as up to date when it differs from the source's version only in context, as extract does", (t) => {
+  const repo = copyDiffersInContext(t);
+
+  run(repo, 'export');
+
+  assert.equal(lineAbove(repo, '__a'), '# mirror: a · up to date');
+});
+
+test('export still names the rebase for a copy on an older base when its commit differs from the source only in context', (t) => {
+  const repo = copyDiffersInContext(t);
+  repo.git('checkout', '-q', 'main');
+  repo.commit('base moves', { 'base.txt': 'base\n' });
+  repo.git('checkout', '-q', 'wip');
+
+  run(repo, 'export');
+
+  assert.equal(
+    lineAbove(repo, '__a'),
+    '# mirror: a · on an old main · own commits up to date → stack-plan extract --rebase',
+  );
+});
+
+test("export still shows a copy as behind when its commit shares the source's subject but changes something else", (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+  ]);
+  repo.git('checkout', '-q', '--detach', 'main');
+  repo.commit('add a', { 'a.txt': 'something else\n' });
+  repo.git('branch', 'a');
+  repo.git('checkout', '-q', 'wip');
+
+  run(repo, 'export');
+
+  assert.equal(
+    lineAbove(repo, '__a'),
+    '# mirror: a · 1 commit behind · 1 commit only on a → stack-plan extract',
+  );
+});
