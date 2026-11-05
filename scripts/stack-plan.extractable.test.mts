@@ -121,6 +121,38 @@ test('extractable --upto tests only the branches up to the one named, and lists 
   assert.deepEqual(result.untested, ['p3']);
 });
 
+/** `__a` and `__b` are extracted onto main as separate copies, and `p1` edits both their files. */
+const twoCopiesStack = (t: TestContext) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: '__b', subject: 'add b', files: { 'b.txt': 'b\n' } },
+    {
+      branch: 'p1',
+      subject: 'edit a and b',
+      files: { 'a.txt': 'a\np1\n', 'b.txt': 'b\np1\n' },
+    },
+  ]);
+  const extract = repo.stackPlan('extract', '--apply', '-b', 'main');
+  assert.equal(extract.status, 0, output(extract));
+  return repo;
+};
+
+test('extractable blocks a branch that needs __ branches whose copies sit in separate stacks, since a pull request has one base', (t) => {
+  const repo = twoCopiesStack(t);
+
+  const result = report(repo);
+
+  assert.deepEqual(result.blocked, [
+    {
+      name: 'p1',
+      reason:
+        'needs __a, __b, whose copies sit in separate stacks, and a pull request has one base',
+    },
+  ]);
+  assert.deepEqual(chainNames(result), []);
+});
+
 test('extractable counts a __ branch as already marked, and chains a branch that needs it onto it', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [

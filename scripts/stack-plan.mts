@@ -2247,20 +2247,44 @@ const standaloneGroup = (
   }
 };
 
-// Merges groups that share a branch, each in stack order, lowest group first.
-const mergeGroups = (groups: string[][], branches: string[]) => {
+// Merges groups that share a branch, each in stack order, lowest group first; a group joining two chains with copies is turned away, since a copy has one base.
+const mergeGroups = (
+  groups: { owner: string; group: string[] }[],
+  branches: string[],
+) => {
+  const hasCopy = (branch: string) =>
+    isExtractSource(branch) && branchExists(extractedNameOf(branch));
+  const at = (branch: string) => branches.indexOf(branch);
   let merged: string[][] = [];
-  for (const group of groups) {
+  const spanning = new Map<string, string>();
+  for (const { owner, group } of [...groups].sort(
+    (a, b) => at(a.owner) - at(b.owner),
+  )) {
     const overlapping = merged.filter((other) =>
       other.some((branch) => group.includes(branch)),
     );
+    const copied = overlapping.filter((other) => other.some(hasCopy));
+    if (copied.length > 1) {
+      const needed = copied.map((other) => {
+        const used = other.filter((branch) => group.includes(branch));
+        return used.filter(hasCopy).at(-1) ?? used.at(-1)!;
+      });
+      spanning.set(
+        owner,
+        `needs ${needed.join(', ')}, whose copies sit in separate stacks, and a pull request has one base`,
+      );
+      continue;
+    }
     const union = new Set([...group, ...overlapping.flat()]);
     merged = [
       ...merged.filter((other) => !overlapping.includes(other)),
       branches.filter((branch) => union.has(branch)),
     ];
   }
-  return merged.sort((a, b) => branches.indexOf(a[0]) - branches.indexOf(b[0]));
+  return {
+    chains: merged.sort((a, b) => at(a[0]) - at(b[0])),
+    spanning,
+  };
 };
 
 const copyCommit = (sha: string, tree: string, parent: string) => {
@@ -2407,7 +2431,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
     return;
   }
   const blockerOf = new Map<string, string>();
-  const groups: string[][] = [];
+  const groups: { owner: string; group: string[] }[] = [];
   for (const source of sources.filter((name) => own.get(name)?.length)) {
     const { group, blocker } = standaloneGroup(
       stack,
@@ -2416,9 +2440,10 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
       isExtractSource,
     );
     if (blocker) blockerOf.set(source, blocker);
-    else groups.push(group);
+    else groups.push({ owner: source, group });
   }
-  const chains = mergeGroups(groups, branches);
+  const { chains, spanning } = mergeGroups(groups, branches);
+  for (const [source, reason] of spanning) blockerOf.set(source, reason);
   const merged = pullRequests('merged');
   const open = openPullRequests();
   if (!open)
@@ -3145,13 +3170,22 @@ const extractableBranches = () => {
   // The __ chains as extract works them out, so a candidate that joins one goes on its top, as extract puts it.
   const extractGroups = branches
     .filter((name) => isExtractSource(name) && own.get(name)?.length)
-    .map((name) => standaloneGroup(stack, wip, name, isExtractSource))
+    .map((name) => ({
+      owner: name,
+      ...standaloneGroup(stack, wip, name, isExtractSource),
+    }))
     .filter(({ blocker }) => !blocker)
-    .map(({ group }) => group);
-  const chainReports = mergeGroups(
-    [...extractGroups, ...needsOf.values()],
+    .map(({ owner, group }) => ({ owner, group }));
+  const { chains, spanning } = mergeGroups(
+    [
+      ...extractGroups,
+      ...[...needsOf].map(([owner, group]) => ({ owner, group })),
+    ],
     branches,
-  )
+  );
+  for (const [branch, reason] of spanning)
+    if (movable(branch)) blockerOf.set(branch, reason);
+  const chainReports = chains
     .filter((chain) => chain.some(movable))
     .map((chain) => {
       const tips = replayTipsOf(chain);

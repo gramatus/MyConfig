@@ -180,6 +180,31 @@ test('extract tells a landed source to be cut rather than extracting it again', 
   );
 });
 
+test('extract makes no copy for a __ branch that needs two copies in separate stacks, since a pull request has one base', (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: '__b', subject: 'add b', files: { 'b.txt': 'b\n' } },
+    {
+      branch: 'p1',
+      subject: 'edit a and b',
+      files: { 'a.txt': 'a\np1\n', 'b.txt': 'b\np1\n' },
+    },
+  ]);
+  applied(repo);
+  const mark = repo.stackPlan('mark', 'p1', '-b', 'main');
+  assert.equal(mark.status, 0, output(mark));
+
+  const run = repo.stackPlan('extract', '--apply', '-b', 'main');
+
+  assert.equal(run.status, 1, output(run));
+  assert.match(
+    output(run),
+    /__p1 → p1 {2}needs __a, __b, whose copies sit in separate stacks/,
+  );
+  assert.throws(() => repo.git('rev-parse', '--verify', 'refs/heads/p1'));
+});
+
 test('extract refuses a __ branch whose unprefixed name is a stack branch above it', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [
