@@ -850,6 +850,22 @@ const changesAny = (sha: string, files: string[]) =>
     gitQuiet('diff-tree', '-r', '--root', '--no-commit-id', '--name-only', sha),
   ).some((file) => files.includes(file));
 
+// Every name a file had in commits since `base`, because a path match misses a commit that changed it before a rename.
+const namesSince = (base: string, sha: string, file: string) => [
+  file,
+  ...fileList(
+    gitQuiet(
+      'log',
+      '--follow',
+      '--name-only',
+      '--format=',
+      `${base}..${sha}`,
+      '--',
+      file,
+    ),
+  ),
+];
+
 const subjectOf = (sha: string) => ({
   sha,
   subject: gitQuiet('show', '-s', '--format=%s', sha).trim(),
@@ -2217,13 +2233,16 @@ const standaloneGroup = (
     const conflictAt = branches.findIndex((b) =>
       (own.get(b) ?? []).some((commit) => commit.sha === conflict.commit.sha),
     );
+    const names = conflict.files.flatMap((file) =>
+      namesSince(tipOf(base), conflict.commit.sha, file),
+    );
     const needs = branches
       .slice(0, conflictAt)
       .filter(
         (below) =>
           !group.includes(below) &&
           (own.get(below) ?? []).some((commit) =>
-            changesAny(commit.sha, conflict.files),
+            changesAny(commit.sha, names),
           ),
       );
     if (!needs.length)

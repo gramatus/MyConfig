@@ -87,6 +87,26 @@ test('extractable blocks a branch that conflicts with main itself, since no bran
   ]);
 });
 
+test('extractable chains a branch that renames a file with the one below it that edited the file under its old name, rather than blaming main', (t) => {
+  const repo = makeRepo(t);
+  repo.commit('initial', { 'old.txt': 'one\ntwo\nthree\nfour\nfive\nsix\n' });
+  repo.git('checkout', '-q', '-b', 'wip');
+  repo.commit('edit old', { 'old.txt': 'one\nTWO\nthree\nfour\nfive\nsix\n' });
+  repo.git('branch', 'p1');
+  repo.git('mv', 'old.txt', 'new.txt');
+  repo.commit('rename and edit', {
+    'new.txt': 'one\nTWO\nTHREE\nfour\nfive\nsix\n',
+  });
+  repo.git('branch', 'p2');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+
+  const result = report(repo);
+
+  assert.deepEqual(result.blocked, []);
+  assert.deepEqual(chainNames(result), [['p1', 'p2']]);
+  assert.deepEqual(result.chains[0].members[1].needs, ['p1']);
+});
+
 test('extractable blocks a branch that needs a PR branch below it, and names the mark line that would let it stack there', (t) => {
   const repo = needyStack(t);
   repo.addOrigin();
