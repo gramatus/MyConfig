@@ -14,7 +14,9 @@
       "Bash(git notes --ref target show:*)",
       "Bash(git notes --ref target list:*)"
     ],
-    "additionalDirectories": ["/repos"]
+    "additionalDirectories": [
+      "/repos"
+    ]
   },
   "hooks": {
     "ConfigChange": [
