@@ -39,6 +39,8 @@ export type Repo = {
   setPullRequests: (state: 'open' | 'merged', rows: PullRequestRow[]) => void;
   /** A second clone of origin, whose pushes leave this repository's remote-tracking refs behind until a fetch. */
   cloneOrigin: () => Pick<Repo, 'dir' | 'git' | 'commit'>;
+  /** Sets an environment variable for every later git and stack-plan run in this repository. */
+  setEnv: (name: string, value: string) => void;
 };
 
 const GH_STUB = `#!/bin/sh
@@ -84,7 +86,7 @@ export const makeRepo = (t: TestContext): Repo => {
   mkdirSync(bin);
   mkdirSync(pulls);
   writeFileSync(join(bin, 'gh'), GH_STUB, { mode: 0o755 });
-  const env = {
+  const env: Record<string, string> = {
     PATH: `${bin}:${process.env.PATH ?? ''}`,
     GH_STUB_DIR: pulls,
     HOME: home,
@@ -151,6 +153,9 @@ export const makeRepo = (t: TestContext): Repo => {
     addOrigin,
     setPullRequests,
     cloneOrigin,
+    setEnv: (name, value) => {
+      env[name] = value;
+    },
   };
 };
 

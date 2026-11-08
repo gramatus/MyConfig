@@ -13,6 +13,7 @@ How to use `scripts/stack-plan` to decide which stacked branch each commit on a 
 | `sp preview` | Saves the file as notes, then previews the rebase. Add `-n` to write no notes either. |
 | `sp apply` | Saves the file as notes, then rebases. Add `-f` to rebase despite a predicted conflict. |
 | `sp continue` | Runs `git rebase --continue` after a stop or a conflict, then `verify` once the rebase is done. |
+| `sp todo` | Shows what is left of the todo of the rebase in progress. |
 | `sp prepare` | Records the pre-rebase tip, so `verify` works after a rebase you run by hand. |
 | `sp verify` | Checks that the last rebase kept everything "as before", except the reordering. |
 | `sp cut <b>` | Checks that dropping the branches up to `b` and rebasing the rest onto the base loses no work. `--apply` does it. |
@@ -34,6 +35,8 @@ To cherry-pick a commit from outside the stack into a branch, add a `pick` line 
 To have the next `apply` pause somewhere with a reminder, add a `stop <message>` line there. Right above a branch's `update-ref`, it pauses at the end of that branch. "Stops" under step 2 has the rest.
 
 The usual round is `export`, edit, `preview`, `apply`, `verify`. `save` alone is rarely needed, because `preview` and `apply` both save first.
+
+To rebase without an editor, such as from a phone, add `--no-edit` to `apply`, and to `continue` after it. "Without an editor" under step 4 has the rest.
 
 `e`, `s`, `a`, `c` and `v` are short for `export`, `save`, `apply`, `continue` and `verify`. `-n` is `--dry-run`, `-f` is `--anyway` and `-b` is `--base`. A flag that does not fit the command is refused rather than ignored. `--verbose` fits every command.
 
@@ -245,6 +248,12 @@ The rebase reads the notes and the saved order, not `stackplan.txt`, so what `sa
 The base is the branch directly under the lowest branch that changes, whether it receives a commit, moves or is new. When that is the lowest branch of the stack, the base is the commit where the stack leaves `--base` (`origin/main`), and the preview shows that commit. Moving the bottom branch therefore rebases the whole stack, but keeps it where it was on `origin/main`. Moving the stack onto newer `origin/main` commits is the work of `cut` and `sync`.
 
 If git's todo and the planned one do not hold the same picks, the sequence editor names the difference and exits non-zero. Git then does not start the rebase. The `pre-rebase:` line already holds the new tip by then, because `apply` and `cut` record it before git runs, and that is intended: once you have run either, the tip before an earlier rebase is no longer the one to verify against. When a pick conflicts, the rebase stops as usual: resolve it, then run `stack-plan continue`. That runs `git rebase --continue`, and `verify` once the rebase is done, as `apply` would have. The same goes for a stop from the plan, and for an `edit` or `break` you add while reviewing the todo. Git exits 0 at such a pause, so stack-plan checks for a rebase still in progress and stops there instead of verifying. A plain `git rebase --continue` works too, but then nothing runs `verify` at the end, so run it yourself. Git moves the stack branches only after the last line of the todo, which is why `verify` cannot run as a final `exec` line.
+
+#### Without an editor
+
+`stack-plan apply --no-edit` opens no editor. It puts a `break` in front of the todo instead, so the rebase pauses before the first pick, with nothing moved yet. `stack-plan todo` then prints what is left of the todo, with the same markers the editor would have shown. `stack-plan continue --no-edit` starts the rebase, and `git rebase --abort` calls it off. To change the todo during the pause, edit the file that `git rev-parse --git-path rebase-merge/git-rebase-todo` names, because git reads it again on `--continue`.
+
+`--no-edit` also runs git with `GIT_EDITOR=true`, so a squash or a resolved conflict keeps the message git suggests, as an editor closed unchanged would. Pass `--no-edit` to every `continue` of that rebase too, or the next squash or conflict opens the editor. The pause messages name the command with the flag. `cut`, `sync` and `extract --from-copy` take `--no-edit` with `--apply`, the forms that rebase.
 
 #### When rerere replays the wrong resolution
 

@@ -131,6 +131,37 @@ test('cut --apply moves the rest of the stack onto main, keeps the cut branch at
   assert.match(output(run), /git branch -D p1/);
 });
 
+test("cut --apply --no-edit pauses before the first pick without opening the editor, even though cut keeps git's own todo", (t) => {
+  const repo = twoBranchStack(t);
+  landOnMain(repo, 'add one (#1)', { 'one.txt': 'one\n' });
+  repo.setEnv('GIT_SEQUENCE_EDITOR', 'false');
+  const p2Tip = tip(repo, 'p2');
+
+  const paused = repo.stackPlan(
+    'cut',
+    'p1',
+    '--apply',
+    '--no-edit',
+    '-b',
+    'main',
+  );
+  assert.equal(paused.status, 0, output(paused));
+  assert.equal(tip(repo, 'p2'), p2Tip);
+  const resumed = repo.stackPlan('continue', '--no-edit', '-b', 'main');
+
+  assert.equal(resumed.status, 0, output(resumed));
+  assert.equal(parentOf(repo, 'p2'), tip(repo, 'main'));
+});
+
+test('cut --no-edit without --apply is refused, because only --apply rebases', (t) => {
+  const repo = twoBranchStack(t);
+
+  const run = repo.stackPlan('cut', 'p1', '--no-edit', '-b', 'main');
+
+  assert.equal(run.status, 2, output(run));
+  assert.match(output(run), /--no-edit applies only where --apply rebases/);
+});
+
 test('cut --apply rewrites nothing when the check finds lost work, and names -f', (t) => {
   const repo = twoBranchStack(t);
   const wipTip = tip(repo, 'wip');

@@ -165,6 +165,29 @@ test('apply pauses at a stop with its message, and verify after continue counts 
   );
 });
 
+test('apply --no-edit pauses before the first pick without opening the editor, todo shows the plan, and continue --no-edit finishes and verifies', (t) => {
+  const { repo, waiting } = waitingCommit(t);
+  editPlan(repo, pickAbove(waiting, 'p1'));
+  repo.setEnv('GIT_SEQUENCE_EDITOR', 'false');
+  const p1Tip = tip(repo, 'p1');
+
+  const paused = applied(repo, '--no-edit');
+  assert.match(output(paused), /stack-plan continue --no-edit/);
+  assert.equal(tip(repo, 'p1'), p1Tip);
+  const todo = repo.stackPlan('todo');
+  assert.equal(todo.status, 0, output(todo));
+  assert.match(
+    todo.stdout,
+    new RegExp(`pick ${waiting.slice(0, 7)}\\S* >>> \\[moved\\] more one`),
+  );
+  assert.match(todo.stdout, /update-ref refs\/heads\/p1/);
+  const resumed = repo.stackPlan('continue', '--no-edit', '-b', 'main');
+
+  assert.equal(resumed.status, 0, output(resumed));
+  assert.equal(subjects(repo, 'main..p1'), 'more one\nadd one');
+  assert.match(output(resumed), /tree matches the pre-rebase tip/);
+});
+
 test('apply cherry-picks a commit from outside the stack into the branch its pick line sits in, and verify counts it as adopted', (t) => {
   const { repo } = waitingCommit(t);
   repo.git('checkout', '-q', '--detach', 'main');

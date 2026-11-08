@@ -167,6 +167,7 @@ _stack_plan() {
         'preview:save, then preview the rebase'
         'apply:save, then rebase the stack'
         'continue:git rebase --continue after a stop or a conflict, then verify once done'
+        'todo:show what is left of the todo of the rebase in progress'
         'prepare:record the pre-rebase tip before a rebase run by hand'
         'verify:compare the stack with the pre-rebase tip'
         'cut:check that cutting the stack at a branch loses no work'
@@ -187,6 +188,7 @@ _stack_plan() {
         (( CURRENT-- ))
         _arguments '(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs' \
             '--apply[do the cut once the check passes]' '(-f --anyway)'{-f,--anyway}'[cut despite a finding]' \
+            '--no-edit[open no editor, and pause before the first pick]' \
             '--merged[drop every __ branch that has landed]' \
             '*:branch:_stack_plan_refs'
         return
@@ -208,10 +210,11 @@ _stack_plan() {
     fi
     local -a flags=('(-b --base)'{-b,--base}'[base ref, default origin/main]:ref:_stack_plan_refs')
     case $words[2] in
-        apply|a) flags+=('(-f --anyway)'{-f,--anyway}'[rebase despite a predicted conflict]') ;;
+        apply|a) flags+=('(-f --anyway)'{-f,--anyway}'[rebase despite a predicted conflict]' '--no-edit[open no editor, and pause before the first pick]') ;;
+        continue|c) flags+=('--no-edit[keep the messages git suggests, opening no editor]') ;;
         save|s|preview|verify|v) flags+=('(-n --dry-run)'{-n,--dry-run}'[show what would change]') ;;
-        sync) flags+=('--apply[do the sync once the check passes]' '(-f --anyway)'{-f,--anyway}'[sync despite a finding]' '--no-fetch[skip fetching and pruning origin first]') ;;
-        extract) flags+=('--apply[move the branches once the check passes]' '(-f --anyway)'{-f,--anyway}'[move the clean ones despite a finding]' '--rebase[rebuild copies that sit on an older base on its current tip]') ;;
+        sync) flags+=('--apply[do the sync once the check passes]' '(-f --anyway)'{-f,--anyway}'[sync despite a finding]' '--no-fetch[skip fetching and pruning origin first]' '--no-edit[open no editor, and pause before the first pick]') ;;
+        extract) flags+=('--apply[move the branches once the check passes]' '(-f --anyway)'{-f,--anyway}'[move the clean ones despite a finding]' '--rebase[rebuild copies that sit on an older base on its current tip]' '--no-edit[with --from-copy: open no editor, and pause before the first pick]') ;;
         extractable) flags+=('--json[print the candidates as JSON]' '--upto[test only the branches up to this one]:branch:_stack_plan_refs') ;;
     esac
     shift words

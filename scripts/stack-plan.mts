@@ -104,6 +104,8 @@ const USAGE = [
   '  preview      save, then preview the rebase; -n also leaves the notes unwritten',
   '  apply (a)    save, then rebase the stack; -f runs it despite a predicted conflict',
   '  continue (c) git rebase --continue after a stop or a conflict, then verify once the rebase is done',
+  '  todo         show what is left of the todo of the rebase in progress',
+  '  --no-edit    with apply, continue or a rebasing --apply: open no editor, and pause before the first pick instead',
   '  prepare     record the pre-rebase tip before a rebase run by hand',
   '  verify (v)   compare the stack with the pre-rebase tip',
   '  cut <branch> check that dropping the branches up to <branch> and rebasing the rest onto the base loses no work;',
@@ -149,13 +151,21 @@ const ALLOWED_FLAGS: Record<string, string[]> = {
   export: ['--base'],
   save: ['--base', '--dry-run'],
   preview: ['--base', '--dry-run'],
-  apply: ['--base', '--anyway'],
-  continue: ['--base'],
+  apply: ['--base', '--anyway', '--no-edit'],
+  continue: ['--base', '--no-edit'],
+  todo: [],
   prepare: [],
   verify: ['--base', '--dry-run'],
-  cut: ['--base', '--apply', '--anyway', '--merged'],
-  sync: ['--base', '--apply', '--anyway', '--no-fetch'],
-  extract: ['--base', '--apply', '--anyway', '--from-copy', '--rebase'],
+  cut: ['--base', '--apply', '--anyway', '--merged', '--no-edit'],
+  sync: ['--base', '--apply', '--anyway', '--no-fetch', '--no-edit'],
+  extract: [
+    '--base',
+    '--apply',
+    '--anyway',
+    '--from-copy',
+    '--rebase',
+    '--no-edit',
+  ],
   extractable: ['--base', '--json', '--upto'],
   mark: ['--base', '--dry-run'],
   unmark: ['--base', '--dry-run', '--anyway'],
@@ -234,6 +244,15 @@ if (!command.startsWith('_')) {
     usageError('extract takes branch names only with --from-copy');
   if (fromCopy && rest.includes('--rebase'))
     usageError('--rebase does not apply to --from-copy');
+  const rebasesWithApply = ['cut', 'sync'].includes(command) || fromCopy;
+  if (
+    rest.includes('--no-edit') &&
+    ['cut', 'sync', 'extract'].includes(command) &&
+    !(rebasesWithApply && rest.includes('--apply'))
+  )
+    usageError(
+      '--no-edit applies only where --apply rebases: cut, sync and extract --from-copy',
+    );
 }
 
 const optionValue = (name: string) => {
@@ -245,6 +264,10 @@ const upto = optionValue('--upto');
 const dryRun = rest.includes('--dry-run');
 const asJson = rest.includes('--json');
 const rebaseCopies = rest.includes('--rebase');
+const noEdit = rest.includes('--no-edit');
+// GIT_EDITOR=true keeps the messages git suggests at a squash or after a conflict, as an editor closed unchanged would.
+const NO_EDIT_ENV = { GIT_EDITOR: 'true', STACK_PLAN_BREAK_FIRST: '1' };
+const continueCommand = `stack-plan continue${noEdit ? ' --no-edit' : ''}`;
 
 type Commit = {
   sha: string;
@@ -1152,12 +1175,15 @@ const exitUnlessRebaseFinished = (
     process.exit(status ?? 1);
   }
   if (status !== 0) {
-    attention('the rebase stopped. Resolve it, then: stack-plan continue');
+    attention(`the rebase stopped. Resolve it, then: ${continueCommand}`);
     process.exit(status ?? 1);
   }
   if (inProgress) {
     attention(
-      'the rebase paused. When done: stack-plan continue, which verifies once the rebase is done',
+      `the rebase paused. When done: ${continueCommand}, which verifies once the rebase is done`,
+    );
+    console.log(
+      'stack-plan todo shows what is left, and git rebase --abort calls it off',
     );
     process.exit(0);
   }
@@ -1169,6 +1195,7 @@ const continueRebase = () => {
   heading('Continue');
   const result = spawnSync('git', ['rebase', '--continue'], {
     stdio: 'inherit',
+    env: { ...process.env, ...(noEdit ? NO_EDIT_ENV : {}) },
   });
   exitUnlessRebaseFinished(result.status, 'git rebase --continue failed');
   verifyRebase();
@@ -1332,7 +1359,13 @@ const cutStack = (at: string, apply: boolean) => {
   ];
   heading('Rebase');
   traceGit(args);
-  exitUnlessRebaseFinished(spawnSync('git', args, { stdio: 'inherit' }).status);
+  const breakFirst = `node ${shellQuote(realpathSync(process.argv[1]))} _break`;
+  const env = noEdit
+    ? { ...process.env, ...NO_EDIT_ENV, GIT_SEQUENCE_EDITOR: breakFirst }
+    : process.env;
+  exitUnlessRebaseFinished(
+    spawnSync('git', args, { stdio: 'inherit', env }).status,
+  );
   verifyRebase();
 };
 
@@ -5325,6 +5358,7 @@ const runRebase = (todo: string[], args: string[], adopted: string[] = []) => {
       STACK_PLAN_EDITOR: reviewEditor,
       STACK_PLAN_TODO: todoPath,
       STACK_PLAN_ADOPTED: adopted.join(' '),
+      ...(noEdit ? NO_EDIT_ENV : {}),
     },
   });
   exitUnlessRebaseFinished(result.status);
@@ -5379,6 +5413,10 @@ const editTodo = (todoPath: string) => {
     process.exit(1);
   }
   const help = original.split('\n').filter((line) => line.startsWith('#'));
+  if (process.env.STACK_PLAN_BREAK_FIRST) {
+    writeFileSync(todoPath, ['break', planned, ...help].join('\n'));
+    return;
+  }
   writeFileSync(todoPath, [planned, ...help].join('\n'));
 
   const review = process.env.STACK_PLAN_EDITOR;
@@ -5388,6 +5426,29 @@ const editTodo = (todoPath: string) => {
     });
     process.exit(result.status ?? 1);
   }
+};
+
+// Runs as git's sequence editor for a rebase that keeps git's own todo.
+const breakBeforeFirstPick = (todoPath: string) =>
+  writeFileSync(todoPath, `break\n${readFileSync(todoPath, 'utf8')}`);
+
+const showTodo = () => {
+  if (!rebaseInProgress()) throw new Error('no rebase is in progress');
+  const todoPath = gitQuiet(
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-path',
+    'rebase-merge/git-rebase-todo',
+  ).trim();
+  // Git's help ends the todo, while a stack-plan marker such as `# [new branch]` sits among the lines it marks.
+  const lines = readFileSync(todoPath, 'utf8')
+    .split('\n')
+    .filter(
+      (line) => line && (!line.startsWith('#') || line.startsWith('# [')),
+    );
+  heading('Todo');
+  if (!lines.length) console.log('nothing left');
+  for (const line of lines) console.log(line);
 };
 
 // Records, shows or forgets the branches a stack branch needs beyond what a text conflict shows.
@@ -5440,6 +5501,7 @@ try {
     else if (command === 'apply')
       applyStack(planned.steps ? planned : undefined);
   } else if (command === 'continue') continueRebase();
+  else if (command === 'todo') showTodo();
   else if (command === 'verify') verifyRebase();
   else if (command === 'mode') setMode();
   else if (command === 'prepare') prepareRebase();
@@ -5457,6 +5519,7 @@ try {
   else if (command === 'unmark') unmarkBranches(branchesToMark);
   else if (command === 'needs') declareNeeds(needsArgs);
   else if (command === '_todo') editTodo(args[0]);
+  else if (command === '_break') breakBeforeFirstPick(args[0]);
   else if (command === '_stop') stopHere(args[0]);
   else if (command === '_resume') recordStopHead(args[0], 'after');
 } catch (error) {
