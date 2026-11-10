@@ -3786,18 +3786,31 @@ const commitsMissingFromPull = (pull: PullRequest, sourceCommits: Commit[]) => {
   if (!hasCommit(pull.head))
     gitSucceeds('fetch', '--quiet', 'origin', `refs/pull/${pull.number}/head`);
   if (!hasCommit(pull.head)) return undefined;
-  const pullIds = new Set(
-    patchIdsIn(
-      `${git('merge-base', base, pull.head).trim()}..${pull.head}`,
-    ).values(),
-  );
+  const fork = git('merge-base', base, pull.head).trim();
+  const pullIdOfSha = patchIdsIn(`${fork}..${pull.head}`);
+  const pullIds = new Set(pullIdOfSha.values());
   const sourceIdOfSha = patchIdsIn(
     `${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`,
   );
-  return sourceCommits.filter((commit) => {
+  const sourceIds = new Set(sourceIdOfSha.values());
+  const lacking = sourceCommits.filter((commit) => {
     const id = sourceIdOfSha.get(commit.sha);
     return id !== undefined && !pullIds.has(id);
   });
+  // A PR commit that differs from its source version only in context, as on another base, still holds it.
+  const extra = [...pullIdOfSha]
+    .filter(([, id]) => !sourceIds.has(id))
+    .map(([sha]) => sha);
+  const sourceVersionOf = sourceVersionsByCopySha(extra, lacking);
+  if (!sourceVersionOf.size) return lacking;
+  const rebuild = simulateRebase(
+    replaysOf(ownCommitsWithSourceVersions(fork, pull.head, sourceVersionOf)),
+    fork,
+    pull.head,
+  );
+  if (rebuild.conflicts.length || !rebuild.sameTree) return lacking;
+  const held = new Set(sourceVersionOf.values());
+  return lacking.filter((commit) => !held.has(commit));
 };
 
 const notFetched = (pull: { number: number }) =>

@@ -255,6 +255,45 @@ test("cut lets the content decide when a __ branch gained a commit after its cop
   );
 });
 
+test("cut takes a copy's merged PR as proof where a source commit differs from the copy's only in context a lower branch changed", (t) => {
+  const repo = makeRepo(t);
+  const lines = (first: string, third: string) =>
+    `${first}\ntwo\n${third}\nfour\nfive\nsix\n`;
+  repo.commit('add lines', { 'lines.txt': lines('one', 'three') });
+  buildStack(repo, [
+    {
+      branch: '__a',
+      subject: 'edit one',
+      files: { 'lines.txt': lines('ONE', 'three') },
+    },
+    {
+      branch: '__b',
+      subject: 'edit three',
+      files: { 'lines.txt': lines('ONE', 'THREE') },
+    },
+    { branch: 'p', subject: 'add p', files: { 'p.txt': 'p\n' } },
+  ]);
+  repo.addOrigin();
+  const extract = repo.stackPlan('extract', '--apply', '-b', 'main');
+  assert.equal(extract.status, 0, output(extract));
+  landOnMain(repo, 'edit three (#7)', { 'lines.txt': lines('one', 'THREE') });
+  repo.setPullRequests('merged', [
+    {
+      number: 7,
+      headRefName: 'b',
+      headRefOid: tip(repo, 'b'),
+      baseRefName: 'main',
+      mergedAt: new Date(Date.now() + 60_000).toISOString(),
+      mergeCommit: { oid: tip(repo, 'main') },
+    },
+  ]);
+
+  const check = repo.stackPlan('cut', '__b', '-b', 'main');
+
+  assert.match(output(check), /__b {2}b merged on GitHub as #7/);
+  assert.doesNotMatch(output(check), /merged without/);
+});
+
 test('cut --merged picks only the __ branches that have landed', (t) => {
   const repo = sourcesBelowBranch(t);
   landOnMain(repo, 'add a (#1)', { 'a.txt': 'a\n' });
