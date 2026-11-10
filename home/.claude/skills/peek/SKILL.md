@@ -25,9 +25,9 @@ The script is `node <this skill's base directory>/scripts/peek.mts`, with the ab
 
 ## Overview
 
-Run `peek.mts overview [target]`. Each entry ends with the view the file gets by default, and the share of its changed lines that were edited in place rather than added or removed whole. Prose files, and files where at least half the changed lines were edited in place, get `words`. Other modified files get `edit`, or `diff` above 40 changed lines. New, deleted and binary files always get `diff`.
+Run `peek.mts overview [target]`. Each entry ends with the view the file gets by default, and the share of its changed lines that were edited in place rather than added or removed whole. Prose files, and files where at least half the changed lines were edited in place, get `words`. Other modified files get `edit`, or `diff` above 40 changed lines. New prose files get `preview`. Other new files, deleted files and binary files get `diff`.
 
-Reply with its first line, then its numbered list, keeping the numbers and the views, and add to each entry one line on what the change does. To write that line, read the file's diff with git yourself. The overview sends no card. The user answers with numbers: "show 2" shows that file in its view, "show 2 as edit", "as words" or "as diff" shows it in that one instead, and "walk" starts a walk.
+Reply with its first line, then its numbered list, keeping the numbers and the views, and add to each entry one line on what the change does. To write that line, read the file's diff with git yourself. The overview sends no card. The user answers with numbers: "show 2" shows that file in its view, "show 2 as edit", "as words", "as diff" or "as preview" shows it in that one instead, and "walk" starts a walk.
 
 ## Showing a file
 
@@ -38,6 +38,7 @@ In chat, say in a sentence or two what the change does and anything in it that l
 | `words` | `peek.mts words <path> [target]` | Send the card it prints. Removed words are struck through in red and added words are green. |
 | `diff` | `peek.mts diff <path> [target]` | Send the card it prints. |
 | `edit` | `peek.mts edit <path> [target]` | Replay the regions, as below. |
+| `preview` | `peek.mts preview <path> [target]` | Send the card it prints. It holds the file rendered, as the target left it. |
 
 **Replaying an edit.** The script prints the path of a scratch copy of the old version, then each changed region as an `<<<<<<< old` block and a `>>>>>>> new` block, split by `=======`. Read the scratch copy with `limit: 1`, which is enough for Edit to accept it. Then make one Edit per region, in order, with the old block as `old_string` and the new block as `new_string`, copied exactly. The app shows each Edit as a diff view, so the Edits are what the user reads: send no card. Where the script refuses a file, as it does for a new file or a region it cannot place uniquely, show it as `diff` instead.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lists changed files and writes markdown cards of diffs and files, for the peek skill to send to the phone.
-// Usage: peek.mts overview [target] | diff|words|edit <path> [target] | file <path>; target is a commit or <a>..<b>, the working tree when absent.
+// Usage: peek.mts overview [target] | diff|words|edit|preview <path> [target] | file <path>; target is a commit or <a>..<b>, the working tree when absent.
 // ../SKILL.md says what each view is for and how the agent replays an edit.
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -121,10 +121,14 @@ const overview = (target: Target) => {
   rows.forEach((row, index) => {
     const binary = row.added === '-';
     const size = binary ? 'binary' : `+${row.added} -${row.removed}`;
-    const view =
-      binary || row.status !== 'M'
-        ? 'diff'
-        : defaultView(
+    const isNew = row.status === 'A' || row.status === '?';
+    const view = binary
+      ? 'diff'
+      : isNew && isProse(row.path)
+        ? 'preview'
+        : row.status !== 'M'
+          ? 'diff'
+          : defaultView(
             row.path,
             target,
             Number(row.added) + Number(row.removed),
@@ -454,6 +458,20 @@ const editReplay = (path: string, target: Target) => {
   });
 };
 
+// Reads the file as the target left it, so a commit or range previews what was committed.
+const previewCard = (path: string, target: Target) => {
+  const inRoot = relativeToRoot(path);
+  const text = fileLinesAt(revisionsOf(target).new, inRoot).join('\n');
+  // The app reflows a .txt file as markdown unless it is fenced.
+  const fence = fenceFor(text);
+  const body =
+    extname(inRoot) === '.txt' ? `${fence}\n${text}\n${fence}` : text;
+  writeCard(
+    `preview-${inRoot}`,
+    `\`${inRoot}\`, ${targetLabel(target)}\n\n---\n\n${body}\n`,
+  );
+};
+
 const fileCard = (path: string) => {
   const inRoot = relativeToRoot(path);
   if (!existsSync(path)) fail(`${path} does not exist`);
@@ -475,8 +493,10 @@ else if (command === 'words')
   wordsCard(first ?? fail('words needs a path'), parseTarget(second));
 else if (command === 'edit')
   editReplay(first ?? fail('edit needs a path'), parseTarget(second));
+else if (command === 'preview')
+  previewCard(first ?? fail('preview needs a path'), parseTarget(second));
 else if (command === 'file') fileCard(first ?? fail('file needs a path'));
 else
   fail(
-    'usage: peek.mts overview [target] | diff|words|edit <path> [target] | file <path>',
+    'usage: peek.mts overview [target] | diff|words|edit|preview <path> [target] | file <path>',
   );
