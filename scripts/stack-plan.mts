@@ -1516,7 +1516,10 @@ const landedSources = (
   const merged = pullRequests('merged');
   if (!merged)
     attention('could not list merged PRs with gh, so only the content decides');
+  const open = pullRequests('open');
   for (const source of sources) {
+    // A copy still under review has not landed, so the content check's verdict would only mislead.
+    if (open?.has(extractedNameOf(source))) continue;
     const pull = mergedCopyPull(source, merged, own.get(source) ?? []);
     if (pull && !pull.inBase) {
       leftOut.push(`${cyan(source)}  left out: ${notFetched(pull)}`);

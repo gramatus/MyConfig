@@ -305,6 +305,40 @@ test('cut --merged picks only the __ branches that have landed', (t) => {
   assert.match(output(check), /To do it: stack-plan cut --merged --apply/);
 });
 
+test("cut --merged lists a __ branch it can't tell about as left out, with the command that drops it anyway", (t) => {
+  const repo = sourcesBelowBranch(t);
+  landOnMain(repo, 'add a differently', { 'a.txt': 'other a\n' });
+
+  const check = repo.stackPlan('cut', '--merged', '-b', 'main');
+
+  assert.match(
+    output(check),
+    /__a {2}left out: can't tell, so compare by hand; to drop it anyway: stack-plan cut __a/,
+  );
+});
+
+test("cut --merged leaves out a __ branch whose copy's PR is still open without listing it, whatever the content says", (t) => {
+  const repo = sourcesBelowBranch(t);
+  repo.addOrigin();
+  const extract = repo.stackPlan('extract', '--apply', '-b', 'main');
+  assert.equal(extract.status, 0, output(extract));
+  landOnMain(repo, 'add a differently', { 'a.txt': 'other a\n' });
+  repo.setPullRequests('open', [
+    {
+      number: 7,
+      headRefName: 'a',
+      headRefOid: tip(repo, 'a'),
+      baseRefName: 'main',
+      mergedAt: '',
+      mergeCommit: null,
+    },
+  ]);
+
+  const check = repo.stackPlan('cut', '--merged', '-b', 'main');
+
+  assert.doesNotMatch(output(check), /__a {2}left out/);
+});
+
 test('cut --merged drops nothing when no __ branch has landed', (t) => {
   const repo = sourcesBelowBranch(t);
   const wipTip = tip(repo, 'wip');

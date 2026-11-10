@@ -445,7 +445,7 @@ stack-plan cut __skills/foo
 stack-plan cut __skills/foo --apply
 ```
 
-`stack-plan cut --merged` names them for you. It picks every `__` branch that has landed by the first test below, and lists each one it leaves out because the content check can't tell. The rest goes as for named branches, and `stack-plan cut --merged --apply` does it. `sync` drops landed `__` branches the same way, and also cuts merged branches of the main stack, the ones without the prefix, and puts the branches above them back on GitHub's rebased copies.
+`stack-plan cut --merged` names them for you. It picks every `__` branch that has landed by the first test below, and lists each one it leaves out because the content check can't tell. A branch whose extracted copy has an open PR has not landed, so it skips the content check and is not listed. The rest goes as for named branches, and `stack-plan cut --merged --apply` does it. `sync` drops landed `__` branches the same way, and also cuts merged branches of the main stack, the ones without the prefix, and puts the branches above them back on GitHub's rebased copies.
 
 Given `__` branches, `cut` drops only those, wherever they sit, rather than everything up to them. It refuses a name without the prefix among them. It checks three things:
 
