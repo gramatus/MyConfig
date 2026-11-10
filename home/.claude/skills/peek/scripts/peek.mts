@@ -129,10 +129,10 @@ const overview = (target: Target) => {
         : row.status !== 'M'
           ? 'diff'
           : defaultView(
-            row.path,
-            target,
-            Number(row.added) + Number(row.removed),
-          );
+              row.path,
+              target,
+              Number(row.added) + Number(row.removed),
+            );
     console.log(`${index + 1}. ${row.status} ${row.path}  ${size}  ${view}`);
   });
 };
