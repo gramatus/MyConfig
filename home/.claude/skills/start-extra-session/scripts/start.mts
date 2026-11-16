@@ -320,7 +320,15 @@ const path = resolveFolder(name);
 // tmux turns "." in a session name into "_", so the name it prints matches the one used here.
 const tmuxName = `cc-${name.replaceAll('.', '_').replaceAll('/', '-')}`;
 
-if (mode === undefined) startInTmux(path, name, tmuxName, []);
+/** The first of cc-<folder>, cc-<folder>-2, cc-<folder>-3 … that no tmux session holds. */
+const freeTmuxName = () => {
+  let session = tmuxName;
+  for (let n = 2; tmux('has-session', '-t', `=${session}`).status === 0; n++)
+    session = `${tmuxName}-${n}`;
+  return session;
+};
+
+if (mode === undefined) startInTmux(path, name, freeTmuxName(), []);
 else if (mode === 'list') listSessions(path, modeArg);
 else if (mode === 'resume') {
   const id = modeArg ?? fail('resume needs a session id: run list first');
