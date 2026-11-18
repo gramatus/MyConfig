@@ -276,3 +276,45 @@ test('sync drops a landed __ branch from an unpushed stack', (t) => {
   assert.equal(subjects(repo, 'main..wip'), 'wip notes\nadd p');
   assert.equal(tip(repo, '__a'), sourceTip);
 });
+
+test("verify after sync onto origin's stack drops a landed __ branch leaves that branch's commits out of the range-diff", (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: 'p', subject: 'add p', files: { 'p.txt': 'p\n' } },
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: '__b', subject: 'add b', files: { 'b.txt': 'b\n' } },
+  ]);
+  repo.addOrigin();
+  repo.git('push', '-q', '-u', 'origin', 'main', 'p');
+  landOnMain(repo, 'add b (#1)', { 'b.txt': 'b\n' });
+  repo.git('push', '-q', 'origin', 'main');
+  setOnOrigin(repo, 'p', 'main', [tip(repo, 'p')]);
+
+  const run = synced(repo, '--apply');
+
+  assert.equal(run.status, 0, output(run));
+  assert.match(output(run), /__b {2}dropped, landed in main/);
+  assert.match(
+    output(run),
+    /range-diff {2}3 unchanged · 0 context only · 0 changed · 0 dropped · 0 added\n/,
+  );
+});
+
+test("verify after sync drops a landed __ branch leaves that branch's commits out of the range-diff, rather than pairing them", (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: '__b', subject: 'add b', files: { 'b.txt': 'b\n' } },
+    { branch: 'p', subject: 'add p', files: { 'p.txt': 'p\n' } },
+  ]);
+  repo.addOrigin();
+  landOnMain(repo, 'add b (#1)', { 'b.txt': 'b\n' });
+
+  const run = synced(repo, '--apply');
+
+  assert.equal(run.status, 0, output(run));
+  assert.match(
+    output(run),
+    /range-diff {2}3 unchanged · 0 context only · 0 changed · 0 dropped · 0 added\n/,
+  );
+});

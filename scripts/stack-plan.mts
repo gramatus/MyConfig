@@ -2031,6 +2031,10 @@ const syncStack = (apply: boolean) => {
       ].join(' '),
     );
   else writeHeader(CUT_PREFIX, [fork, onto, ...cutAndDropped].join(' '));
+  writeHeader(
+    CUT_RUNS_PREFIX,
+    keptRuns(fork, onto, branches, cutAndDropped, wip).join(' '),
+  );
   const drops = dropped.map((commit) => `drop ${commit.sha} ${commit.subject}`);
   const syncTodo = [
     ...(drops.length
