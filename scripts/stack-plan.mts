@@ -22,6 +22,7 @@ const PRE_REBASE_PREFIX = '# pre-rebase: ';
 const MODE_PREFIX = '# mode: ';
 const FOLDED_PREFIX = '# folded: ';
 const CUT_PREFIX = '# cut: ';
+const CUT_RUNS_PREFIX = '# cut-runs: ';
 const SYNC_PREFIX = '# sync: ';
 const FROM_COPY_PREFIX = '# from-copy: ';
 const STOPS_PREFIX = '# stops: ';
@@ -543,6 +544,7 @@ const recordPreRebase = (sha: string, folded: string[]) => {
   if (folded.length) writeHeader(FOLDED_PREFIX, folded.join(' '));
   else dropHeader(FOLDED_PREFIX);
   dropHeader(CUT_PREFIX);
+  dropHeader(CUT_RUNS_PREFIX);
   dropHeader(SYNC_PREFIX);
   dropHeader(FROM_COPY_PREFIX);
   dropHeader(STOPS_PREFIX);
@@ -1370,6 +1372,34 @@ const cutStack = (at: string, apply: boolean) => {
 };
 
 // Drops __ branches whose copies have landed, from wherever they sit, and rebases the rest onto the base without them.
+// Each run of kept branches as oldStart:oldEnd:newFrom:newTo, so verify's range-diff never reads the dropped commits.
+const keptRuns = (
+  fork: string,
+  newBase: string,
+  branches: string[],
+  dropping: string[],
+  wip: string,
+) => {
+  const runs: string[] = [];
+  let oldStart = fork;
+  let newFrom = newBase;
+  let top: string | undefined;
+  for (const branch of branches) {
+    if (!dropping.includes(branch)) {
+      top = branch;
+      continue;
+    }
+    if (top) {
+      runs.push(`${oldStart}:${tipOf(top)}:${newFrom}:${top}`);
+      newFrom = top;
+    }
+    top = undefined;
+    oldStart = tipOf(branch);
+  }
+  runs.push(`${oldStart}:${tipOf(wip)}:${newFrom}:${wip}`);
+  return runs;
+};
+
 const dropExtractSources = (
   names: string[],
   apply: boolean,
@@ -1492,6 +1522,10 @@ const dropExtractSources = (
   recordPreRebase(tipOf(wip), []);
   // verify reads it as a cut whose old range starts at the fork.
   writeHeader(CUT_PREFIX, [fork, tipOf(base), ...dropping].join(' '));
+  writeHeader(
+    CUT_RUNS_PREFIX,
+    keptRuns(fork, tipOf(base), branches, dropping, wip).join(' '),
+  );
   const drops = dropping.flatMap((branch) =>
     (own.get(branch) ?? []).map(
       (commit) => `drop ${commit.sha} ${commit.subject}`,
@@ -4544,14 +4578,22 @@ const verifyRebase = () => {
   const cutBranches = syncOnto ? branchesCutBySync : branchesCutByCut;
 
   // Both run before anything prints, so the details come first and the verdict ends the output.
-  const rangeArgs = [
-    'range-diff',
-    colourOn(process.stdout) ? '--color=always' : '--no-color',
-    `${oldFrom}..${recorded}`,
-    `${newFrom}..${wip}`,
-  ];
+  const colour = colourOn(process.stdout) ? '--color=always' : '--no-color';
+  const runs = words(readHeader(CUT_RUNS_PREFIX) ?? '').map((run) =>
+    run.split(':'),
+  );
+  const rangeArgsList = runs.length
+    ? runs.map(([oldStart, oldEnd, runFrom, runTo]) => [
+        'range-diff',
+        colour,
+        `${oldStart}..${oldEnd}`,
+        `${tipOf(runFrom)}..${tipOf(runTo)}`,
+      ])
+    : [['range-diff', colour, `${oldFrom}..${recorded}`, `${newFrom}..${wip}`]];
   const statArgs = ['diff', '--stat', recorded, wip];
-  const entries = splitRangeDiff(gitQuiet(...rangeArgs));
+  const entries = rangeArgsList.flatMap((args) =>
+    splitRangeDiff(gitQuiet(...args)),
+  );
   const treeMayChange = baseMoved || Boolean(taken);
   const atStops = stopWork(readStopRecords());
   const adoptedShas = words(readHeader(ADOPTED_PREFIX) ?? '');
@@ -4604,7 +4646,8 @@ const verifyRebase = () => {
     cutBranches.some((branch) => isAncestor(sha, branch));
   if (baseMoved) {
     for (const entry of entries.filter((candidate) => candidate.kind === '<')) {
-      if (onSyncCutBranch(entry.oldSha)) {
+      // With runs, no cut branch's commit reaches range-diff, so a commit an ancestor of one sat below it and was kept.
+      if (!runs.length && onSyncCutBranch(entry.oldSha)) {
         entry.kind = 'landed';
         continue;
       }
@@ -4682,7 +4725,7 @@ const verifyRebase = () => {
   }
 
   subheading('Conclusion');
-  traceGit(rangeArgs);
+  for (const args of rangeArgsList) traceGit(args);
   const count = (kind: Entry['kind']) =>
     entries.filter((entry) => entry.kind === kind).length;
   const foldedCount = count('folded') ? ` · ${count('folded')} from folds` : '';

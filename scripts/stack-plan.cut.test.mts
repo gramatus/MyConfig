@@ -198,6 +198,19 @@ test('cut of a __ branch drops only its commits, wherever it sits, and moves the
   assert.equal(tip(repo, '__b'), sourceTip);
 });
 
+test("verify after a cut of a __ branch leaves the cut branch's commits out of the range-diff, rather than pairing them", (t) => {
+  const repo = sourcesBelowBranch(t);
+  landOnMain(repo, 'add b (#1)', { 'b.txt': 'b\n' });
+
+  const run = repo.stackPlan('cut', '__b', '--apply', '-b', 'main');
+
+  assert.equal(run.status, 0, output(run));
+  assert.match(
+    output(run),
+    /range-diff {2}3 unchanged · 0 context only · 0 changed · 0 dropped · 0 added\n/,
+  );
+});
+
 test('cut of a __ branch refuses when a branch with a PR sits below it, because moving that branch would rewrite its PR', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [
