@@ -4,6 +4,8 @@ import prettier from 'eslint-plugin-prettier/recommended';
 import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import unusedImports from 'eslint-plugin-unused-imports';
 
+import harnessIgnores from './.claude/eslint-ignores.json' with { type: 'json' };
+
 const plugins = {
   'simple-import-sort': simpleImportSort,
   'unused-imports': unusedImports,
@@ -40,6 +42,7 @@ const typescript = {
 };
 
 export default [
+  harnessIgnores,
   // Claude Code's own writes, gitignored, which ESLint does not read.
   {
     ignores: [
