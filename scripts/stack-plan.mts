@@ -2291,18 +2291,35 @@ const standaloneGroup = (
     group.push(...needs.filter((need) => !group.includes(need)));
   }
   const directNeeds = [...declared];
+  const replaysClean = (members: string[]) =>
+    !simulateRebase(
+      replaysOf(commitsOfBranches(stack, members)),
+      tipOf(base),
+      wip,
+    ).conflicts.length;
+  const fixed = [...group];
   for (;;) {
     const [conflict] = simulateRebase(
       replaysOf(commitsOfBranches(stack, group)),
       tipOf(base),
       wip,
     ).conflicts;
-    if (!conflict)
+    if (!conflict) {
+      // A conflict adds every branch below that touches its files, so drop each one the replay can do without.
+      for (const added of branches.filter(
+        (b) => group.includes(b) && !fixed.includes(b),
+      )) {
+        const without = group.filter((b) => b !== added);
+        if (replaysClean(without)) group = without;
+      }
       return {
         group: branches.filter((b) => group.includes(b)),
-        directNeeds: branches.filter((b) => directNeeds.includes(b)),
+        directNeeds: branches.filter(
+          (b) => directNeeds.includes(b) && group.includes(b),
+        ),
         declared,
       };
+    }
     const files = conflict.files.join(', ');
     const conflictAt = branches.findIndex((b) =>
       (own.get(b) ?? []).some((commit) => commit.sha === conflict.commit.sha),

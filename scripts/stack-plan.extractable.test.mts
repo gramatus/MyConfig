@@ -107,6 +107,28 @@ test('extractable chains a branch that renames a file with the one below it that
   assert.deepEqual(result.chains[0].members[1].needs, ['p1']);
 });
 
+test('extractable leaves out a branch below that changes the conflicting file but that the replay does without', (t) => {
+  const repo = makeRepo(t);
+  repo.commit('initial', { 'f.txt': '1\n2\n3\n4\n5\n6\n7\n8\n' });
+  repo.git('checkout', '-q', '-b', 'wip');
+  repo.commit('edit the end', { 'f.txt': '1\n2\n3\n4\n5\n6\n7\nEIGHT\n' });
+  repo.git('branch', 'p1');
+  repo.commit('edit the start', {
+    'f.txt': 'ONE\n2\n3\n4\n5\n6\n7\nEIGHT\n',
+  });
+  repo.git('branch', 'p2');
+  repo.commit('rewrite the start', {
+    'f.txt': 'UNO\n2\n3\n4\n5\n6\n7\nEIGHT\n',
+  });
+  repo.git('branch', 'p3');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+
+  const result = report(repo);
+
+  assert.deepEqual(chainNames(result), [['p1'], ['p2', 'p3']]);
+  assert.deepEqual(result.chains[1].members[1].needs, ['p2']);
+});
+
 test('extractable blocks a branch that needs a PR branch below it, and names the mark line that would let it stack there', (t) => {
   const repo = needyStack(t);
   repo.addOrigin();
