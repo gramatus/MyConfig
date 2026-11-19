@@ -203,6 +203,12 @@ git config --global rerere.autoupdate false
 git config --global notes.rewriteRef refs/notes/target '^refs/notes/target$'
 git config --global notes.rewriteRef 'refs/notes/stackplan-stop*' '^refs/notes/stackplan-stop\*$'
 
+if [ -e "/mnt/c/Program Files/Git/ucrt64/bin/git-credential-manager.exe" ]; then
+  echo "############### Routing git credentials through the Windows GCM wrapper ###############"
+  # README's bootstrap points at the GCM .exe directly so the clone works; the wrapper exists only after it.
+  git config --global credential.helper "$HOME/scripts/git-credential-gcm-wsl"
+fi
+
 echo "############### Setup commit signing if the private key is saved to the ssh agent ###############"
 if ssh-add -L 2>/dev/null | grep -q "GitHub Signing"; then
   git config --global gpg.format ssh
