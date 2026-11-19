@@ -12,5 +12,4 @@ The always-on instruction body is `.claude/rules/core.md`. If your tool has not 
 **Do not restore the checkout yourself.** Not by cloning, not by linking, not by renaming back a copy you found on disk. Report the state and stop. Repairing it is the user's call, and an agent that repairs and then carries on proceeds on conventions nobody loaded.
 
 For the user, once they have decided to restore it: run `./agent-harness.sh` from the repository root. It clones `.agent-harness/` back if it is absent, then recreates the symlinks. The devcontainer's `postStartCommand` normally runs it on every container start.
-
 <!-- <<< agent-harness managed <<< -->

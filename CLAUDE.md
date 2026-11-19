@@ -14,5 +14,4 @@ The shared instruction set for this repository lives in a nested checkout at `.a
 For the user, once they have decided to restore it: run `./agent-harness.sh` from the repository root. It clones `.agent-harness/` back if it is absent, then recreates the symlinks. The devcontainer's `postStartCommand` normally runs it on every container start.
 
 @.agent-harness/CLAUDE.md
-
 <!-- <<< agent-harness managed <<< -->
