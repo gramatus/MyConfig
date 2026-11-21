@@ -2069,7 +2069,19 @@ const compareWithExtracted = (
   const extra = [...extractedIdOfSha]
     .filter(([, id]) => !sourceIds.has(id))
     .map(([sha]) => sha);
-  return { missing, extraCount: extra.length, extra };
+  const sourceCommitOfId = new Map(
+    sourceCommits.flatMap((commit) => {
+      const id = sourceIdOfSha.get(commit.sha);
+      return id === undefined ? [] : [[id, commit] as const];
+    }),
+  );
+  const sameAs = new Map(
+    [...extractedIdOfSha].flatMap(([sha, id]) => {
+      const commit = sourceCommitOfId.get(id);
+      return commit ? [[sha, commit] as const] : [];
+    }),
+  );
+  return { missing, extraCount: extra.length, extra, sameAs };
 };
 
 // A subject pairs only where it is unique among the copy's extra commits and among the missing source commits.
@@ -2661,7 +2673,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         sources.slice(0, i).map(extractedNameOf),
       );
       let { on, fork } = forkFound;
-      let { missing, extraCount, extra } = compareWithExtracted(
+      let { missing, extraCount, extra, sameAs } = compareWithExtracted(
         commits,
         extracted,
         fork,
@@ -2672,7 +2684,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           : undefined;
       if (landedTip) {
         fork = landedTip;
-        ({ missing, extraCount, extra } = compareWithExtracted(
+        ({ missing, extraCount, extra, sameAs } = compareWithExtracted(
           commits,
           extracted,
           fork,
@@ -2692,7 +2704,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
           return;
         }
         ({ fork, on } = chained);
-        ({ missing, extraCount, extra } = compareWithExtracted(
+        ({ missing, extraCount, extra, sameAs } = compareWithExtracted(
           commits,
           extracted,
           fork,
@@ -2765,10 +2777,14 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         }
       }
       const rebuildStart = rebuildOn ? start : replaces ? fork : undefined;
+      // The source's versions already sit on the moved lower copy's commits, where the copy's own may conflict.
+      const versionOf = movedOn
+        ? new Map([...sameAs, ...sourceVersionOf])
+        : sourceVersionOf;
       const replay = rebuildStart
         ? replayOnto(
             [
-              ...ownCommitsWithSourceVersions(fork, extracted, sourceVersionOf),
+              ...ownCommitsWithSourceVersions(fork, extracted, versionOf),
               ...missing,
             ],
             rebuildStart,

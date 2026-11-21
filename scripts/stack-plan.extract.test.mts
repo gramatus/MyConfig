@@ -237,6 +237,43 @@ test('extract rebuilds a copy on its lower copy once that lower copy has moved f
   assert.equal(repo.git('show', 'upper:lower.txt'), 'more\n');
 });
 
+test("extract rebuilds a copy on its moved lower copy from the source's version of a commit that only conflicts in the copy's own version", (t) => {
+  const repo = makeRepo(t);
+  const text = (...lines: string[]) => `${lines.join('\n')}\n`;
+  const before = ['head', 'x', '}', ''];
+  const after = ['a1', 'a2', 'a3'];
+  // The inserted block ends in the lines before `turn`, so both versions of the upper commit share a patch-id.
+  const inserted = ['set', 'x', '}', ''];
+  repo.commit('initial', { 'README.md': 'readme\n' });
+  repo.git('checkout', '-q', '-b', 'wip');
+  repo.commit('add f', { 'f.txt': text(...before, 'turn', ...after) });
+  repo.git('branch', '__lower');
+  repo.commit('edit turn', { 'f.txt': text(...before, 'turned', ...after) });
+  repo.git('branch', '__upper');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+  applied(repo);
+  repo.git('checkout', '-q', '--detach', '__lower');
+  repo.commit('insert set', {
+    'f.txt': text(...before, ...inserted, 'turn', ...after),
+  });
+  repo.git('branch', '-f', '__lower', 'HEAD');
+  repo.commit('edit turn', {
+    'f.txt': text(...before, ...inserted, 'turned', ...after),
+  });
+  repo.git('branch', '-f', '__upper', 'HEAD');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+  repo.git('checkout', '-q', '-B', 'wip');
+
+  const run = applied(repo);
+
+  assert.match(output(run), /__upper → upper {2}rebuilt on lower/);
+  assert.equal(parentOf(repo, 'upper'), tip(repo, 'lower'));
+  assert.equal(
+    repo.git('show', 'upper:f.txt'),
+    text(...before, ...inserted, 'turned', ...after),
+  );
+});
+
 test('extract makes a deleted lower copy anew and rebuilds the copy that sat on it', (t) => {
   const repo = chainedStack(t);
   applied(repo);
