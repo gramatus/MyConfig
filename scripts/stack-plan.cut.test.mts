@@ -211,6 +211,24 @@ test("verify after a cut of a __ branch leaves the cut branch's commits out of t
   );
 });
 
+test("cut of a __ branch compares the net change of each run of kept branches, so the cut branch's files never reach the file-by-file check", (t) => {
+  const repo = sourcesBelowBranch(t);
+  landOnMain(repo, 'add b (#1)', { 'b.txt': 'b\n' });
+
+  const run = repo.stackPlan('cut', '__b', '--apply', '-b', 'main');
+
+  assert.equal(run.status, 0, output(run));
+  assert.doesNotMatch(output(run), /these files end the same/);
+  assert.equal(
+    output(run).match(/net change of [0-9a-f]{10}\.\.__a is the same/g)?.length,
+    2,
+  );
+  assert.equal(
+    output(run).match(/net change of [0-9a-f]{10}\.\.wip is the same/g)?.length,
+    2,
+  );
+});
+
 test('cut of a __ branch refuses when a branch with a PR sits below it, because moving that branch would rewrite its PR', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [

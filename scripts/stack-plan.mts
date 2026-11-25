@@ -1372,7 +1372,10 @@ const cutStack = (at: string, apply: boolean) => {
 };
 
 // Drops __ branches whose copies have landed, from wherever they sit, and rebases the rest onto the base without them.
-// Each run of kept branches as oldStart:oldEnd:newFrom:newTo, so verify's range-diff never reads the dropped commits.
+// A run of kept branches: its old range, and the refs its new range runs between once rebased.
+type KeptRun = { oldStart: string; oldEnd: string; newFrom: string; top: string };
+
+// Each run of kept branches, so verify's range-diff and the net-change checks never read the dropped commits.
 const keptRuns = (
   fork: string,
   newBase: string,
@@ -1380,7 +1383,7 @@ const keptRuns = (
   dropping: string[],
   wip: string,
 ) => {
-  const runs: string[] = [];
+  const runs: KeptRun[] = [];
   let oldStart = fork;
   let newFrom = newBase;
   let top: string | undefined;
@@ -1390,15 +1393,60 @@ const keptRuns = (
       continue;
     }
     if (top) {
-      runs.push(`${oldStart}:${tipOf(top)}:${newFrom}:${top}`);
+      runs.push({ oldStart, oldEnd: tipOf(top), newFrom, top });
       newFrom = top;
     }
     top = undefined;
     oldStart = tipOf(branch);
   }
-  runs.push(`${oldStart}:${tipOf(wip)}:${newFrom}:${wip}`);
+  runs.push({ oldStart, oldEnd: tipOf(wip), newFrom, top: wip });
   return runs;
 };
+
+const runsHeader = (runs: KeptRun[]) =>
+  runs
+    .map(({ oldStart, oldEnd, newFrom, top }) =>
+      [oldStart, oldEnd, newFrom, top].join(':'),
+    )
+    .join(' ');
+
+const parseRuns = (header: string): KeptRun[] =>
+  words(header).map((run) => {
+    const [oldStart, oldEnd, newFrom, top] = run.split(':');
+    return { oldStart, oldEnd, newFrom, top };
+  });
+
+// Per run, so the dropped branches' files never reach sameNetChange's file-by-file comparison.
+const sameNetChangeOfRuns = (
+  runs: KeptRun[],
+  newTipOf: (ref: string) => string,
+  onName: string,
+): boolean | 'unclear' => {
+  const verdicts = runs.map(({ oldStart, oldEnd, newFrom, top }) => {
+    const from = newTipOf(newFrom);
+    return sameNetChange(
+      `${oldStart.slice(0, 10)}..${top}`,
+      oldStart,
+      oldEnd,
+      from,
+      newTipOf(top),
+      onName,
+      new Set(fileList(gitQuiet('diff', '--name-only', oldStart, from))),
+    );
+  });
+  if (verdicts.includes(false)) return false;
+  return verdicts.includes('unclear') ? 'unclear' : true;
+};
+
+// Where each kept branch ends in a simulated replay, for the refs a KeptRun names.
+const simulatedTipOf =
+  (endOf: Map<string, number>, simulation: Simulation, start: string, wip: string) =>
+  (ref: string) => {
+    if (ref === wip) return simulation.tip;
+    const end = endOf.get(ref);
+    if (end === undefined) return ref;
+    return end ? simulation.tipAfterPick[end - 1] : start;
+  };
 
 const dropExtractSources = (
   names: string[],
@@ -1463,26 +1511,25 @@ const dropExtractSources = (
   subheading(`The rest: rebased onto ${base}`);
   const kept = branches.filter((branch) => !dropping.includes(branch));
   const { todo, sequence, pick } = newTodo();
+  const endOf = new Map<string, number>();
   for (const branch of kept) {
     for (const commit of own.get(branch) ?? []) pick(commit);
     todo.push(`update-ref refs/heads/${branch}`, '');
+    endOf.set(branch, sequence.length);
   }
   for (const commit of pending) pick(commit);
   const simulation = simulateRebase(sequence, tipOf(base), wip);
   const conflicted = simulation.conflicts.length > 0;
+  const runs = keptRuns(fork, tipOf(base), branches, dropping, wip);
   if (conflicted) {
     unclear++;
     reportConflicts(simulation, tipOf(base), '', landingBranches(todo, wip));
   } else {
     good(`all ${simulation.picks} picks apply cleanly in memory`);
-    const sameNet = sameNetChange(
-      'the stack',
-      fork,
-      wip,
-      tipOf(base),
-      simulation.tip,
+    const sameNet = sameNetChangeOfRuns(
+      runs,
+      simulatedTipOf(endOf, simulation, tipOf(base), wip),
       base,
-      new Set(fileList(gitQuiet('diff', '--name-only', fork, base))),
     );
     const sameTip = sameTipOutsideOrigin(
       fork,
@@ -1522,10 +1569,7 @@ const dropExtractSources = (
   recordPreRebase(tipOf(wip), []);
   // verify reads it as a cut whose old range starts at the fork.
   writeHeader(CUT_PREFIX, [fork, tipOf(base), ...dropping].join(' '));
-  writeHeader(
-    CUT_RUNS_PREFIX,
-    keptRuns(fork, tipOf(base), branches, dropping, wip).join(' '),
-  );
+  writeHeader(CUT_RUNS_PREFIX, runsHeader(runs));
   const drops = dropping.flatMap((branch) =>
     (own.get(branch) ?? []).map(
       (commit) => `drop ${commit.sha} ${commit.subject}`,
@@ -1847,6 +1891,7 @@ const syncStack = (apply: boolean) => {
   let belowRemote = onto;
   let newFromOrigin = 0;
   let picksUpToTop = 0;
+  const endOf = new Map<string, number>();
   for (const branch of kept) {
     if (droppedSources.includes(branch)) {
       dropped.push(...(own.get(branch) ?? []));
@@ -1861,6 +1906,7 @@ const syncStack = (apply: boolean) => {
     for (const commit of fromOrigin) pick(commit);
     for (const commit of carried) pick(commit, `${LOCAL_MARKER} `);
     todo.push(`update-ref refs/heads/${branch}`, '');
+    endOf.set(branch, sequence.length);
     if (branch === topBranch) picksUpToTop = sequence.length;
     dropped.push(...replaced);
     if (remote) belowRemote = remote;
@@ -1971,14 +2017,10 @@ const syncStack = (apply: boolean) => {
       if (!sameAboveTop || !sameTip) findings++;
     } else {
       // The checks cut runs, since the whole stack moves onto the base.
-      const sameNet = sameNetChange(
-        'the stack',
-        fork,
-        wip,
-        onto,
-        simulation.tip,
+      const sameNet = sameNetChangeOfRuns(
+        keptRuns(fork, onto, branches, [...cut, ...droppedSources], wip),
+        simulatedTipOf(endOf, simulation, onto, wip),
         base,
-        new Set(fileList(gitQuiet('diff', '--name-only', fork, onto))),
       );
       const sameTip = sameTipOutsideOrigin(
         fork,
@@ -2033,7 +2075,7 @@ const syncStack = (apply: boolean) => {
   else writeHeader(CUT_PREFIX, [fork, onto, ...cutAndDropped].join(' '));
   writeHeader(
     CUT_RUNS_PREFIX,
-    keptRuns(fork, onto, branches, cutAndDropped, wip).join(' '),
+    runsHeader(keptRuns(fork, onto, branches, cutAndDropped, wip)),
   );
   const drops = dropped.map((commit) => `drop ${commit.sha} ${commit.subject}`);
   const syncTodo = [
@@ -4616,15 +4658,13 @@ const verifyRebase = () => {
 
   // Both run before anything prints, so the details come first and the verdict ends the output.
   const colour = colourOn(process.stdout) ? '--color=always' : '--no-color';
-  const runs = words(readHeader(CUT_RUNS_PREFIX) ?? '').map((run) =>
-    run.split(':'),
-  );
+  const runs = parseRuns(readHeader(CUT_RUNS_PREFIX) ?? '');
   const rangeArgsList = runs.length
-    ? runs.map(([oldStart, oldEnd, runFrom, runTo]) => [
+    ? runs.map(({ oldStart, oldEnd, newFrom: runFrom, top }) => [
         'range-diff',
         colour,
         `${oldStart}..${oldEnd}`,
-        `${tipOf(runFrom)}..${tipOf(runTo)}`,
+        `${tipOf(runFrom)}..${tipOf(top)}`,
       ])
     : [['range-diff', colour, `${oldFrom}..${recorded}`, `${newFrom}..${wip}`]];
   const statArgs = ['diff', '--stat', recorded, wip];
@@ -4865,15 +4905,19 @@ const verifyRebase = () => {
     : syncOnto
       ? syncedOk()
       : cutTip
-        ? sameNetChange(
-            `${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`,
-            cutTip,
-            recorded,
-            newBase,
-            wip,
-            newBase.slice(0, 10),
-            new Set(fileList(gitQuiet('diff', '--name-only', cutTip, newBase))),
-          ) &&
+        ? (runs.length
+            ? sameNetChangeOfRuns(runs, tipOf, newBase.slice(0, 10))
+            : sameNetChange(
+                `${cutTip.slice(0, 10)}..${recorded.slice(0, 10)}`,
+                cutTip,
+                recorded,
+                newBase,
+                wip,
+                newBase.slice(0, 10),
+                new Set(
+                  fileList(gitQuiet('diff', '--name-only', cutTip, newBase)),
+                ),
+              )) &&
           sameTipOutsideOrigin(
             cutTip,
             recorded,
