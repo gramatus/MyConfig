@@ -192,6 +192,46 @@ test('extract lists no command for a copy that matches origin', (t) => {
   assert.doesNotMatch(output(run), /To bring origin in line/);
 });
 
+/** Both copies pushed, then lower squash-merged with a review fix, so no origin commit of it matches main by patch-id, and cut rebuilds upper on main. */
+const lowerSquashedWithFix = (t: TestContext) => {
+  const repo = chainedStack(t);
+  repo.addOrigin();
+  applied(repo);
+  pushed(repo, 'lower', 'upper');
+  landOnMain(repo, 'add shared (#1)', {
+    'shared.txt': 'one\n',
+    'review.txt': 'fix\n',
+  });
+  const cut = repo.stackPlan('cut', '__lower', '--apply', '-b', 'main');
+  assert.equal(cut.status, 0, output(cut));
+  return repo;
+};
+
+test("extract lists a force push for a copy rebuilt on main after its lower copy squash-merged, as origin holds only the old lower copy and older versions of the copy's own commits", (t) => {
+  const repo = lowerSquashedWithFix(t);
+
+  const run = applied(repo);
+
+  assert.match(output(run), /\n {2}git push --force-with-lease origin upper\n/);
+  assert.doesNotMatch(output(run), /compare by hand/);
+});
+
+test("extract asks for a look by hand at a copy whose origin holds a fix above the copy's own commits, even where the lower copy below them squash-merged", (t) => {
+  const repo = lowerSquashedWithFix(t);
+  const clone = repo.cloneOrigin();
+  clone.git('checkout', '-q', 'upper');
+  clone.commit('address review', { 'shared.txt': 'two, fixed\n' });
+  clone.git('push', '-q', 'origin', 'upper');
+  repo.git('fetch', '-q', 'origin');
+
+  const run = applied(repo);
+
+  assert.match(
+    output(run),
+    /\n {2}compare by hand: git range-diff origin\/upper\.\.\.upper\n/,
+  );
+});
+
 test('extract names no push for a landed copy, which is left for cut', (t) => {
   const repo = standaloneStack(t);
   repo.addOrigin();

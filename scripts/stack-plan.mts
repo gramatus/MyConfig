@@ -2192,7 +2192,11 @@ type OriginCommands = {
 };
 
 /** How a branch differs from its origin copy, and the command that brings them together; undefined where they match or origin has none. */
-const originState = (branch: string, commands: OriginCommands) => {
+const originState = (
+  branch: string,
+  commands: OriginCommands,
+  copy = false,
+) => {
   if (upstreamGone(branch))
     return {
       parts: ['its origin branch is gone'],
@@ -2221,11 +2225,17 @@ const originState = (branch: string, commands: OriginCommands) => {
   const localIds = onlyOrigin
     ? new Set(patchIdsIn(`${remote}..${branch}`).values())
     : new Set<string>();
-  const newWork =
-    onlyOrigin > 0 &&
-    [...patchIdsIn(`${branch}..${remote}`).values()].some(
-      (id) => !localIds.has(id),
-    );
+  const originIds = onlyOrigin
+    ? [...patchIdsIn(`${branch}..${remote}`).values()].reverse()
+    : [];
+  // A copy's origin commits below its own are the lower copy it sat on, which that copy's own line reports.
+  const ownFrom = copy
+    ? Math.max(
+        originIds.findIndex((id) => localIds.has(id)),
+        0,
+      )
+    : 0;
+  const newWork = originIds.slice(ownFrom).some((id) => !localIds.has(id));
   const command = newWork
     ? commands.newWork(remote, !onlyLocal)
     : onlyOrigin
@@ -2605,7 +2615,7 @@ const mirrorStatus = (
     on === undefined && !landedTip && !chained && fork !== tipOf(base);
   const stale =
     landedTip !== undefined || chained !== undefined || onOldCopy || onOldBase;
-  const origin = originState(extracted, copyOriginCommands(extracted));
+  const origin = originState(extracted, copyOriginCommands(extracted), true);
   const parts = [
     extracted,
     ...(pulls ? [pull ? `PR #${pull.number}` : 'no PR'] : []),
@@ -2957,7 +2967,7 @@ const extractBranches = (apply: boolean, landedOnly = false) => {
         return `git push --force-with-lease origin ${copy}`;
       if (!remoteOf(copy) && !upstreamGone(copy))
         return `git push -u origin ${copy}`;
-      return originState(copy, copyOriginCommands(copy))?.command;
+      return originState(copy, copyOriginCommands(copy), true)?.command;
     });
     const distinctCommands = new Set(
       commands.filter((command) => command !== undefined),
