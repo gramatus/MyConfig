@@ -300,6 +300,33 @@ test("verify after sync onto origin's stack drops a landed __ branch leaves that
   );
 });
 
+test("sync onto origin's stack compares the net change above it run by run, so a dropped __ branch's files never reach the file-by-file check", (t) => {
+  const repo = makeRepo(t);
+  buildStack(repo, [
+    { branch: 'p', subject: 'add p', files: { 'p.txt': 'p\n' } },
+    { branch: '__a', subject: 'add a', files: { 'a.txt': 'a\n' } },
+    { branch: '__b', subject: 'add b', files: { 'b.txt': 'b\n' } },
+  ]);
+  repo.addOrigin();
+  repo.git('push', '-q', '-u', 'origin', 'main', 'p');
+  landOnMain(repo, 'add b (#1)', { 'b.txt': 'b\n' });
+  repo.git('push', '-q', 'origin', 'main');
+  setOnOrigin(repo, 'p', 'main', [tip(repo, 'p')]);
+
+  const run = synced(repo, '--apply');
+
+  assert.equal(run.status, 0, output(run));
+  assert.doesNotMatch(output(run), /these files end the same/);
+  assert.equal(
+    output(run).match(/net change of [0-9a-f]{10}\.\.__a is the same/g)?.length,
+    2,
+  );
+  assert.equal(
+    output(run).match(/net change of [0-9a-f]{10}\.\.wip is the same/g)?.length,
+    2,
+  );
+});
+
 test("verify after sync drops a landed __ branch leaves that branch's commits out of the range-diff, rather than pairing them", (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [

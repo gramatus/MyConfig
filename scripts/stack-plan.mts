@@ -24,6 +24,7 @@ const FOLDED_PREFIX = '# folded: ';
 const CUT_PREFIX = '# cut: ';
 const CUT_RUNS_PREFIX = '# cut-runs: ';
 const SYNC_PREFIX = '# sync: ';
+const SYNC_RUNS_PREFIX = '# sync-runs: ';
 const FROM_COPY_PREFIX = '# from-copy: ';
 const STOPS_PREFIX = '# stops: ';
 const ADOPTED_PREFIX = '# adopted: ';
@@ -546,6 +547,7 @@ const recordPreRebase = (sha: string, folded: string[]) => {
   dropHeader(CUT_PREFIX);
   dropHeader(CUT_RUNS_PREFIX);
   dropHeader(SYNC_PREFIX);
+  dropHeader(SYNC_RUNS_PREFIX);
   dropHeader(FROM_COPY_PREFIX);
   dropHeader(STOPS_PREFIX);
   dropHeader(ADOPTED_PREFIX);
@@ -1373,7 +1375,12 @@ const cutStack = (at: string, apply: boolean) => {
 
 // Drops __ branches whose copies have landed, from wherever they sit, and rebases the rest onto the base without them.
 // A run of kept branches: its old range, and the refs its new range runs between once rebased.
-type KeptRun = { oldStart: string; oldEnd: string; newFrom: string; top: string };
+type KeptRun = {
+  oldStart: string;
+  oldEnd: string;
+  newFrom: string;
+  top: string;
+};
 
 // Each run of kept branches, so verify's range-diff and the net-change checks never read the dropped commits.
 const keptRuns = (
@@ -1421,6 +1428,7 @@ const sameNetChangeOfRuns = (
   runs: KeptRun[],
   newTipOf: (ref: string) => string,
   onName: string,
+  baseMovedUnder = true,
 ): boolean | 'unclear' => {
   const verdicts = runs.map(({ oldStart, oldEnd, newFrom, top }) => {
     const from = newTipOf(newFrom);
@@ -1431,7 +1439,9 @@ const sameNetChangeOfRuns = (
       from,
       newTipOf(top),
       onName,
-      new Set(fileList(gitQuiet('diff', '--name-only', oldStart, from))),
+      baseMovedUnder
+        ? new Set(fileList(gitQuiet('diff', '--name-only', oldStart, from)))
+        : undefined,
     );
   });
   if (verdicts.includes(false)) return false;
@@ -1440,7 +1450,12 @@ const sameNetChangeOfRuns = (
 
 // Where each kept branch ends in a simulated replay, for the refs a KeptRun names.
 const simulatedTipOf =
-  (endOf: Map<string, number>, simulation: Simulation, start: string, wip: string) =>
+  (
+    endOf: Map<string, number>,
+    simulation: Simulation,
+    start: string,
+    wip: string,
+  ) =>
   (ref: string) => {
     if (ref === wip) return simulation.tip;
     const end = endOf.get(ref);
@@ -1853,6 +1868,15 @@ const syncStack = (apply: boolean) => {
   });
   if (!landed.picked.length && !landed.leftOut.length)
     good(`no ${EXTRACT_SOURCE_PREFIX} branch has landed`);
+  // Landed __ branches sit above the PR branches, so the net change above the top branch has to skip them too.
+  const runsAboveTop = (top: string) =>
+    keptRuns(
+      tipOf(top),
+      top,
+      branches.slice(branches.indexOf(top) + 1),
+      droppedSources,
+      wip,
+    );
   // With nothing on origin, a newer base is still worth moving onto.
   const baseMoved = onBase && onto !== fork;
   if (onBase && !baseMoved && !cut.length && !droppedSources.length)
@@ -2000,13 +2024,11 @@ const syncStack = (apply: boolean) => {
       const newTop = picksUpToTop
         ? simulation.tipAfterPick[picksUpToTop - 1]
         : onto;
-      const sameAboveTop = sameNetChange(
-        `${topBranch}..${wip}`,
+      const sameAboveTop = sameNetChangeOfRuns(
+        runsAboveTop(topBranch),
+        simulatedTipOf(endOf, simulation, onto, wip),
         topBranch,
-        wip,
-        newTop,
-        simulation.tip,
-        topBranch,
+        false,
       );
       const sameTip = sameTipOutsideOrigin(
         tipOf(topBranch),
@@ -2073,6 +2095,8 @@ const syncStack = (apply: boolean) => {
       ].join(' '),
     );
   else writeHeader(CUT_PREFIX, [fork, onto, ...cutAndDropped].join(' '));
+  if (topBranch && topRemote)
+    writeHeader(SYNC_RUNS_PREFIX, runsHeader(runsAboveTop(topBranch)));
   writeHeader(
     CUT_RUNS_PREFIX,
     runsHeader(keptRuns(fork, onto, branches, cutAndDropped, wip)),
@@ -4886,15 +4910,18 @@ const verifyRebase = () => {
 
   console.log('');
   // A cut or sync moves the rest onto a base that has changed, so the tree cannot match; the net change above it still must.
+  const syncRuns = parseRuns(readHeader(SYNC_RUNS_PREFIX) ?? '');
   const syncedOk = () => {
-    const sameAboveTop = sameNetChange(
-      `${syncOldTop.slice(0, 10)}..${recorded.slice(0, 10)}`,
-      syncOldTop,
-      recorded,
-      tipOf(syncTop),
-      wip,
-      syncTop,
-    );
+    const sameAboveTop = syncRuns.length
+      ? sameNetChangeOfRuns(syncRuns, tipOf, syncTop, false)
+      : sameNetChange(
+          `${syncOldTop.slice(0, 10)}..${recorded.slice(0, 10)}`,
+          syncOldTop,
+          recorded,
+          tipOf(syncTop),
+          wip,
+          syncTop,
+        );
     return (
       sameTipOutsideOrigin(syncOldTop, recorded, tipOf(syncTop), wip) &&
       sameAboveTop
