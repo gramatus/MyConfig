@@ -10,6 +10,10 @@ This governs prose only. Leave wrapping intact where a format or tool owns it: c
 
 Ask early and freely, but always ask in the reply itself, as prose. Never call a question tool: anything that puts the question in a dialog with preset options, whatever it happens to be named. Fixed options are a good format only when they are the right options, and you cannot tell from inside the question whether yours are — offering chicken or beef is no help when what I wanted was dessert. Prose keeps the whole answer available: take one, take none, or tell you the question is wrong, which is the answer a dialog makes hardest to give.
 
+## Commands for me to run
+
+When handing me a command to run, give it plain, without the `!` prefix, even where your instructions suggest `! <command>`. The client I usually work in refuses `!` with "Shell commands are only available in local sessions", and in a normal terminal the `!` triggers zsh history expansion. Where you need the output, have the command write it to a file under `.agent-context/.tmp/` and read that file afterwards.
+
 ## Memory
 
 Don't use memory: never write to the memory folder under `~/.claude/projects/`. It sits on one machine, outside anything versioned, where I never see what goes in. When I ask you to note something down, put what belongs to the current thread in the session's handoff log, and propose where a lasting rule belongs in a versioned file, such as a skill or this file.
