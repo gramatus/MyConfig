@@ -2283,16 +2283,25 @@ const landedForkOf = (
   sourceCommits: Commit[],
 ) => {
   if (!sourceCommits.length) return undefined;
-  const sourceIds = new Set(
-    patchIdsIn(
-      `${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`,
-    ).values(),
+  const sourceIdOfSha = patchIdsIn(
+    `${sourceCommits[0].sha}^..${sourceCommits.at(-1)!.sha}`,
   );
+  const sourceIds = new Set(sourceIdOfSha.values());
   const idOfSha = patchIdsIn(`${fork}..${extracted}`);
   const line = commitsIn(`${fork}..${extracted}`);
+  // An own commit that differs from the source's only in context pairs by subject, as in extract's rebuild.
+  const copyIds = new Set(idOfSha.values());
+  const unmatched = line
+    .map(({ sha }) => sha)
+    .filter((sha) => !sourceIds.has(idOfSha.get(sha) ?? ''));
+  const missing = sourceCommits.filter(
+    ({ sha }) => !copyIds.has(sourceIdOfSha.get(sha) ?? ''),
+  );
+  const paired = sourceVersionsByCopySha(unmatched, missing);
+  const isOwn = (sha: string) =>
+    sourceIds.has(idOfSha.get(sha) ?? '') || paired.has(sha);
   let start = line.length;
-  while (start > 0 && sourceIds.has(idOfSha.get(line[start - 1].sha) ?? ''))
-    start--;
+  while (start > 0 && isOwn(line[start - 1].sha)) start--;
   if (start === 0 || start === line.length) return undefined;
   const landedTip = line[start - 1].sha;
   const merged = mergeTree(fork, base, landedTip);

@@ -511,6 +511,39 @@ test('extract rebuilds on main a copy left on its lower copy after that lower co
   assert.equal(repo.git('show', 'upper:shared.txt'), 'two\n');
 });
 
+test("extract rebuilds on main a copy left on a squash-merged branch whose own commit differs from the source's only in context", (t) => {
+  const repo = makeRepo(t);
+  const original = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
+  const edited = (from: string[], at: number) =>
+    from.map((line, i) => (i === at - 1 ? `${line}, edited` : line));
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  repo.commit('initial', { 'f.txt': text(original) });
+  repo.git('checkout', '-q', '-b', 'a');
+  // The second lower commit rewrites the first, so the first alone does not merge into main.
+  repo.commit('lower one', { 'g.txt': 'one\n' });
+  repo.commit('lower two', { 'g.txt': 'two\n' });
+  repo.commit('edit line 5', { 'f.txt': text(edited(original, 5)) });
+  repo.git('checkout', '-q', 'main');
+  repo.commit('lower (#1)', {
+    'g.txt': 'two\n',
+    'f.txt': text(edited(original, 3)),
+  });
+  repo.git('checkout', '-q', '-b', 'wip');
+  const sourceVersion = text(edited(edited(original, 3), 5));
+  repo.commit('edit line 5', { 'f.txt': sourceVersion });
+  repo.git('branch', '__a');
+  repo.commit('wip notes', { 'notes.txt': 'notes\n' });
+
+  const run = applied(repo);
+
+  assert.match(
+    output(run),
+    /__a → a {2}rebuilt on main, off landed commits, 1 commit replaced by __a's version/,
+  );
+  assert.equal(parentOf(repo, 'a'), tip(repo, 'main'));
+  assert.equal(repo.git('show', 'a:f.txt'), sourceVersion);
+});
+
 test('extract --from-copy refuses when the branch above would conflict with the copy commit it takes, names -f, and rewrites nothing', (t) => {
   const repo = makeRepo(t);
   buildStack(repo, [
